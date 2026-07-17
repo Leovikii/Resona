@@ -15,16 +15,19 @@
 
 ```powershell
 npm run build
+npm run licenses
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
 cargo test --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 npm run tauri build
 ```
 
+fixture 重新生成需要 FFmpeg 8.1.2+ 与 Xiph FLAC 1.5.0+，详见 `tests/fixtures/audio/README.md`。日常测试不依赖编码器，直接使用已提交的二进制样本。
+
 需要真实默认音频设备的 smoke test 默认忽略，显式执行：
 
 ```powershell
-cargo test --manifest-path src-tauri/Cargo.toml opens_default_output_and_accepts_a_wav -- --ignored
+cargo test --manifest-path src-tauri/Cargo.toml opens_default_output_and_accepts_a_flac -- --ignored
 ```
 
 开发运行使用 `npm run tauri dev`。单独执行 `npm run dev` 只预览 Web 前端，没有 Tauri 文件对话框或 Rust 播放能力。

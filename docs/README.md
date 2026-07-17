@@ -16,6 +16,7 @@
 | [plans/](plans/README.md) | 待确认版本计划及其状态 | 进入新版本前或范围变化时 |
 | [decisions/](decisions/README.md) | 架构决策记录（ADR） | 形成难以从代码看出的长期决定时 |
 | [vendor/](vendor/README.md) | 外部开发参考快照及来源 | 更新外部参考时 |
+| [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) | 当前 Cargo/npm 依赖许可证清单 | 依赖变化时 |
 
 ## 权威性
 

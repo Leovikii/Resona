@@ -28,7 +28,7 @@ Resona 是一个从零构建的本地桌面高解析度音频播放器。当前�
 
 `0.0.1` 最小技术验证已完成自动化检查与 Windows 实机试听：Tauri 窗口可以选择 WAV/FLAC，Rust 后端通过 Rodio 在独立线程中播放、暂停、继续和停止。
 
-开发环境、验证命令和后续工作以 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)、[docs/STATUS.md](docs/STATUS.md) 与 [0.0.2 提案](docs/plans/0.0.2.md)为准。
+`0.0.2` 播放能力闭环已完成自动验证和 Windows 实机验收，支持 MP3、WAV 16/24/32-bit 与 FLAC 16/24-bit。32-bit FLAC 明确不支持；导入时会安全进入可恢复的解码失败状态。验证矩阵见 [docs/STATUS.md](docs/STATUS.md) 与 [0.0.2 记录](docs/releases/0.0.2.md)。
 
 ## 许可证
 

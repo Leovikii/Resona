@@ -5,14 +5,14 @@ use std::sync::Arc;
 
 use tauri::State;
 
-use crate::playback::{PlaybackEngine, PlaybackSnapshot, RodioPlaybackEngine};
+use crate::playback::{PlaybackEngine, PlaybackFailure, PlaybackSnapshot, RodioPlaybackEngine};
 
 type ManagedPlaybackEngine = Arc<RodioPlaybackEngine>;
 
 async fn run_engine_operation<F>(
     engine: ManagedPlaybackEngine,
     operation: F,
-) -> Result<PlaybackSnapshot, String>
+) -> Result<PlaybackSnapshot, PlaybackFailure>
 where
     F: FnOnce(&RodioPlaybackEngine) -> Result<PlaybackSnapshot, crate::playback::PlaybackError>
         + Send
@@ -20,15 +20,15 @@ where
 {
     tauri::async_runtime::spawn_blocking(move || operation(&engine))
         .await
-        .map_err(|error| format!("playback task failed: {error}"))?
-        .map_err(|error| error.to_string())
+        .map_err(|error| PlaybackFailure::task_failed(format!("playback task failed: {error}")))?
+        .map_err(|error| error.failure())
 }
 
 #[tauri::command]
 pub async fn play_file(
     path: String,
     engine: State<'_, ManagedPlaybackEngine>,
-) -> Result<PlaybackSnapshot, String> {
+) -> Result<PlaybackSnapshot, PlaybackFailure> {
     let engine = Arc::clone(engine.inner());
     run_engine_operation(engine, move |engine| engine.play(PathBuf::from(path))).await
 }
@@ -36,7 +36,7 @@ pub async fn play_file(
 #[tauri::command]
 pub async fn pause_playback(
     engine: State<'_, ManagedPlaybackEngine>,
-) -> Result<PlaybackSnapshot, String> {
+) -> Result<PlaybackSnapshot, PlaybackFailure> {
     let engine = Arc::clone(engine.inner());
     run_engine_operation(engine, PlaybackEngine::pause).await
 }
@@ -44,7 +44,7 @@ pub async fn pause_playback(
 #[tauri::command]
 pub async fn resume_playback(
     engine: State<'_, ManagedPlaybackEngine>,
-) -> Result<PlaybackSnapshot, String> {
+) -> Result<PlaybackSnapshot, PlaybackFailure> {
     let engine = Arc::clone(engine.inner());
     run_engine_operation(engine, PlaybackEngine::resume).await
 }
@@ -52,15 +52,33 @@ pub async fn resume_playback(
 #[tauri::command]
 pub async fn stop_playback(
     engine: State<'_, ManagedPlaybackEngine>,
-) -> Result<PlaybackSnapshot, String> {
+) -> Result<PlaybackSnapshot, PlaybackFailure> {
     let engine = Arc::clone(engine.inner());
     run_engine_operation(engine, PlaybackEngine::stop).await
 }
 
 #[tauri::command]
+pub async fn seek_playback(
+    position_ms: u64,
+    engine: State<'_, ManagedPlaybackEngine>,
+) -> Result<PlaybackSnapshot, PlaybackFailure> {
+    let engine = Arc::clone(engine.inner());
+    run_engine_operation(engine, move |engine| engine.seek(position_ms)).await
+}
+
+#[tauri::command]
+pub async fn set_playback_volume(
+    volume: f32,
+    engine: State<'_, ManagedPlaybackEngine>,
+) -> Result<PlaybackSnapshot, PlaybackFailure> {
+    let engine = Arc::clone(engine.inner());
+    run_engine_operation(engine, move |engine| engine.set_volume(volume)).await
+}
+
+#[tauri::command]
 pub async fn get_playback_state(
     engine: State<'_, ManagedPlaybackEngine>,
-) -> Result<PlaybackSnapshot, String> {
+) -> Result<PlaybackSnapshot, PlaybackFailure> {
     let engine = Arc::clone(engine.inner());
     run_engine_operation(engine, PlaybackEngine::snapshot).await
 }

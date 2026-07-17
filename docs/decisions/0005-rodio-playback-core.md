@@ -57,3 +57,8 @@ Rodio 当前活跃，但 API 仍可能快速变化。停止更新不等于必须
 
 - crates.io 的 Rodio 0.22.2 不提供仓库 master 曾展示的 `simd` feature；0.0.1 只使用稳定发布版实际公开的 `playback`、`flac`、`wav`。
 - 未发布分支的 README、Cargo feature 或 API 不作为实现依据。
+
+## 0.0.2 验证记录
+
+- Rodio 0.22.2 使用 `flac`、`mp3`、`wav` 与 `playback` features；MP3/WAV/FLAC 16/24-bit 和 WAV 32-bit 已通过矩阵解码，MP3、FLAC 与 192 kHz/32-bit WAV 已通过默认设备 smoke test。
+- 生成的合法 32-bit FLAC 可被 Xiph FLAC 1.5.0 与 FFmpeg 8.1.2 独立读取，但 Rodio 0.22.2 的 Symphonia FLAC adapter 无法产生样本。项目所有者确认该格式没有实际需求，因此明确不支持，不为其引入第二套播放引擎。导入时进入可恢复的 `decode` 失败状态，随后仍可播放支持的文件。

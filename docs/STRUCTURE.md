@@ -20,6 +20,12 @@ src-tauri/
 │  └─ main.rs                 # 桌面入口
 ├─ Cargo.toml
 └─ tauri.conf.json
+tests/
+└─ fixtures/audio/             # 可再生成的 WAV/FLAC/MP3 与边界样本
+scripts/
+├─ generate-audio-fixtures.ps1
+└─ generate-license-report.mjs
+.github/workflows/ci.yml       # Windows 构建、测试与 Clippy
 ```
 
 `App.tsx` 在本技术验证中直接使用 Mantine，避免为一次性界面建立无收益的包装层。进入多窗口或第二个前端 feature 时，再按下述目标结构拆分 `app`、`features` 与 `shared/ui`。

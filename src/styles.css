@@ -83,6 +83,14 @@ input {
   min-height: 40px;
 }
 
+.timeline {
+  width: 100%;
+}
+
+.volume-control .mantine-Slider-root {
+  flex: 1;
+}
+
 @media (max-width: 480px) {
   .app-header,
   .player-surface {

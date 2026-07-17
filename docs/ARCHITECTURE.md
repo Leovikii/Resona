@@ -70,9 +70,13 @@ Mantine 是 UI 实现依赖，不是领域 API。采用三层策略：
 - `DecoderFactory`：限制并配置 Symphonia 解码能力，首版强制 MP3/WAV/FLAC，AAC/M4A 可选
 - `PlaybackClock`：生成权威播放位置并按 UI 实际需要节流
 
+0.0.2 的 `PlaybackSnapshot` 对外提供 `positionMs`、`durationMs`、`volume` 与 `seekable`；定位和音量仍通过 audio actor 串行执行。Tauri 错误边界使用稳定 `code` + `message`，UI 不依赖 Rodio/Symphonia 异常文本。
+
 音频回调不获取应用全局锁，不执行文件、数据库或 WebView IPC。解码、设备恢复和队列准备在 Rust 后台完成；音频样本不经过 Tauri IPC 或 WebView。前端在后端时间锚点之间做视觉插值。
 
 Rodio 使用精确锁定的稳定版本和最小 feature 集。首版不实现 mpv fallback，也不同时维护第二套播放路径。
+
+当前配置使用 Rodio 的 Symphonia `flac`、`mp3`、`wav` 与 CPAL `playback` features。WAV 的 32-bit integer/float 和 FLAC 的 16/24-bit 已进入自动矩阵；Rodio 0.22.2 的 FLAC adapter 对合法 32-bit FLAC 暂不产生样本，不能宣称该组合已支持。
 
 ## 平台能力
 

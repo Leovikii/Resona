@@ -2,6 +2,19 @@
 
 本项目的显著变更记录在此文件中。
 
+## [0.0.2] - 2026-07-17
+
+### Added
+
+- MP3 文件选择与 Rodio MP3 解码 feature。
+- 播放时长、进度、定位、音量和结构化播放错误。
+- WAV/FLAC/MP3 格式矩阵与损坏文件 fixture。
+- Windows CI 配置和依赖许可证清单生成器。
+
+### Known limitations
+
+- 32-bit FLAC 不支持；导入时返回可恢复的解码错误。32-bit WAV 正常。
+
 ## [0.0.1] - 2026-07-17
 
 ### Added

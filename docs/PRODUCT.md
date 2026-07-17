@@ -10,6 +10,7 @@ Resona 是本地优先的桌面高解析度音频播放器。它优先提供可�
 
 - MP3、PCM WAV 和 FLAC 播放
 - 44.1 kHz/16-bit 至 192 kHz/24-bit 的常见双声道本地音频
+- WAV 32-bit integer/float 源文件播放验证；FLAC 32-bit 不支持，导入时返回可恢复的解码错误
 - AAC/M4A 尽力支持，不作为首版发布阻塞项
 - 播放队列、播放模式、定位、音量和设备选择
 - Windows WASAPI Shared 输出

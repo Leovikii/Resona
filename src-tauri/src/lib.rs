@@ -5,7 +5,10 @@ mod playback;
 
 use std::sync::Arc;
 
-use commands::{get_playback_state, pause_playback, play_file, resume_playback, stop_playback};
+use commands::{
+    get_playback_state, pause_playback, play_file, resume_playback, seek_playback,
+    set_playback_volume, stop_playback,
+};
 use playback::RodioPlaybackEngine;
 
 pub fn run() {
@@ -17,6 +20,8 @@ pub fn run() {
             pause_playback,
             resume_playback,
             stop_playback,
+            seek_playback,
+            set_playback_volume,
             get_playback_state
         ])
         .run(tauri::generate_context!())
