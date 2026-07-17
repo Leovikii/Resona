@@ -1,0 +1,22 @@
+[package]
+name = "resona"
+version = "0.0.1"
+description = "A local desktop audio player"
+authors = ["Viki"]
+edition = "2021"
+license = "GPL-3.0-only"
+rust-version = "1.89"
+
+[lib]
+name = "resona_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+rodio = { version = "0.22.2", default-features = false, features = ["playback", "flac", "wav"] }
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+thiserror = "2"

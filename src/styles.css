@@ -1,0 +1,96 @@
+:root {
+  color-scheme: dark;
+  background: #101113;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-width: 320px;
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  min-height: 100vh;
+  background: #101113;
+}
+
+button,
+input {
+  letter-spacing: 0;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+.app-header {
+  min-height: 72px;
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #2c2e33;
+  background: #15171a;
+}
+
+.app-header h1 {
+  font-size: 20px;
+  line-height: 1.15;
+  letter-spacing: 0;
+}
+
+.status {
+  min-width: 68px;
+  text-align: right;
+}
+
+.status-playing {
+  color: #3bc9db;
+}
+
+.status-failed {
+  color: #ff8787;
+}
+
+.player-surface {
+  width: min(100%, 720px);
+  margin: 0 auto;
+  padding: clamp(28px, 8vh, 72px) 24px 36px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 24px;
+}
+
+.file-summary {
+  min-width: 0;
+  padding-bottom: 18px;
+  border-bottom: 1px solid #2c2e33;
+}
+
+.transport {
+  min-height: 40px;
+}
+
+@media (max-width: 480px) {
+  .app-header,
+  .player-surface {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .transport {
+    flex-wrap: wrap;
+  }
+}
