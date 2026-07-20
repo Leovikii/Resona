@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop-lyrics",
+  "description": "Minimal permissions for the Resona desktop lyrics WebView",
+  "windows": ["desktop-lyrics"],
+  "permissions": ["core:default"]
+}

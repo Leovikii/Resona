@@ -4,6 +4,33 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#101113" />
+    <script>
+      (() => {
+        const windowKind = new URLSearchParams(location.search).get("window");
+        if (windowKind === "desktop-lyrics" || windowKind === "audio-compression") {
+          document.documentElement.dataset.window = windowKind;
+        }
+        let scheme = "dark";
+        try {
+          const saved = localStorage.getItem("resona-color-scheme");
+          scheme = saved === "light" || saved === "dark"
+            ? saved
+            : matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        } catch {
+          scheme = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        }
+        document.documentElement.dataset.mantineColorScheme = scheme;
+      })();
+    </script>
+    <style>
+      html, body, #root { margin: 0; min-height: 100%; background: #101113; }
+      html[data-mantine-color-scheme="light"],
+      html[data-mantine-color-scheme="light"] body,
+      html[data-mantine-color-scheme="light"] #root { background: #fff; }
+      html[data-window="desktop-lyrics"],
+      html[data-window="desktop-lyrics"] body,
+      html[data-window="desktop-lyrics"] #root { background: transparent; }
+    </style>
     <title>Resona</title>
   </head>
   <body>

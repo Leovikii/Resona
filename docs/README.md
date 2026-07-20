@@ -12,6 +12,7 @@
 | [DEVELOPMENT.md](DEVELOPMENT.md) | 开发、依赖和质量准则 | 工程规则变化时 |
 | [ROADMAP.md](ROADMAP.md) | 阶段、验收条件和顺序 | 计划调整时 |
 | [STATUS.md](STATUS.md) | 已完成、进行中、下一步和阻塞项 | 每次有效开发后 |
+| [KNOWN_ISSUES.md](KNOWN_ISSUES.md) | 已知缺陷、暂缓理由和重新调查条件 | 发现问题或状态变化时 |
 | [releases/](releases/) | 各版本范围、验收证据和已知限制 | 每次版本验收时 |
 | [plans/](plans/README.md) | 待确认版本计划及其状态 | 进入新版本前或范围变化时 |
 | [decisions/](decisions/README.md) | 架构决策记录（ADR） | 形成难以从代码看出的长期决定时 |

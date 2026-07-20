@@ -1,6 +1,6 @@
 [package]
 name = "resona"
-version = "0.0.2"
+version = "0.0.17"
 description = "A local desktop audio player"
 authors = ["Viki"]
 edition = "2021"
@@ -16,7 +16,21 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 rodio = { version = "0.22.2", default-features = false, features = ["flac", "mp3", "playback", "wav"] }
+rusqlite = { version = "0.40.1", default-features = false, features = ["bundled"] }
+lofty = "0.24.0"
+hound = "3.5.1"
+base64 = "0.22.1"
+fastrand = "2.3.0"
+lrc = "0.2.0"
+subtp = "0.2.0"
+encoding_rs = "0.8.35"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+souvlaki = { version = "0.8.3", default-features = false }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+tauri-plugin-single-instance = "2"
 thiserror = "2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.44", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_UI_Controls", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

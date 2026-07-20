@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "audio-compression",
+  "description": "Minimal permissions for the Resona audio compression workspace",
+  "windows": ["audio-compression"],
+  "permissions": ["core:default", "dialog:allow-open"]
+}

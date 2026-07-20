@@ -9,7 +9,7 @@
 - Visual Studio Build Tools 2022，包含 MSVC/C++ 桌面工具
 - Microsoft Edge WebView2 Runtime
 
-首次安装依赖使用 `npm ci`。Rust 命令应在已加载 MSVC 环境的 Developer PowerShell/Command Prompt 中运行。
+首次安装依赖使用 `npm ci`，随后运行 `npm run prepare:sidecars` 下载并校验固定 FFmpeg/ffprobe。两个约 97 MiB 的可执行文件不进入 Git；`npm run tauri dev`、`npm run tauri build` 和 `npm run release:windows` 也会自动执行该准备步骤。Rust 命令应在已加载 MSVC 环境的 Developer PowerShell/Command Prompt 中运行。
 
 常用验证命令：
 
@@ -19,7 +19,7 @@ npm run licenses
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
 cargo test --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-npm run tauri build
+npm run release:windows
 ```
 
 fixture 重新生成需要 FFmpeg 8.1.2+ 与 Xiph FLAC 1.5.0+，详见 `tests/fixtures/audio/README.md`。日常测试不依赖编码器，直接使用已提交的二进制样本。
@@ -31,6 +31,18 @@ cargo test --manifest-path src-tauri/Cargo.toml opens_default_output_and_accepts
 ```
 
 开发运行使用 `npm run tauri dev`。单独执行 `npm run dev` 只预览 Web 前端，没有 Tauri 文件对话框或 Rust 播放能力。
+
+Windows 交付版本只能通过 `npm run release:windows` 生成。不得在 Tauri 构建后用 `cargo build --release` 重建或覆盖 `src-tauri/target/release/resona.exe`：普通 Cargo 构建不会注入 Tauri 生产协议，生成的 WebView 会错误访问 `devUrl`。`release:windows` 在构建后先确认 Vite 开发服务器未运行，再启动可执行文件检查主窗口存活，并自动关闭测试实例；交付前仍需浏览器或人工确认窗口内容。
+
+`scripts/prepare-ffmpeg-sidecars.ps1` 固定下载 FFmpeg 8.1.2 essentials archive，并分别校验归档、ffmpeg 和 ffprobe 的 SHA-256。下载文件只写入已忽略的 `src-tauri/binaries/*.exe`；修改版本、来源或任一哈希前必须重新审查许可证、构建选项和转换回归。CI 通过 `npm run tauri build` 使用同一准备路径，不依赖仓库内二进制。
+
+涉及前端的改动至少要在独立浏览器中检查一次页面加载、控制台错误和主要布局状态。浏览器预览不替代 Tauri command、窗口、媒体键、透明穿透等原生验收，但必须先拦截白屏、根组件崩溃、资源路径和明显布局问题。
+
+## Windows 文件选择对话框
+
+Tauri dialog 2.7.1 在 Windows 通过 rfd 0.16.0 调用系统 `IFileOpenDialog`，并自动把当前 Tauri 窗口设为 parent。前端必须保证同一窗口最多存在一个文件选择请求；对话框完成或失败后再解除互斥。
+
+不要给原生对话框增加仅在 JavaScript 层生效的超时。该超时无法关闭 Windows COM 对话框，只会让应用错误地认为窗口已经关闭并允许叠加第二个模态窗口。若单个对话框偶发长时间无响应，应分别检查 Windows Explorer、快速访问中的不可达网络路径和第三方 Shell 扩展，并记录复现时的目录位置。
 
 ## 优先级
 
@@ -72,9 +84,10 @@ cargo test --manifest-path src-tauri/Cargo.toml opens_default_output_and_accepts
 
 - 音频流不进入 WebView，也不跨 Tauri command/event 传输。
 - 音频输出由专用 Rust actor 持有；音频回调不等待应用锁、不访问数据库、不发送 UI 事件。
-- 长曲目列表必须虚拟化。
+- 长播放队列和用户播放列表必须虚拟化。
 - 高频进度事件按视觉需要节流，避免每个音频 tick 触发全局 React 更新。
-- 数据库扫描批量提交，封面和波形使用缓存。
+- 目录扫描不得为每个候选文件启动外部进程。WAV 扫描使用进程内头解析；FFmpeg/ffprobe 仅用于实际转换和结果校验，并在 Windows 隐藏控制台窗口。
+- 播放列表数据库操作使用事务并维护稠密位置；当前曲目封面按需读取并限制缓存，不建立全局媒体索引。
 - 性能优化以测量结果为依据，不通过牺牲边界和正确性换取不可见收益。
 
 ## 测试层次
@@ -83,7 +96,14 @@ cargo test --manifest-path src-tauri/Cargo.toml opens_default_output_and_accepts
 - Rodio/CPAL/Symphonia、FFmpeg、SQLite adapter：固定 fixture 的集成测试
 - Tauri command/event：契约测试
 - 关键用户流程：桌面 E2E
-- UI：暗色、缩放、空/加载/错误状态截图验证
+- UI：浅色/深色、主题色、中文/英文、缩放、空/加载/错误状态截图验证
+- 应用壳：空默认列表、多个用户列表、完整播放主内容视图、长路径和长翻译文本下不得发生布局跳动或溢出；可选底栏按钮出现前后必须保持固定几何
+- 完整播放器：当前歌词自动居中、无横向滚动条，歌词/播放信息面板和顶部切换控件尺寸固定；输入元数据和实际 CPAL 输出流配置分别单行展示
+- 启动首帧：冷/暖启动、浅色/深色/跟随系统下不得出现明显白色空窗；隐藏到首帧的窗口必须有 Release 启动失败检测
+- Windows SMTC：系统回调必须通过 typed command 进入播放服务，并在实机验证媒体键与系统显示状态
+- Windows 桌面歌词：透明、置顶、焦点、跨进程点击/滚轮/拖动穿透和原生解锁辅助窗口必须实机验证；浏览器预览不能替代
+- Windows 应用生命周期：关闭主窗口、隐藏歌词资源释放、重复启动单实例和退出后无残留进程必须单独验证；WebView2 子进程数量不能作为播放核心重复的判断依据
+- Windows Release：必须通过 `npm run release:windows` 构建并验证内嵌前端；仅通过 `npm run build` 或普通 `cargo build --release` 不构成交付验证
 
 音频 fixture 必须体积小、来源清晰并允许重新分发。
 

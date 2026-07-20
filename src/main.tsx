@@ -1,23 +1,38 @@
-import { StrictMode } from "react";
+import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
-import { createTheme, MantineProvider } from "@mantine/core";
-import "@mantine/core/styles.css";
-import "./styles.css";
-import App from "./App";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
-const theme = createTheme({
-  primaryColor: "cyan",
-  defaultRadius: "sm",
-  fontFamily: "Segoe UI, system-ui, sans-serif",
-  headings: {
-    fontFamily: "Segoe UI, system-ui, sans-serif",
-  },
-});
+import { AppProvider } from "./app/preferences";
+import { isTauriRuntime } from "./shared/bridge/tauri";
+import "./shared/i18n";
+import "./styles.css";
+
+const desktopLyricsWindow = new URLSearchParams(window.location.search).get("window") === "desktop-lyrics"
+  || (isTauriRuntime() && getCurrentWindow().label === "desktop-lyrics");
+const audioCompressionWindow = new URLSearchParams(window.location.search).get("window") === "audio-compression"
+  || (isTauriRuntime() && getCurrentWindow().label === "audio-compression");
+const RootWindow = desktopLyricsWindow
+  ? lazy(() => import("./windows/DesktopLyricsWindow"))
+  : audioCompressionWindow
+    ? lazy(() => import("./windows/AudioCompressionWindow"))
+    : lazy(() => import("./App"));
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <MantineProvider defaultColorScheme="dark" theme={theme}>
-      <App />
-    </MantineProvider>
+    <AppProvider>
+      <Suspense fallback={null}>
+        <RootWindow />
+      </Suspense>
+    </AppProvider>
   </StrictMode>,
 );
+
+if (isTauriRuntime() && !desktopLyricsWindow && !audioCompressionWindow) {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      void getCurrentWindow().show().catch((error) => {
+        console.error("Unable to show the Resona main window", error);
+      });
+    });
+  });
+}

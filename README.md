@@ -14,6 +14,16 @@ Resona 是一个从零构建的本地桌面高解析度音频播放器。当前�
 
 技术选择以最低总开发成本、成熟实现优先、离线可用和可维护性为准。详细约束见[开发准则](docs/DEVELOPMENT.md)。
 
+## 本地开发
+
+```powershell
+npm ci
+npm run prepare:sidecars
+npm run tauri dev
+```
+
+FFmpeg/ffprobe 使用固定版本和 SHA-256 校验，构建前按需下载，不提交约 194 MiB 的本地 sidecar。版本、来源和校验值见 [sidecar 说明](src-tauri/binaries/README.md)。
+
 ## 文档
 
 - [文档索引](docs/README.md)

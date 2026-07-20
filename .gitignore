@@ -1,15 +1,42 @@
 # Frontend
 node_modules/
 dist/
+coverage/
+.vite/
 
 # Rust / Tauri
 src-tauri/target/
+# Downloaded and hash-verified by scripts/prepare-ffmpeg-sidecars.ps1.
+src-tauri/binaries/*.exe
+src-tauri/binaries/*.zip
 
 # Local tooling
+.agents/
+.codex/
 .idea/
 .vscode/
+.vs/
 *.log
+*.tmp
+*.bak
+*.dmp
+
+# Local configuration, data and signing secrets
+.env
+.env.*
+!.env.example
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.key
+*.pem
+*.p12
+*.pfx
 
 # OS
 .DS_Store
 Thumbs.db
+Desktop.ini

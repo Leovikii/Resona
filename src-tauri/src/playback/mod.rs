@@ -1,18 +1,28 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::fs::File;
-use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::Mutex;
-use std::thread::{self, JoinHandle};
-use std::time::Duration;
+mod output;
 
-use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
-use serde::Serialize;
+use std::collections::VecDeque;
+use std::fs::File;
+use std::io::BufReader;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
+
+use rodio::source::Done;
+use rodio::{Decoder, Player, Source};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+use output::OutputDeviceManager;
+use output::OutputSnapshot;
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 const ACTOR_TICK: Duration = Duration::from_millis(150);
+const DEVICE_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -25,6 +35,57 @@ pub enum PlaybackStatus {
     Failed,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlaybackMode {
+    #[default]
+    Sequential,
+    RepeatOne,
+    RepeatAll,
+    Shuffle,
+}
+
+impl PlaybackMode {
+    pub fn storage_key(self) -> &'static str {
+        match self {
+            Self::Sequential => "sequential",
+            Self::RepeatOne => "repeat_one",
+            Self::RepeatAll => "repeat_all",
+            Self::Shuffle => "shuffle",
+        }
+    }
+
+    pub fn from_storage_key(value: &str) -> Self {
+        match value {
+            "repeat_one" => Self::RepeatOne,
+            "repeat_all" => Self::RepeatAll,
+            "shuffle" => Self::Shuffle,
+            _ => Self::Sequential,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueItemStatus {
+    Pending,
+    Playing,
+    Paused,
+    Played,
+    Failed,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueItemSnapshot {
+    pub id: u64,
+    pub path: String,
+    pub display_name: String,
+    pub duration_ms: Option<u64>,
+    pub status: QueueItemStatus,
+    pub error: Option<PlaybackFailure>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaybackSnapshot {
@@ -35,6 +96,19 @@ pub struct PlaybackSnapshot {
     pub duration_ms: Option<u64>,
     pub volume: f32,
     pub seekable: bool,
+    pub queue: Vec<QueueItemSnapshot>,
+    pub current_item_id: Option<u64>,
+    pub playback_mode: PlaybackMode,
+    pub output: OutputSnapshot,
+}
+
+#[derive(Clone, Debug)]
+pub struct RestoredPlaybackSession {
+    pub paths: Vec<PathBuf>,
+    pub current_path: Option<PathBuf>,
+    pub position_ms: u64,
+    pub volume: f32,
+    pub playback_mode: PlaybackMode,
 }
 
 impl Default for PlaybackSnapshot {
@@ -47,6 +121,10 @@ impl Default for PlaybackSnapshot {
             duration_ms: None,
             volume: 1.0,
             seekable: false,
+            queue: Vec::new(),
+            current_item_id: None,
+            playback_mode: PlaybackMode::Sequential,
+            output: OutputSnapshot::default(),
         }
     }
 }
@@ -65,6 +143,10 @@ pub enum PlaybackErrorCode {
     EngineUnavailable,
     EngineTimeout,
     TaskFailed,
+    QueueItemNotFound,
+    ListOutputDevices,
+    InvalidOutputDevice,
+    OutputDeviceUnavailable,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -104,6 +186,14 @@ pub enum PlaybackError {
     EngineUnavailable,
     #[error("播放引擎响应超时")]
     EngineTimeout,
+    #[error("播放列表项目不存在")]
+    QueueItemNotFound,
+    #[error("无法列出输出设备：{0}")]
+    ListOutputDevices(String),
+    #[error("输出设备 ID 无效：{0}")]
+    InvalidOutputDevice(String),
+    #[error("输出设备不可用：{0}")]
+    OutputDeviceUnavailable(String),
 }
 
 impl PlaybackError {
@@ -119,6 +209,10 @@ impl PlaybackError {
             Self::Seek(_) => PlaybackErrorCode::Seek,
             Self::EngineUnavailable => PlaybackErrorCode::EngineUnavailable,
             Self::EngineTimeout => PlaybackErrorCode::EngineTimeout,
+            Self::QueueItemNotFound => PlaybackErrorCode::QueueItemNotFound,
+            Self::ListOutputDevices(_) => PlaybackErrorCode::ListOutputDevices,
+            Self::InvalidOutputDevice(_) => PlaybackErrorCode::InvalidOutputDevice,
+            Self::OutputDeviceUnavailable(_) => PlaybackErrorCode::OutputDeviceUnavailable,
         };
         PlaybackFailure {
             code,
@@ -128,21 +222,77 @@ impl PlaybackError {
 }
 
 pub trait PlaybackEngine {
-    fn play(&self, path: PathBuf) -> Result<PlaybackSnapshot, PlaybackError>;
+    fn replace_queue(&self, paths: Vec<PathBuf>) -> Result<PlaybackSnapshot, PlaybackError>;
+    fn append_queue(&self, paths: Vec<PathBuf>) -> Result<PlaybackSnapshot, PlaybackError>;
+    fn replace_queue_and_play(
+        &self,
+        paths: Vec<PathBuf>,
+        selected_index: usize,
+    ) -> Result<PlaybackSnapshot, PlaybackError>;
+    fn play_queue_item(&self, id: u64) -> Result<PlaybackSnapshot, PlaybackError>;
+    fn remove_queue_item(&self, id: u64) -> Result<PlaybackSnapshot, PlaybackError>;
+    fn move_queue_item(&self, id: u64, to_index: usize) -> Result<PlaybackSnapshot, PlaybackError>;
+    fn previous(&self) -> Result<PlaybackSnapshot, PlaybackError>;
+    fn next(&self) -> Result<PlaybackSnapshot, PlaybackError>;
+    fn set_playback_mode(&self, mode: PlaybackMode) -> Result<PlaybackSnapshot, PlaybackError>;
+    fn clear_queue(&self) -> Result<PlaybackSnapshot, PlaybackError>;
+    fn refresh_output_devices(&self) -> Result<PlaybackSnapshot, PlaybackError>;
+    fn select_output_device(
+        &self,
+        device_id: Option<String>,
+    ) -> Result<PlaybackSnapshot, PlaybackError>;
     fn pause(&self) -> Result<PlaybackSnapshot, PlaybackError>;
     fn resume(&self) -> Result<PlaybackSnapshot, PlaybackError>;
     fn stop(&self) -> Result<PlaybackSnapshot, PlaybackError>;
     fn seek(&self, position_ms: u64) -> Result<PlaybackSnapshot, PlaybackError>;
     fn set_volume(&self, volume: f32) -> Result<PlaybackSnapshot, PlaybackError>;
     fn snapshot(&self) -> Result<PlaybackSnapshot, PlaybackError>;
+    fn restore_session(
+        &self,
+        session: RestoredPlaybackSession,
+    ) -> Result<PlaybackSnapshot, PlaybackError>;
 }
 
 type CommandResult = Result<PlaybackSnapshot, PlaybackError>;
 type ResponseSender = Sender<CommandResult>;
 
 enum AudioCommand {
-    Play {
-        path: PathBuf,
+    ReplaceQueue {
+        paths: Vec<PathBuf>,
+        response: ResponseSender,
+    },
+    AppendQueue {
+        paths: Vec<PathBuf>,
+        response: ResponseSender,
+    },
+    ReplaceQueueAndPlay {
+        paths: Vec<PathBuf>,
+        selected_index: usize,
+        response: ResponseSender,
+    },
+    PlayQueueItem {
+        id: u64,
+        response: ResponseSender,
+    },
+    RemoveQueueItem {
+        id: u64,
+        response: ResponseSender,
+    },
+    MoveQueueItem {
+        id: u64,
+        to_index: usize,
+        response: ResponseSender,
+    },
+    Previous(ResponseSender),
+    Next(ResponseSender),
+    SetPlaybackMode {
+        mode: PlaybackMode,
+        response: ResponseSender,
+    },
+    ClearQueue(ResponseSender),
+    RefreshOutputDevices(ResponseSender),
+    SelectOutputDevice {
+        device_id: Option<String>,
         response: ResponseSender,
     },
     Pause(ResponseSender),
@@ -157,6 +307,10 @@ enum AudioCommand {
         response: ResponseSender,
     },
     Snapshot(ResponseSender),
+    RestoreSession {
+        session: RestoredPlaybackSession,
+        response: ResponseSender,
+    },
     Shutdown,
 }
 
@@ -204,8 +358,63 @@ impl Default for RodioPlaybackEngine {
 }
 
 impl PlaybackEngine for RodioPlaybackEngine {
-    fn play(&self, path: PathBuf) -> CommandResult {
-        self.request(|response| AudioCommand::Play { path, response })
+    fn replace_queue(&self, paths: Vec<PathBuf>) -> CommandResult {
+        self.request(|response| AudioCommand::ReplaceQueue { paths, response })
+    }
+
+    fn append_queue(&self, paths: Vec<PathBuf>) -> CommandResult {
+        self.request(|response| AudioCommand::AppendQueue { paths, response })
+    }
+
+    fn replace_queue_and_play(&self, paths: Vec<PathBuf>, selected_index: usize) -> CommandResult {
+        self.request(|response| AudioCommand::ReplaceQueueAndPlay {
+            paths,
+            selected_index,
+            response,
+        })
+    }
+
+    fn play_queue_item(&self, id: u64) -> CommandResult {
+        self.request(|response| AudioCommand::PlayQueueItem { id, response })
+    }
+
+    fn remove_queue_item(&self, id: u64) -> CommandResult {
+        self.request(|response| AudioCommand::RemoveQueueItem { id, response })
+    }
+
+    fn move_queue_item(&self, id: u64, to_index: usize) -> CommandResult {
+        self.request(|response| AudioCommand::MoveQueueItem {
+            id,
+            to_index,
+            response,
+        })
+    }
+
+    fn previous(&self) -> CommandResult {
+        self.request(AudioCommand::Previous)
+    }
+
+    fn next(&self) -> CommandResult {
+        self.request(AudioCommand::Next)
+    }
+
+    fn set_playback_mode(&self, mode: PlaybackMode) -> CommandResult {
+        self.request(|response| AudioCommand::SetPlaybackMode { mode, response })
+    }
+
+    fn clear_queue(&self) -> CommandResult {
+        self.request(AudioCommand::ClearQueue)
+    }
+
+    fn refresh_output_devices(&self) -> CommandResult {
+        self.request(AudioCommand::RefreshOutputDevices)
+    }
+
+    fn select_output_device(&self, device_id: Option<String>) -> CommandResult {
+        self.request(|response| AudioCommand::SelectOutputDevice {
+            device_id,
+            response,
+        })
     }
 
     fn pause(&self) -> CommandResult {
@@ -234,6 +443,10 @@ impl PlaybackEngine for RodioPlaybackEngine {
     fn snapshot(&self) -> CommandResult {
         self.request(AudioCommand::Snapshot)
     }
+
+    fn restore_session(&self, session: RestoredPlaybackSession) -> CommandResult {
+        self.request(|response| AudioCommand::RestoreSession { session, response })
+    }
 }
 
 impl Drop for RodioPlaybackEngine {
@@ -248,17 +461,81 @@ impl Drop for RodioPlaybackEngine {
 }
 
 struct AudioActor {
-    output: Option<MixerDeviceSink>,
+    output: OutputDeviceManager,
     player: Option<Player>,
     snapshot: PlaybackSnapshot,
+    queue: Vec<QueueItem>,
+    next_queue_id: u64,
+    current_index: Option<usize>,
+    source_signals: VecDeque<(usize, Arc<AtomicUsize>)>,
+    last_device_poll: Instant,
+    recovery: Option<OutputRecovery>,
+    restored_position_ms: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct OutputRecovery {
+    index: usize,
+    position_ms: u64,
+    paused: bool,
+}
+
+#[derive(Clone, Debug)]
+struct QueueItem {
+    id: u64,
+    path: PathBuf,
+    display_name: String,
+    duration_ms: Option<u64>,
+    status: QueueItemStatus,
+    error: Option<PlaybackFailure>,
+}
+
+impl QueueItem {
+    fn new(id: u64, path: PathBuf) -> Self {
+        let display_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_owned)
+            .unwrap_or_else(|| path.to_string_lossy().into_owned());
+        Self {
+            id,
+            path,
+            display_name,
+            duration_ms: None,
+            status: QueueItemStatus::Pending,
+            error: None,
+        }
+    }
+
+    fn snapshot(&self) -> QueueItemSnapshot {
+        QueueItemSnapshot {
+            id: self.id,
+            path: self.path.to_string_lossy().into_owned(),
+            display_name: self.display_name.clone(),
+            duration_ms: self.duration_ms,
+            status: self.status,
+            error: self.error.clone(),
+        }
+    }
 }
 
 impl AudioActor {
     fn new() -> Self {
+        let output = OutputDeviceManager::new();
         Self {
-            output: None,
+            snapshot: PlaybackSnapshot {
+                output: output.snapshot(),
+                ..PlaybackSnapshot::default()
+            },
+            output,
             player: None,
-            snapshot: PlaybackSnapshot::default(),
+            queue: Vec::new(),
+            next_queue_id: 1,
+            current_index: None,
+            source_signals: VecDeque::new(),
+            last_device_poll: Instant::now(),
+            recovery: None,
+            restored_position_ms: None,
         }
     }
 
@@ -267,7 +544,10 @@ impl AudioActor {
             match receiver.recv_timeout(ACTOR_TICK) {
                 Ok(AudioCommand::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
                 Ok(command) => self.handle(command),
-                Err(RecvTimeoutError::Timeout) => self.refresh_finished_playback(),
+                Err(RecvTimeoutError::Timeout) => {
+                    self.refresh_finished_playback();
+                    self.refresh_output_lifecycle();
+                }
             }
         }
 
@@ -278,7 +558,45 @@ impl AudioActor {
 
     fn handle(&mut self, command: AudioCommand) {
         let (result, response, replace_state_on_error) = match command {
-            AudioCommand::Play { path, response } => (self.play(path), response, true),
+            AudioCommand::ReplaceQueue { paths, response } => {
+                (self.replace_queue(paths), response, false)
+            }
+            AudioCommand::AppendQueue { paths, response } => {
+                (self.append_queue(paths), response, false)
+            }
+            AudioCommand::ReplaceQueueAndPlay {
+                paths,
+                selected_index,
+                response,
+            } => (
+                self.replace_queue_and_play(paths, selected_index),
+                response,
+                true,
+            ),
+            AudioCommand::PlayQueueItem { id, response } => {
+                (self.play_queue_item(id), response, true)
+            }
+            AudioCommand::RemoveQueueItem { id, response } => {
+                (self.remove_queue_item(id), response, false)
+            }
+            AudioCommand::MoveQueueItem {
+                id,
+                to_index,
+                response,
+            } => (self.move_queue_item(id, to_index), response, false),
+            AudioCommand::Previous(response) => (self.previous(), response, false),
+            AudioCommand::Next(response) => (self.next(), response, true),
+            AudioCommand::SetPlaybackMode { mode, response } => {
+                (self.set_playback_mode(mode), response, false)
+            }
+            AudioCommand::ClearQueue(response) => (self.clear_queue(), response, false),
+            AudioCommand::RefreshOutputDevices(response) => {
+                (self.refresh_output_devices(), response, false)
+            }
+            AudioCommand::SelectOutputDevice {
+                device_id,
+                response,
+            } => (self.select_output_device(device_id), response, false),
             AudioCommand::Pause(response) => (self.pause(), response, false),
             AudioCommand::Resume(response) => (self.resume(), response, false),
             AudioCommand::Stop(response) => (self.stop(), response, false),
@@ -291,7 +609,11 @@ impl AudioActor {
             }
             AudioCommand::Snapshot(response) => {
                 self.refresh_playback_state();
+                self.sync_output_snapshot();
                 (Ok(self.snapshot.clone()), response, false)
+            }
+            AudioCommand::RestoreSession { session, response } => {
+                (self.restore_session(session), response, false)
             }
             AudioCommand::Shutdown => return,
         };
@@ -305,50 +627,543 @@ impl AudioActor {
         let _ = response.send(result);
     }
 
-    fn play(&mut self, path: PathBuf) -> CommandResult {
+    fn replace_queue(&mut self, paths: Vec<PathBuf>) -> CommandResult {
+        self.stop_player();
+        self.queue = paths
+            .into_iter()
+            .map(|path| {
+                let id = self.next_queue_id;
+                self.next_queue_id = self.next_queue_id.saturating_add(1);
+                QueueItem::new(id, path)
+            })
+            .collect();
+        self.current_index = None;
+        self.snapshot = PlaybackSnapshot {
+            status: if self.queue.is_empty() {
+                PlaybackStatus::Idle
+            } else {
+                PlaybackStatus::Stopped
+            },
+            volume: self.snapshot.volume,
+            playback_mode: self.snapshot.playback_mode,
+            queue: self.queue.iter().map(QueueItem::snapshot).collect(),
+            output: self.output.snapshot(),
+            ..PlaybackSnapshot::default()
+        };
+        Ok(self.snapshot.clone())
+    }
+
+    fn restore_session(&mut self, session: RestoredPlaybackSession) -> CommandResult {
+        let paths = session
+            .paths
+            .into_iter()
+            .filter(|path| validate_audio_path(path).is_ok())
+            .collect::<Vec<_>>();
+        self.snapshot.playback_mode = session.playback_mode;
+        self.snapshot.volume = if session.volume.is_finite() {
+            session.volume.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        self.replace_queue(paths)?;
+        let Some(current_path) = session.current_path else {
+            return Ok(self.snapshot.clone());
+        };
+        let Some(index) = self.queue.iter().position(|item| item.path == current_path) else {
+            return Ok(self.snapshot.clone());
+        };
+        let (_, duration_ms) = decode_path(&self.queue[index].path)?;
+        self.queue[index].duration_ms = duration_ms;
+        self.current_index = Some(index);
+        let position_ms = duration_ms.map_or(session.position_ms, |duration| {
+            session.position_ms.min(duration)
+        });
+        self.snapshot.status = PlaybackStatus::Stopped;
+        self.snapshot.position_ms = position_ms;
+        self.restored_position_ms = Some(position_ms);
+        self.sync_snapshot_queue();
+        Ok(self.snapshot.clone())
+    }
+
+    fn append_queue(&mut self, paths: Vec<PathBuf>) -> CommandResult {
+        for path in paths {
+            let id = self.next_queue_id;
+            self.next_queue_id = self.next_queue_id.saturating_add(1);
+            self.queue.push(QueueItem::new(id, path));
+        }
+        if self.current_index.is_some() && self.player.is_some() {
+            self.preload_next()?;
+        }
+        self.sync_snapshot_queue();
+        Ok(self.snapshot.clone())
+    }
+
+    fn replace_queue_and_play(
+        &mut self,
+        paths: Vec<PathBuf>,
+        selected_index: usize,
+    ) -> CommandResult {
+        if selected_index >= paths.len() {
+            return Err(PlaybackError::QueueItemNotFound);
+        }
+        self.replace_queue(paths)?;
+        self.start_from_index(selected_index)
+    }
+
+    fn play_queue_item(&mut self, id: u64) -> CommandResult {
+        let index = self
+            .queue
+            .iter()
+            .position(|item| item.id == id)
+            .ok_or(PlaybackError::QueueItemNotFound)?;
+        let position_ms = if self.current_index == Some(index)
+            && self.snapshot.status == PlaybackStatus::Stopped
+        {
+            self.restored_position_ms.take().unwrap_or(0)
+        } else {
+            self.restored_position_ms = None;
+            0
+        };
+        self.start_from_index_at(index, position_ms)
+    }
+
+    fn remove_queue_item(&mut self, id: u64) -> CommandResult {
+        let index = self
+            .queue
+            .iter()
+            .position(|item| item.id == id)
+            .ok_or(PlaybackError::QueueItemNotFound)?;
+        let was_current = self.current_index == Some(index);
+        self.queue.remove(index);
+
+        if self.queue.is_empty() {
+            self.stop_player();
+            self.current_index = None;
+            self.snapshot = PlaybackSnapshot {
+                status: PlaybackStatus::Idle,
+                volume: self.snapshot.volume,
+                playback_mode: self.snapshot.playback_mode,
+                output: self.output.snapshot(),
+                ..PlaybackSnapshot::default()
+            };
+            return Ok(self.snapshot.clone());
+        }
+
+        if let Some(current) = self.current_index {
+            if was_current {
+                let next = current.min(self.queue.len().saturating_sub(1));
+                return self.start_from_index(next);
+            }
+            self.current_index = Some(if index < current {
+                current - 1
+            } else {
+                current
+            });
+            if self.snapshot.status == PlaybackStatus::Playing
+                || self.snapshot.status == PlaybackStatus::Paused
+            {
+                self.rebuild_current_player()?;
+            }
+        }
+        self.sync_snapshot_queue();
+        Ok(self.snapshot.clone())
+    }
+
+    fn move_queue_item(&mut self, id: u64, to_index: usize) -> CommandResult {
+        let from_index = self
+            .queue
+            .iter()
+            .position(|item| item.id == id)
+            .ok_or(PlaybackError::QueueItemNotFound)?;
+        if self.queue.len() < 2 {
+            return Ok(self.snapshot.clone());
+        }
+        let bounded_index = to_index.min(self.queue.len() - 1);
+        let item = self.queue.remove(from_index);
+        self.queue.insert(bounded_index, item);
+
+        if let Some(current) = self.current_index {
+            self.current_index = Some(if current == from_index {
+                bounded_index
+            } else if from_index < current && bounded_index >= current {
+                current - 1
+            } else if from_index > current && bounded_index <= current {
+                current + 1
+            } else {
+                current
+            });
+            if self.snapshot.status == PlaybackStatus::Playing
+                || self.snapshot.status == PlaybackStatus::Paused
+            {
+                self.rebuild_current_player()?;
+            }
+        }
+        self.sync_snapshot_queue();
+        Ok(self.snapshot.clone())
+    }
+
+    fn next(&mut self) -> CommandResult {
+        let current = self.current_index.ok_or(PlaybackError::NothingLoaded)?;
+        let next = self
+            .manual_next_index(current)
+            .ok_or(PlaybackError::NothingLoaded)?;
+        self.start_from_index(next)
+    }
+
+    fn set_playback_mode(&mut self, mode: PlaybackMode) -> CommandResult {
+        self.snapshot.playback_mode = mode;
+        if self.player.is_some() {
+            self.rebuild_current_player()?;
+        }
+        Ok(self.snapshot.clone())
+    }
+
+    fn previous(&mut self) -> CommandResult {
+        const RESTART_THRESHOLD_MS: u64 = 3_000;
+        if self.snapshot.position_ms > RESTART_THRESHOLD_MS {
+            return self.seek(0);
+        }
+        let current = self.current_index.ok_or(PlaybackError::NothingLoaded)?;
+        let previous = self
+            .queue
+            .iter()
+            .enumerate()
+            .take(current)
+            .rev()
+            .find(|(_, item)| item.status != QueueItemStatus::Failed)
+            .map(|(index, _)| index)
+            .unwrap_or(current);
+        self.start_from_index(previous)
+    }
+
+    fn clear_queue(&mut self) -> CommandResult {
+        self.stop_player();
+        self.queue.clear();
+        self.current_index = None;
+        self.snapshot = PlaybackSnapshot {
+            status: PlaybackStatus::Idle,
+            volume: self.snapshot.volume,
+            playback_mode: self.snapshot.playback_mode,
+            output: self.output.snapshot(),
+            ..PlaybackSnapshot::default()
+        };
+        Ok(self.snapshot.clone())
+    }
+
+    fn refresh_output_devices(&mut self) -> CommandResult {
+        self.output.refresh()?;
+        self.sync_output_snapshot();
+        Ok(self.snapshot.clone())
+    }
+
+    fn select_output_device(&mut self, device_id: Option<String>) -> CommandResult {
+        let recovery = self.capture_output_recovery();
+        self.output.select(device_id)?;
+        if let Some(recovery) = recovery {
+            self.stop_player();
+            self.recovery = Some(recovery);
+            self.restore_output_recovery()?;
+        }
+        self.snapshot.error = None;
+        self.sync_output_snapshot();
+        Ok(self.snapshot.clone())
+    }
+
+    fn start_from_index(&mut self, index: usize) -> CommandResult {
+        self.start_from_index_at(index, 0)
+    }
+
+    fn start_from_index_at(&mut self, index: usize, position_ms: u64) -> CommandResult {
+        if index >= self.queue.len() {
+            return Err(PlaybackError::QueueItemNotFound);
+        }
+        self.stop_player();
+        self.current_index = None;
+        for item in &mut self.queue {
+            if matches!(
+                item.status,
+                QueueItemStatus::Playing | QueueItemStatus::Paused
+            ) {
+                item.status = QueueItemStatus::Pending;
+            }
+        }
+
+        let mut candidate = index;
+        loop {
+            let (decoder, duration_ms) = match decode_path(&self.queue[candidate].path) {
+                Ok(value) => value,
+                Err(error) => {
+                    self.queue[candidate].status = QueueItemStatus::Failed;
+                    self.queue[candidate].error = Some(error.failure());
+                    let Some(next) = self.next_valid_index(candidate + 1) else {
+                        self.snapshot.status = PlaybackStatus::Failed;
+                        self.sync_snapshot_queue();
+                        return Err(PlaybackError::Decode(
+                            self.queue[candidate]
+                                .error
+                                .as_ref()
+                                .map(|failure| failure.message.clone())
+                                .unwrap_or_else(|| "无法解码队列项目".to_owned()),
+                        ));
+                    };
+                    candidate = next;
+                    continue;
+                }
+            };
+            self.queue[candidate].duration_ms = duration_ms;
+            self.ensure_output()?;
+            let output = self
+                .output
+                .output()
+                .ok_or(PlaybackError::EngineUnavailable)?;
+            let player = Player::connect_new(output.mixer());
+            player.set_volume(self.snapshot.volume);
+            let signal = append_marked(&player, decoder);
+            player.play();
+            let bounded_position =
+                duration_ms.map_or(position_ms, |duration| position_ms.min(duration));
+            if bounded_position > 0 {
+                player
+                    .try_seek(Duration::from_millis(bounded_position))
+                    .map_err(|error| PlaybackError::Seek(error.to_string()))?;
+            }
+            self.player = Some(player);
+            self.source_signals.push_back((candidate, signal));
+            self.current_index = Some(candidate);
+            self.queue[candidate].status = QueueItemStatus::Playing;
+            self.queue[candidate].error = None;
+            self.snapshot.status = PlaybackStatus::Playing;
+            self.snapshot.position_ms = bounded_position;
+            self.restored_position_ms = None;
+            self.snapshot.error = None;
+            self.sync_snapshot_queue();
+            self.preload_next()?;
+            return Ok(self.snapshot.clone());
+        }
+    }
+
+    fn ensure_output(&mut self) -> Result<(), PlaybackError> {
+        self.output.ensure_open()?;
+        self.sync_output_snapshot();
+        Ok(())
+    }
+
+    fn sync_output_snapshot(&mut self) {
+        self.snapshot.output = self.output.snapshot();
+    }
+
+    fn capture_output_recovery(&self) -> Option<OutputRecovery> {
+        let index = self.current_index?;
+        if !matches!(
+            self.snapshot.status,
+            PlaybackStatus::Playing | PlaybackStatus::Paused
+        ) {
+            return None;
+        }
+        Some(OutputRecovery {
+            index,
+            position_ms: self
+                .player
+                .as_ref()
+                .map(|player| duration_to_millis(player.get_pos()))
+                .unwrap_or(self.snapshot.position_ms),
+            paused: self.snapshot.status == PlaybackStatus::Paused,
+        })
+    }
+
+    fn restore_output_recovery(&mut self) -> Result<(), PlaybackError> {
+        let Some(recovery) = self.recovery.take() else {
+            return Ok(());
+        };
+        if recovery.index >= self.queue.len() {
+            return Ok(());
+        }
+        self.start_from_index(recovery.index)?;
+        if recovery.position_ms > 0 {
+            let player = self.player.as_ref().ok_or(PlaybackError::NothingLoaded)?;
+            player
+                .try_seek(Duration::from_millis(recovery.position_ms))
+                .map_err(|error| PlaybackError::Seek(error.to_string()))?;
+            self.snapshot.position_ms = recovery.position_ms;
+        }
+        if recovery.paused {
+            self.player
+                .as_ref()
+                .ok_or(PlaybackError::NothingLoaded)?
+                .pause();
+            self.snapshot.status = PlaybackStatus::Paused;
+            if let Some(index) = self.current_index {
+                self.queue[index].status = QueueItemStatus::Paused;
+            }
+        }
+        self.sync_snapshot_queue();
+        Ok(())
+    }
+
+    fn suspend_output(&mut self, error: PlaybackError) {
+        self.recovery = self.capture_output_recovery();
+        self.stop_player();
+        self.output.mark_unavailable(&error);
+        self.snapshot.status = if self.recovery.is_some() {
+            PlaybackStatus::Failed
+        } else {
+            self.snapshot.status
+        };
+        self.snapshot.error = Some(error.failure());
+        self.sync_output_snapshot();
+        self.sync_snapshot_queue();
+    }
+
+    fn refresh_output_lifecycle(&mut self) {
+        if let Some(error) = self.output.take_stream_error() {
+            self.suspend_output(PlaybackError::OutputDeviceUnavailable(error));
+            return;
+        }
+        if self.last_device_poll.elapsed() < DEVICE_POLL_INTERVAL {
+            return;
+        }
+        self.last_device_poll = Instant::now();
+
+        if self.recovery.is_some() {
+            if self
+                .output
+                .selected_available()
+                .is_ok_and(|available| available)
+                && self.output.ensure_open().is_ok()
+            {
+                let _ = self.restore_output_recovery();
+                self.snapshot.error = None;
+                self.sync_output_snapshot();
+            }
+            return;
+        }
+
+        if !self.output.has_output() {
+            return;
+        }
+        match self.output.needs_reopen() {
+            Ok(true) => {
+                let recovery = self.capture_output_recovery();
+                if self.output.reopen().is_ok() {
+                    if let Some(recovery) = recovery {
+                        self.stop_player();
+                        self.recovery = Some(recovery);
+                        let _ = self.restore_output_recovery();
+                    }
+                    self.snapshot.error = None;
+                    self.sync_output_snapshot();
+                }
+            }
+            Ok(false) => {}
+            Err(error) => self.suspend_output(error),
+        }
+    }
+
+    fn stop_player(&mut self) {
         if let Some(player) = self.player.take() {
             player.stop();
         }
-        self.snapshot = PlaybackSnapshot {
-            path: Some(path.to_string_lossy().into_owned()),
-            volume: self.snapshot.volume,
-            ..PlaybackSnapshot::default()
-        };
+        self.source_signals.clear();
+    }
 
-        validate_audio_path(&path)?;
+    fn next_valid_index(&self, start: usize) -> Option<usize> {
+        (start..self.queue.len()).find(|&index| self.queue[index].status != QueueItemStatus::Failed)
+    }
 
-        let file = File::open(&path).map_err(|error| PlaybackError::OpenFile(error.to_string()))?;
-        let decoder =
-            Decoder::try_from(file).map_err(|error| PlaybackError::Decode(error.to_string()))?;
-        let duration_ms = decoder.total_duration().map(duration_to_millis);
-
-        if self.output.is_none() {
-            let mut output = DeviceSinkBuilder::open_default_sink()
-                .map_err(|error| PlaybackError::OpenOutput(error.to_string()))?;
-            output.log_on_drop(false);
-            self.output = Some(output);
+    fn preload_next(&mut self) -> Result<(), PlaybackError> {
+        if self.current_index.is_none()
+            || self.source_signals.len() >= 2
+            || matches!(
+                self.snapshot.playback_mode,
+                PlaybackMode::RepeatOne | PlaybackMode::Shuffle
+            )
+        {
+            return Ok(());
         }
+        let last_loaded = self
+            .source_signals
+            .back()
+            .map(|(index, _)| *index)
+            .or(self.current_index)
+            .unwrap_or(0);
+        let mut next = self.next_valid_index(last_loaded.saturating_add(1));
+        if next.is_none() && self.snapshot.playback_mode == PlaybackMode::RepeatAll {
+            next = self.next_valid_index(0);
+        }
+        while let Some(index) = next {
+            if self.current_index == Some(index) {
+                return Ok(());
+            }
+            let (decoder, duration_ms) = match decode_path(&self.queue[index].path) {
+                Ok(value) => value,
+                Err(error) => {
+                    self.queue[index].status = QueueItemStatus::Failed;
+                    self.queue[index].error = Some(error.failure());
+                    next = self.next_valid_index(index.saturating_add(1));
+                    if next.is_none() && self.snapshot.playback_mode == PlaybackMode::RepeatAll {
+                        next = self.next_valid_index(0);
+                    }
+                    continue;
+                }
+            };
+            self.queue[index].duration_ms = duration_ms;
+            let player = self.player.as_ref().ok_or(PlaybackError::NothingLoaded)?;
+            let signal = append_marked(player, decoder);
+            self.source_signals.push_back((index, signal));
+            return Ok(());
+        }
+        Ok(())
+    }
 
-        let output = self
-            .output
-            .as_ref()
-            .ok_or(PlaybackError::EngineUnavailable)?;
-        let player = Player::connect_new(output.mixer());
-        player.append(decoder);
-        player.set_volume(self.snapshot.volume);
-        player.play();
-
-        self.player = Some(player);
-        self.snapshot = PlaybackSnapshot {
-            status: PlaybackStatus::Playing,
-            path: Some(path.to_string_lossy().into_owned()),
-            error: None,
-            position_ms: 0,
-            duration_ms,
-            volume: self.snapshot.volume,
-            seekable: duration_ms.is_some(),
+    fn sync_current_snapshot(&mut self) {
+        let Some(index) = self.current_index else {
+            self.snapshot.path = None;
+            self.snapshot.duration_ms = None;
+            self.snapshot.seekable = false;
+            self.snapshot.current_item_id = None;
+            return;
         };
-        Ok(self.snapshot.clone())
+        let item = &self.queue[index];
+        self.snapshot.path = Some(item.path.to_string_lossy().into_owned());
+        self.snapshot.duration_ms = item.duration_ms;
+        self.snapshot.seekable = item.duration_ms.is_some();
+        self.snapshot.current_item_id = Some(item.id);
+    }
+
+    fn sync_snapshot_queue(&mut self) {
+        self.snapshot.queue = self.queue.iter().map(QueueItem::snapshot).collect();
+        self.sync_current_snapshot();
+    }
+
+    fn rebuild_current_player(&mut self) -> Result<(), PlaybackError> {
+        let Some(index) = self.current_index else {
+            return Ok(());
+        };
+        let position_ms = self
+            .player
+            .as_ref()
+            .map(|player| duration_to_millis(player.get_pos()))
+            .unwrap_or(self.snapshot.position_ms);
+        let paused = self.snapshot.status == PlaybackStatus::Paused;
+        self.start_from_index(index)?;
+        if position_ms > 0 {
+            let player = self.player.as_ref().ok_or(PlaybackError::NothingLoaded)?;
+            player
+                .try_seek(Duration::from_millis(position_ms))
+                .map_err(|error| PlaybackError::Seek(error.to_string()))?;
+            self.snapshot.position_ms = position_ms;
+        }
+        if paused {
+            self.player
+                .as_ref()
+                .ok_or(PlaybackError::NothingLoaded)?
+                .pause();
+            self.snapshot.status = PlaybackStatus::Paused;
+            if let Some(index) = self.current_index {
+                self.queue[index].status = QueueItemStatus::Paused;
+            }
+        }
+        Ok(())
     }
 
     fn pause(&mut self) -> CommandResult {
@@ -358,7 +1173,11 @@ impl AudioActor {
         let player = self.player.as_ref().ok_or(PlaybackError::NothingLoaded)?;
         player.pause();
         self.snapshot.status = PlaybackStatus::Paused;
+        if let Some(index) = self.current_index {
+            self.queue[index].status = QueueItemStatus::Paused;
+        }
         self.snapshot.error = None;
+        self.sync_snapshot_queue();
         Ok(self.snapshot.clone())
     }
 
@@ -369,16 +1188,26 @@ impl AudioActor {
         let player = self.player.as_ref().ok_or(PlaybackError::NothingLoaded)?;
         player.play();
         self.snapshot.status = PlaybackStatus::Playing;
+        if let Some(index) = self.current_index {
+            self.queue[index].status = QueueItemStatus::Playing;
+        }
         self.snapshot.error = None;
+        self.sync_snapshot_queue();
         Ok(self.snapshot.clone())
     }
 
     fn stop(&mut self) -> CommandResult {
-        let player = self.player.take().ok_or(PlaybackError::NothingLoaded)?;
-        player.stop();
+        if self.player.is_none() {
+            return Err(PlaybackError::NothingLoaded);
+        }
+        self.stop_player();
         self.snapshot.status = PlaybackStatus::Stopped;
         self.snapshot.position_ms = 0;
+        if let Some(index) = self.current_index {
+            self.queue[index].status = QueueItemStatus::Pending;
+        }
         self.snapshot.error = None;
+        self.sync_snapshot_queue();
         Ok(self.snapshot.clone())
     }
 
@@ -418,26 +1247,159 @@ impl AudioActor {
         if let Some(player) = &self.player {
             self.snapshot.position_ms = duration_to_millis(player.get_pos());
         }
+        while self
+            .source_signals
+            .front()
+            .is_some_and(|(_, signal)| signal.load(Ordering::Relaxed) == 0)
+        {
+            let Some((finished_index, _)) = self.source_signals.pop_front() else {
+                break;
+            };
+            self.finish_source(finished_index);
+        }
         if self.snapshot.status == PlaybackStatus::Playing
+            && self.source_signals.is_empty()
             && self.player.as_ref().is_some_and(Player::empty)
         {
             self.snapshot.position_ms = self
                 .snapshot
                 .duration_ms
                 .unwrap_or(self.snapshot.position_ms);
-            self.player = None;
+            self.stop_player();
+            self.current_index = None;
             self.snapshot.status = PlaybackStatus::Stopped;
             self.snapshot.error = None;
+            self.sync_snapshot_queue();
         }
     }
 
     fn refresh_finished_playback(&mut self) {
         self.refresh_playback_state();
     }
+
+    fn finish_source(&mut self, finished_index: usize) {
+        if let Some(item) = self.queue.get_mut(finished_index) {
+            item.status = QueueItemStatus::Played;
+        }
+
+        if self.current_index != Some(finished_index) {
+            self.sync_snapshot_queue();
+            return;
+        }
+
+        let queued_next = self.source_signals.front().map(|(index, _)| *index);
+        if let Some(next_index) = queued_next {
+            self.current_index = Some(next_index);
+            if let Some(item) = self.queue.get_mut(next_index) {
+                item.status = QueueItemStatus::Playing;
+            }
+            self.snapshot.position_ms = 0;
+            self.snapshot.status = PlaybackStatus::Playing;
+            self.snapshot.error = None;
+            self.sync_current_snapshot();
+            let _ = self.preload_next();
+        } else {
+            let next = self.natural_next_index(finished_index);
+            if let Some(next_index) = next {
+                if self.append_index(next_index).is_ok() {
+                    self.current_index = Some(next_index);
+                    if let Some(item) = self.queue.get_mut(next_index) {
+                        item.status = QueueItemStatus::Playing;
+                    }
+                    self.snapshot.position_ms = 0;
+                    self.snapshot.status = PlaybackStatus::Playing;
+                    self.snapshot.error = None;
+                    self.sync_current_snapshot();
+                    let _ = self.preload_next();
+                } else {
+                    self.snapshot.status = PlaybackStatus::Failed;
+                    self.current_index = None;
+                }
+            } else {
+                self.snapshot.position_ms = self
+                    .snapshot
+                    .duration_ms
+                    .unwrap_or(self.snapshot.position_ms);
+                self.stop_player();
+                self.current_index = None;
+                self.snapshot.status = PlaybackStatus::Stopped;
+                self.snapshot.error = None;
+            }
+        }
+        self.sync_snapshot_queue();
+    }
+
+    fn append_index(&mut self, index: usize) -> Result<(), PlaybackError> {
+        let (decoder, duration_ms) = decode_path(&self.queue[index].path)?;
+        self.queue[index].duration_ms = duration_ms;
+        let player = self.player.as_ref().ok_or(PlaybackError::NothingLoaded)?;
+        let signal = append_marked(player, decoder);
+        self.source_signals.push_back((index, signal));
+        Ok(())
+    }
+
+    fn manual_next_index(&self, current: usize) -> Option<usize> {
+        match self.snapshot.playback_mode {
+            PlaybackMode::Shuffle => self.random_valid_index(current),
+            PlaybackMode::RepeatAll => self
+                .next_valid_index(current.saturating_add(1))
+                .or_else(|| self.next_valid_index(0)),
+            PlaybackMode::Sequential | PlaybackMode::RepeatOne => {
+                self.next_valid_index(current.saturating_add(1))
+            }
+        }
+    }
+
+    fn natural_next_index(&self, current: usize) -> Option<usize> {
+        match self.snapshot.playback_mode {
+            PlaybackMode::RepeatOne => Some(current),
+            PlaybackMode::RepeatAll => self
+                .next_valid_index(current.saturating_add(1))
+                .or_else(|| self.next_valid_index(0)),
+            PlaybackMode::Shuffle => self.random_valid_index(current),
+            PlaybackMode::Sequential => self.next_valid_index(current.saturating_add(1)),
+        }
+    }
+
+    fn random_valid_index(&self, current: usize) -> Option<usize> {
+        let valid = self
+            .queue
+            .iter()
+            .enumerate()
+            .filter(|(index, item)| *index != current && item.status != QueueItemStatus::Failed)
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        if valid.is_empty() {
+            self.queue
+                .get(current)
+                .is_some_and(|item| item.status != QueueItemStatus::Failed)
+                .then_some(current)
+        } else {
+            valid.get(fastrand::usize(..valid.len())).copied()
+        }
+    }
 }
 
 fn duration_to_millis(duration: Duration) -> u64 {
     duration.as_millis().min(u128::from(u64::MAX)) as u64
+}
+
+fn decode_path(path: &Path) -> Result<(Decoder<BufReader<File>>, Option<u64>), PlaybackError> {
+    validate_audio_path(path)?;
+    let file = File::open(path).map_err(|error| PlaybackError::OpenFile(error.to_string()))?;
+    let decoder =
+        Decoder::try_from(file).map_err(|error| PlaybackError::Decode(error.to_string()))?;
+    let duration_ms = decoder.total_duration().map(duration_to_millis);
+    Ok((decoder, duration_ms))
+}
+
+fn append_marked<S>(player: &Player, source: S) -> Arc<AtomicUsize>
+where
+    S: Source + Send + 'static,
+{
+    let signal = Arc::new(AtomicUsize::new(1));
+    player.append(Done::new(source, Arc::clone(&signal)));
+    signal
 }
 
 fn validate_audio_path(path: &Path) -> Result<(), PlaybackError> {
@@ -544,8 +1506,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Rodio 0.22.2's FLAC adapters cannot emit samples from valid 32-bit FLAC"]
-    fn decodes_flac_32_bit_fixtures_when_upstream_supports_them() {
+    fn rejects_flac_32_bit_fixtures_as_unsupported() {
         for name in [
             "flac_44100_32_stereo.flac",
             "flac_48000_32_stereo.flac",
@@ -554,8 +1515,7 @@ mod tests {
         ] {
             let file =
                 File::open(fixture_directory().join(name)).expect("open 32-bit FLAC fixture");
-            let decoder = Decoder::try_from(file).expect("decode 32-bit FLAC fixture");
-            assert!(decoder.take(64).count() > 0, "fixture {name}");
+            assert!(Decoder::try_from(file).is_err(), "fixture {name}");
         }
     }
 
@@ -605,11 +1565,89 @@ mod tests {
     }
 
     #[test]
+    fn queue_operations_preserve_ids_across_append_move_and_remove() {
+        let engine = RodioPlaybackEngine::new();
+        let first = PathBuf::from("first.wav");
+        let second = PathBuf::from("second.flac");
+        let third = PathBuf::from("third.mp3");
+
+        let replaced = engine
+            .replace_queue(vec![first.clone(), second.clone()])
+            .expect("replace queue");
+        assert_eq!(replaced.queue.len(), 2);
+        assert_eq!(replaced.queue[0].id, 1);
+        assert_eq!(replaced.queue[1].id, 2);
+        assert_eq!(replaced.queue[0].display_name, "first.wav");
+
+        let appended = engine.append_queue(vec![third]).expect("append queue");
+        assert_eq!(
+            appended
+                .queue
+                .iter()
+                .map(|item| item.display_name.as_str())
+                .collect::<Vec<_>>(),
+            ["first.wav", "second.flac", "third.mp3"]
+        );
+
+        let moved = engine.move_queue_item(3, 1).expect("move queue item");
+        assert_eq!(
+            moved.queue.iter().map(|item| item.id).collect::<Vec<_>>(),
+            [1, 3, 2]
+        );
+
+        let removed = engine.remove_queue_item(1).expect("remove queue item");
+        assert_eq!(
+            removed.queue.iter().map(|item| item.id).collect::<Vec<_>>(),
+            [3, 2]
+        );
+    }
+
+    #[test]
+    fn playback_modes_round_trip_through_storage_keys() {
+        for (mode, key) in [
+            (PlaybackMode::Sequential, "sequential"),
+            (PlaybackMode::RepeatOne, "repeat_one"),
+            (PlaybackMode::RepeatAll, "repeat_all"),
+            (PlaybackMode::Shuffle, "shuffle"),
+        ] {
+            assert_eq!(mode.storage_key(), key);
+            assert_eq!(PlaybackMode::from_storage_key(key), mode);
+        }
+        assert_eq!(
+            PlaybackMode::from_storage_key("future-mode"),
+            PlaybackMode::Sequential
+        );
+    }
+
+    #[test]
+    fn restores_valid_session_without_opening_output_or_playing() {
+        let valid = fixture_directory().join("wav_44100_16_stereo.wav");
+        let engine = RodioPlaybackEngine::new();
+        let snapshot = engine
+            .restore_session(RestoredPlaybackSession {
+                paths: vec![PathBuf::from("missing.wav"), valid.clone()],
+                current_path: Some(valid),
+                position_ms: 120,
+                volume: 0.4,
+                playback_mode: PlaybackMode::RepeatAll,
+            })
+            .expect("restore session");
+        assert_eq!(snapshot.status, PlaybackStatus::Stopped);
+        assert_eq!(snapshot.output.status, output::OutputStatus::Closed);
+        assert_eq!(snapshot.queue.len(), 1);
+        assert_eq!(snapshot.position_ms, 120);
+        assert_eq!(snapshot.volume, 0.4);
+        assert_eq!(snapshot.playback_mode, PlaybackMode::RepeatAll);
+    }
+
+    #[test]
     #[ignore = "requires a system audio output device"]
     fn opens_default_output_and_accepts_a_flac() {
         let path = fixture_directory().join("seek_48000_24_stereo.flac");
         let engine = RodioPlaybackEngine::new();
-        let result = engine.play(path).expect("play FLAC fixture");
+        let result = engine
+            .replace_queue_and_play(vec![path], 0)
+            .expect("play FLAC fixture");
         assert_eq!(result.status, PlaybackStatus::Playing);
         assert_eq!(result.duration_ms, Some(4000));
         let stopped = engine.stop().expect("stop FLAC fixture");
@@ -620,10 +1658,29 @@ mod tests {
 
     #[test]
     #[ignore = "requires a system audio output device"]
+    fn enumerates_and_selects_the_system_default_output() {
+        let engine = RodioPlaybackEngine::new();
+        let refreshed = engine
+            .refresh_output_devices()
+            .expect("refresh output devices");
+        assert!(!refreshed.output.devices.is_empty());
+        assert!(refreshed.output.follow_system_default);
+
+        let selected = engine
+            .select_output_device(None)
+            .expect("select system default output");
+        assert_eq!(selected.output.status, output::OutputStatus::Ready);
+        assert!(selected.output.active_device_id.is_some());
+    }
+
+    #[test]
+    #[ignore = "requires a system audio output device"]
     fn opens_default_output_and_accepts_an_mp3() {
         let path = fixture_directory().join("mp3_44100_cbr128_stereo.mp3");
         let engine = RodioPlaybackEngine::new();
-        let result = engine.play(path).expect("play MP3 fixture");
+        let result = engine
+            .replace_queue_and_play(vec![path], 0)
+            .expect("play MP3 fixture");
         assert_eq!(result.status, PlaybackStatus::Playing);
         assert!(result.duration_ms.is_some());
         engine.stop().expect("stop MP3 fixture");
@@ -634,7 +1691,9 @@ mod tests {
     fn opens_default_output_and_accepts_a_192_khz_32_bit_wav() {
         let path = fixture_directory().join("wav_192000_32_stereo.wav");
         let engine = RodioPlaybackEngine::new();
-        let result = engine.play(path).expect("play 192 kHz/32-bit WAV fixture");
+        let result = engine
+            .replace_queue_and_play(vec![path], 0)
+            .expect("play 192 kHz/32-bit WAV fixture");
         assert_eq!(result.status, PlaybackStatus::Playing);
         engine.stop().expect("stop 192 kHz/32-bit WAV fixture");
     }
@@ -645,7 +1704,7 @@ mod tests {
         let engine = RodioPlaybackEngine::new();
         let unsupported = fixture_directory().join("flac_48000_32_stereo.flac");
         assert!(matches!(
-            engine.play(unsupported),
+            engine.replace_queue_and_play(vec![unsupported], 0),
             Err(PlaybackError::Decode(_))
         ));
 
@@ -657,10 +1716,38 @@ mod tests {
         );
 
         let supported = fixture_directory().join("flac_48000_24_stereo.flac");
-        let playing = engine.play(supported).expect("recover with supported FLAC");
+        let playing = engine
+            .replace_queue_and_play(vec![supported], 0)
+            .expect("recover with supported FLAC");
         assert_eq!(playing.status, PlaybackStatus::Playing);
         assert_eq!(playing.error, None);
         engine.stop().expect("stop recovered playback");
+    }
+
+    #[test]
+    #[ignore = "requires a system audio output device"]
+    fn preloads_and_advances_a_lossless_queue() {
+        let engine = RodioPlaybackEngine::new();
+        let first = fixture_directory().join("seek_48000_24_stereo.flac");
+        let second = fixture_directory().join("wav_44100_16_stereo.wav");
+        let queued = engine
+            .replace_queue(vec![first, second])
+            .expect("replace queue");
+        let first_id = queued.queue[0].id;
+        let playing = engine
+            .play_queue_item(first_id)
+            .expect("play first queue item");
+        assert_eq!(playing.status, PlaybackStatus::Playing);
+        assert_eq!(playing.queue[1].status, QueueItemStatus::Pending);
+
+        std::thread::sleep(Duration::from_millis(4_200));
+        let advanced = engine.snapshot().expect("read advanced queue state");
+        assert!(matches!(
+            advanced.status,
+            PlaybackStatus::Playing | PlaybackStatus::Stopped
+        ));
+        assert_eq!(advanced.queue[0].status, QueueItemStatus::Played);
+        engine.stop().ok();
     }
 
     fn fixture_directory() -> PathBuf {
