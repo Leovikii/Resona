@@ -34,7 +34,9 @@ cargo test --manifest-path src-tauri/Cargo.toml opens_default_output_and_accepts
 
 Windows 交付版本只能通过 `npm run release:windows` 生成。不得在 Tauri 构建后用 `cargo build --release` 重建或覆盖 `src-tauri/target/release/resona.exe`：普通 Cargo 构建不会注入 Tauri 生产协议，生成的 WebView 会错误访问 `devUrl`。`release:windows` 在构建后先确认 Vite 开发服务器未运行，再启动可执行文件检查主窗口存活，并自动关闭测试实例；交付前仍需浏览器或人工确认窗口内容。
 
-`scripts/prepare-ffmpeg-sidecars.ps1` 固定下载 FFmpeg 8.1.2 essentials archive，并分别校验归档、ffmpeg 和 ffprobe 的 SHA-256。下载文件只写入已忽略的 `src-tauri/binaries/*.exe`；修改版本、来源或任一哈希前必须重新审查许可证、构建选项和转换回归。CI 通过 `npm run tauri build` 使用同一准备路径，不依赖仓库内二进制。
+`scripts/prepare-ffmpeg-sidecars.ps1` 固定下载 FFmpeg 8.1.2 essentials archive，并分别校验归档、ffmpeg 和 ffprobe 的 SHA-256。下载文件只写入已忽略的 `src-tauri/binaries/*.exe`；修改版本、来源或任一哈希前必须重新审查许可证、构建选项和转换回归。自动化构建应调用 `npm run tauri -- build` 使用同一准备路径，不依赖仓库内二进制。
+
+0.1.0 功能开发完成前不维护 GitHub Actions；当前由本地自动检查和阶段验收提供反馈。CI、分支保护和 Action 依赖更新策略在 0.0.20 发布加固阶段按实际发布渠道建立，启用时必须重新核对所有 Action 的最新稳定版本、运行时和权限，并优先固定完整 commit SHA。
 
 涉及前端的改动至少要在独立浏览器中检查一次页面加载、控制台错误和主要布局状态。浏览器预览不替代 Tauri command、窗口、媒体键、透明穿透等原生验收，但必须先拦截白屏、根组件崩溃、资源路径和明显布局问题。
 

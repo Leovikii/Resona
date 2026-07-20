@@ -52,6 +52,8 @@
 
 首次 GitHub 上传前仓库卫生审计已完成：本地 FFmpeg/ffprobe sidecar 各约 97 MiB，超过 GitHub 100 MB 十进制单文件限制，现已由 `.gitignore` 排除并改为固定 URL、归档/双二进制 SHA-256 校验的构建前准备脚本。未发现环境文件、私钥、访问令牌、日志或本地数据库；测试音频、Mantine 文档快照、现有图标和 Tauri schema 均有明确用途并保留。
 
+现阶段不启用 GitHub Actions：项目仍处于单一开发流和 0.1.0 功能收口期，本地自动检查已经是权威验收路径，提前维护 CI 会重复下载依赖/sidecar并引入无必要的 Action 版本成本。CI、分支保护和依赖更新策略推迟到 0.0.20 发布加固阶段，届时按实际发布流程和当时最新稳定 Action 重新建立。
+
 ## 已完成
 
 - [x] 明确 Windows-first，Linux 只预留 Wayland + PipeWire 结构
