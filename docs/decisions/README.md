@@ -22,5 +22,7 @@ ADR 记录会长期影响代码、依赖或产品边界且无法仅从实现看�
 - [0015 - 播放列表激活、队列入口与单一状态展示](0015-playlist-activation-and-single-state-presentation.md)
 - [0016 - 音频压缩独立工作窗口](0016-audio-compression-workspace-window.md)
 - [0017 - 完整播放器作为右侧主内容视图](0017-full-player-as-main-content-view.md)
+- [0018 - 播放列表即当前播放序列](0018-playlist-as-playback-sequence.md)
+- [0019 - 临时默认列表退出语义与桌面歌词三分区工具栏](0019-transient-default-playlist-and-lyrics-toolbar.md)
 
 新 ADR 不修改历史决定的原文；如果决定被替代，新增 ADR 并将旧记录标记为 `Superseded`。

@@ -2,7 +2,7 @@
 
 该结构在初始化应用时逐步创建；当前不为尚未存在的模块添加空目录。
 
-## 当前实际结构（截至 0.0.13）
+## 当前实际结构（截至 0.0.18）
 
 应用已按实际变化边界拆分前端与 Rust 模块：
 
@@ -21,6 +21,7 @@ src/
 │  ├─ bridge/                 # 类型化 Tauri command/event 与单实例文件选择边界
 │  ├─ i18n/                   # zh-CN/en 资源与 i18next 初始化
 │  ├─ model/                  # 播放、播放列表、歌词和桌面窗口共享契约
+│  ├─ ui/usePointerReorder.ts # 不依赖组件库的播放列表指针排序行为
 │  └─ utils/format.ts         # 时间等纯格式化函数
 ├─ windows/
 │  └─ DesktopLyricsWindow.tsx # 不加载应用壳的轻量桌面歌词入口
@@ -32,7 +33,7 @@ src-tauri/
 │  ├─ commands.rs             # 薄 Tauri command 边界
 │  ├─ filesystem.rs           # 直属音频上下文枚举与拖入路径展开
 │  ├─ lyrics.rs               # LRC/SRT/WebVTT 发现、解码、解析、缓存和同步
-│  ├─ media_import.rs         # 临时默认列表与统一 external-open 应用服务
+│  ├─ media_import.rs         # 默认列表、当前列表来源、执行序列同步与 external-open 协调
 │  ├─ metadata.rs             # 后续按需元数据 adapter 源文件，当前不编译
 │  ├─ persistence.rs          # 用户列表、最近历史与 schema v3 migration
 │  ├─ playlists.rs            # 播放列表导入、命名和事务编排服务
@@ -45,7 +46,7 @@ src-tauri/
 │  │  └─ media_session/
 │  │     └─ windows.rs       # souvlaki Windows SMTC adapter
 │  ├─ playback/
-│  │  ├─ mod.rs              # 播放契约、Rodio actor、队列与测试
+│  │  ├─ mod.rs              # 播放契约、Rodio actor、内部执行序列与测试
 │  │  └─ output.rs           # CPAL 输出枚举、选择与错误回调
 │  ├─ lib.rs                  # Tauri 组装
 │  └─ main.rs                 # 桌面入口
@@ -60,10 +61,9 @@ scripts/
 ├─ generate-license-report.mjs
 ├─ prepare-ffmpeg-sidecars.ps1 # 下载并校验不进入 Git 的固定 FFmpeg sidecar
 └─ verify-release-webview.ps1 # 验证 Release 主窗口实际可见并清理进程
-.github/workflows/ci.yml       # Windows 构建、测试与 Clippy
 ```
 
-Mantine 直接导入仍限制在 `src/app`；当前没有出现需要统一平台行为或领域语义的复用控件，因此不创建空的 `shared/ui` 包装层。后续出现真实复用边界时再按目标结构增加。
+Mantine 直接导入仍限制在 `src/app`；`shared/ui/usePointerReorder.ts` 是播放列表使用的纯 Pointer Events 排序行为，不导入 Mantine、Tauri 或领域服务。当前仍没有需要统一平台行为或领域语义的 Mantine 适配控件，不为每个组件创建空包装层。
 
 0.0.13 已删除 managed-folder/media-library 运行时代码；`src/features/library` 保持为播放列表与最近历史，不为目录整洁做无收益搬迁。桌面歌词仍通过通用 facade 隔离 Windows 实现。0.0.17 的 `src/windows/AudioCompressionWindow.tsx` 只提供轻量窗口入口，Mantine 组合位于 `src/app/AudioCompressionApp.tsx`；Rust `compression_window.rs` 只管理普通辅助窗口生命周期，扫描和转换仍归 `CompressionService`。
 

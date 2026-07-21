@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { selectAudioFiles } from "../../shared/bridge/audioDialog";
+import { selectAudioFiles, selectAudioFolders } from "../../shared/bridge/audioDialog";
 import { invokeTauri, isTauriRuntime } from "../../shared/bridge/tauri";
 import type {
   PlaylistItem,
@@ -258,6 +258,13 @@ export function useLibrary() {
     return addItems(playlistId, paths, position);
   }, [addItems, preview]);
 
+  const chooseAndAddFolders = useCallback(async (playlistId: number) => {
+    const paths = preview
+      ? ["C:\\Music\\Imported\\Folder track.flac"]
+      : await selectAudioFolders();
+    return addItems(playlistId, paths);
+  }, [addItems, preview]);
+
   const removeItem = useCallback(async (playlistId: number, itemId: number) => {
     setItemsLoading(true);
     try {
@@ -285,6 +292,57 @@ export function useLibrary() {
       setItemsLoading(false);
     }
   }, [preview, previewItemsByPlaylist, refresh]);
+
+  const removeItems = useCallback(async (playlistId: number, itemIds: number[]) => {
+    if (itemIds.length === 0) return false;
+    setItemsLoading(true);
+    try {
+      let items: PlaylistItem[];
+      if (preview) {
+        const selected = new Set(itemIds);
+        items = (previewItemsByPlaylist[playlistId] ?? [])
+          .filter((candidate) => !selected.has(candidate.id))
+          .map((candidate, position) => ({ ...candidate, position }));
+        setPreviewItemsByPlaylist((current) => ({ ...current, [playlistId]: items }));
+      } else {
+        items = await invokeTauri<PlaylistItem[]>("remove_playlist_items", { playlistId, itemIds });
+        await refresh();
+      }
+      setSelectedItems(items);
+      setPlaylists((current) => current.map((playlist) => playlist.id === playlistId
+        ? { ...playlist, itemCount: items.length }
+        : playlist));
+      setError(null);
+      return true;
+    } catch (cause) {
+      setError(messageFrom(cause));
+      return false;
+    } finally {
+      setItemsLoading(false);
+    }
+  }, [preview, previewItemsByPlaylist, refresh]);
+
+  const clearItems = useCallback(async (playlistId: number) => {
+    setItemsLoading(true);
+    try {
+      const items = preview
+        ? []
+        : await invokeTauri<PlaylistItem[]>("clear_playlist_items", { playlistId });
+      if (preview) setPreviewItemsByPlaylist((current) => ({ ...current, [playlistId]: [] }));
+      else await refresh();
+      setSelectedItems(items);
+      setPlaylists((current) => current.map((playlist) => playlist.id === playlistId
+        ? { ...playlist, itemCount: 0 }
+        : playlist));
+      setError(null);
+      return true;
+    } catch (cause) {
+      setError(messageFrom(cause));
+      return false;
+    } finally {
+      setItemsLoading(false);
+    }
+  }, [preview, refresh]);
 
   const moveItem = useCallback(async (
     playlistId: number,
@@ -321,7 +379,9 @@ export function useLibrary() {
 
   return {
     addItems,
+    chooseAndAddFolders,
     chooseAndAddItems,
+    clearItems,
     createPlaylist,
     deletePlaylist,
     error,
@@ -333,6 +393,7 @@ export function useLibrary() {
     refresh,
     rejectedCount,
     removeItem,
+    removeItems,
     renamePlaylist,
     selectPlaylist,
     selectedItems,

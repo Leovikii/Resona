@@ -100,7 +100,10 @@ export default function DesktopLyricsWindow() {
     >
       <div aria-hidden="true" className="desktop-lyrics-background" />
       <div className="desktop-lyrics-toolbar" onPointerDown={stopControlDrag}>
-        <div className="desktop-lyrics-toolbar-group">
+        <div className="desktop-lyrics-toolbar-title" title={fileNameFromPath(playback.path)}>
+          {fileNameFromPath(playback.path) || t("playback.noTrack")}
+        </div>
+        <div className="desktop-lyrics-toolbar-group desktop-lyrics-toolbar-center">
           <DesktopLyricsButton
             ariaLabel={t("playback.previous")}
             disabled={!canSkip || desktopLyrics.busy}
@@ -130,7 +133,7 @@ export default function DesktopLyricsWindow() {
             <SkipForward size={15} />
           </DesktopLyricsButton>
         </div>
-        <div className="desktop-lyrics-toolbar-group">
+        <div className="desktop-lyrics-toolbar-group desktop-lyrics-toolbar-right">
           <DesktopLyricsButton ariaLabel={t("desktopLyrics.settings")} onClick={runSettings} title={t("desktopLyrics.settings")}>
             <Settings size={15} />
           </DesktopLyricsButton>

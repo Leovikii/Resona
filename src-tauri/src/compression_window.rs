@@ -10,10 +10,10 @@ use crate::compression::CompressionFailure;
 
 pub const LABEL: &str = "audio-compression";
 const GEOMETRY_FILE: &str = "audio-compression-window.json";
-const DEFAULT_WIDTH: f64 = 920.0;
-const DEFAULT_HEIGHT: f64 = 680.0;
-const MIN_WIDTH: u32 = 720;
-const MIN_HEIGHT: u32 = 520;
+const DEFAULT_WIDTH: f64 = 800.0;
+const DEFAULT_HEIGHT: f64 = 560.0;
+const MIN_WIDTH: u32 = 700;
+const MIN_HEIGHT: u32 = 500;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 struct WindowGeometry {

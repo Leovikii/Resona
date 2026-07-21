@@ -19,19 +19,21 @@ use tauri::webview::PageLoadEvent;
 use tauri::{Emitter, Manager, WindowEvent};
 
 use commands::{
-    add_playlist_items, append_to_queue, cancel_audio_compression, cancel_audio_compression_scan,
-    clear_audio_compression_inputs, clear_queue, create_playlist, delete_playlist,
-    desktop_lyrics_window_ready, get_audio_compression_scan_state, get_audio_compression_state,
-    get_default_playlist, get_desktop_lyrics_window_state, get_now_playing_state,
-    get_playback_state, get_track_details, hide_desktop_lyrics_window, list_playlist_items,
-    list_playlists, list_recent_play, lock_desktop_lyrics_window, move_playlist,
-    move_playlist_item, move_queue_item, next_playback, open_main_settings, open_media_context,
-    pause_playback, play_queue_item, previous_playback, refresh_output_devices,
-    remove_audio_compression_inputs, remove_playlist_item, remove_queue_item, rename_playlist,
-    replace_queue, replace_queue_and_play, resume_playback, scan_audio_compression_inputs,
-    seek_playback, select_output_device, set_playback_mode, set_playback_volume,
-    show_audio_compression_window, show_desktop_lyrics_window, start_audio_compression,
-    start_desktop_lyrics_drag, stop_playback, unlock_desktop_lyrics_window,
+    add_default_playlist_items, add_playlist_items, cancel_audio_compression,
+    cancel_audio_compression_scan, clear_audio_compression_inputs, clear_default_playlist,
+    clear_playlist_items, create_playlist, delete_playlist, desktop_lyrics_window_ready,
+    get_audio_compression_scan_state, get_audio_compression_state, get_default_playlist,
+    get_desktop_lyrics_window_state, get_now_playing_state, get_playback_state, get_track_details,
+    hide_desktop_lyrics_window, list_playlist_items, list_playlists, list_recent_play,
+    lock_desktop_lyrics_window, move_default_playlist_item, move_playlist, move_playlist_item,
+    next_playback, open_main_settings, open_media_context, pause_playback,
+    play_default_playlist_item, play_queue_item, play_user_playlist_item, previous_playback,
+    refresh_output_devices, remove_audio_compression_inputs, remove_default_playlist_items,
+    remove_playlist_item, remove_playlist_items, rename_playlist, resume_playback,
+    scan_audio_compression_inputs, seek_playback, select_output_device, set_playback_mode,
+    set_playback_volume, show_audio_compression_window, show_desktop_lyrics_window,
+    start_audio_compression, start_desktop_lyrics_drag, stop_playback,
+    unlock_desktop_lyrics_window,
 };
 use compression::CompressionService;
 use lyrics::LyricsService;
@@ -87,7 +89,7 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir)?;
             let database = PersistenceService::open(&data_dir.join("resona.sqlite3"))
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
-            restore_playback_session(&playback_for_restore, &database);
+            restore_playback_preferences(&playback_for_restore, &database);
             app.manage(Arc::new(database));
             let arguments = std::env::args().collect::<Vec<_>>();
             let current_directory = std::env::current_dir().unwrap_or_default();
@@ -101,16 +103,16 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_media_context,
             get_default_playlist,
-            replace_queue,
-            replace_queue_and_play,
-            append_to_queue,
+            add_default_playlist_items,
+            remove_default_playlist_items,
+            clear_default_playlist,
+            move_default_playlist_item,
+            play_default_playlist_item,
+            play_user_playlist_item,
             play_queue_item,
-            remove_queue_item,
-            move_queue_item,
             previous_playback,
             next_playback,
             set_playback_mode,
-            clear_queue,
             refresh_output_devices,
             select_output_device,
             pause_playback,
@@ -146,6 +148,8 @@ pub fn run() {
             list_playlist_items,
             add_playlist_items,
             remove_playlist_item,
+            remove_playlist_items,
+            clear_playlist_items,
             move_playlist_item,
             list_recent_play
         ])
@@ -213,7 +217,7 @@ pub fn run() {
         });
 }
 
-fn restore_playback_session(engine: &Arc<RodioPlaybackEngine>, database: &PersistenceService) {
+fn restore_playback_preferences(engine: &Arc<RodioPlaybackEngine>, database: &PersistenceService) {
     let session = match database.load_playback_session() {
         Ok(Some(session)) => session,
         Ok(None) => return,
@@ -224,14 +228,14 @@ fn restore_playback_session(engine: &Arc<RodioPlaybackEngine>, database: &Persis
     };
     let selected_output = session.selected_output_device_id.clone();
     let restored = RestoredPlaybackSession {
-        paths: session.queue_paths.into_iter().map(Into::into).collect(),
-        current_path: session.current_path.map(Into::into),
-        position_ms: session.position_ms,
+        paths: Vec::new(),
+        current_path: None,
+        position_ms: 0,
         volume: session.volume,
         playback_mode: PlaybackMode::from_storage_key(&session.playback_mode),
     };
     if let Err(error) = engine.restore_session(restored) {
-        eprintln!("playback session restore failed: {error}");
+        eprintln!("playback preferences restore failed: {error}");
     }
     if let Some(device_id) = selected_output {
         if let Err(error) = engine.select_output_device(Some(device_id)) {
@@ -252,9 +256,9 @@ fn persist_playback_session(app: &tauri::AppHandle) {
         }
     };
     let record = PlaybackSessionRecord {
-        queue_paths: snapshot.queue.into_iter().map(|item| item.path).collect(),
-        current_path: snapshot.path,
-        position_ms: snapshot.position_ms,
+        queue_paths: Vec::new(),
+        current_path: None,
+        position_ms: 0,
         volume: snapshot.volume,
         playback_mode: snapshot.playback_mode.storage_key().to_owned(),
         selected_output_device_id: (!snapshot.output.follow_system_default)

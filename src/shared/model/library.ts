@@ -13,6 +13,7 @@ export interface PlaylistDetails {
 }
 
 export interface DefaultPlaylistItem {
+  id: number;
   path: string;
   displayName: string;
 }
@@ -24,9 +25,25 @@ export interface DefaultPlaylistSnapshot {
   items: DefaultPlaylistItem[];
 }
 
+export interface ActivePlaylistSnapshot {
+  kind: "default" | "user";
+  playlistId: number | null;
+}
+
 export interface OpenMediaResult {
   playback: import("./playback").PlaybackSnapshot;
   defaultPlaylist: DefaultPlaylistSnapshot;
+  activePlaylist: ActivePlaylistSnapshot;
+}
+
+export interface PlaylistPlaybackResult {
+  playback: import("./playback").PlaybackSnapshot;
+  activePlaylist: ActivePlaylistSnapshot;
+}
+
+export interface DefaultPlaylistMutationResult {
+  defaultPlaylist: DefaultPlaylistSnapshot;
+  rejected: RejectedPath[];
 }
 
 export interface PlaylistItem {
@@ -46,7 +63,7 @@ export interface RecentPlayRecord {
 
 export interface RejectedPath {
   path: string;
-  reason: "missing" | "unsupported" | "unreadable" | "empty_folder";
+  reason: "missing" | "unsupported" | "unreadable" | "empty_folder" | "duplicate";
 }
 
 export interface PlaylistMutationResult extends PlaylistDetails {

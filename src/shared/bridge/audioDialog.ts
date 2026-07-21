@@ -12,7 +12,15 @@ export async function selectWavFiles(): Promise<string[]> {
   return selectFiles(true, { name: "WAV", extensions: ["wav"] });
 }
 
+export async function selectAudioFolders(): Promise<string[]> {
+  return selectFolders();
+}
+
 export async function selectCompressionFolders(): Promise<string[]> {
+  return selectFolders();
+}
+
+async function selectFolders(): Promise<string[]> {
   if (pending || !isTauriRuntime()) return [];
   pending = true;
   try {

@@ -7,6 +7,14 @@ use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::tag::Accessor;
 use serde::Serialize;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioQuality {
+    HiRes,
+    Sq,
+    Hq,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrackDetails {
@@ -24,6 +32,7 @@ pub struct TrackDetails {
     pub file_size: Option<u64>,
     pub artwork_data_url: Option<String>,
     pub metadata_warning: Option<String>,
+    pub quality: Option<AudioQuality>,
 }
 
 impl TrackDetails {
@@ -43,6 +52,7 @@ impl TrackDetails {
             file_size: std::fs::metadata(path).ok().map(|value| value.len()),
             artwork_data_url: None,
             metadata_warning: Some(warning.into()),
+            quality: None,
         }
     }
 }
@@ -67,6 +77,10 @@ pub fn read_track_details(path: &Path) -> TrackDetails {
                 base64::engine::general_purpose::STANDARD.encode(picture.data())
             )
         });
+    let sample_rate = properties.sample_rate();
+    let bit_depth = properties.bit_depth();
+    let audio_bitrate = properties.audio_bitrate();
+    let codec = codec_name(path);
     TrackDetails {
         path: path.to_string_lossy().into_owned(),
         file_name: file_name(path),
@@ -74,14 +88,33 @@ pub fn read_track_details(path: &Path) -> TrackDetails {
         artist: tag.and_then(|value| value.artist().map(|text| text.into_owned())),
         album: tag.and_then(|value| value.album().map(|text| text.into_owned())),
         duration_ms: Some(properties.duration().as_millis().min(u128::from(u64::MAX)) as u64),
-        sample_rate: properties.sample_rate(),
-        bit_depth: properties.bit_depth(),
+        sample_rate,
+        bit_depth,
         channels: properties.channels(),
-        audio_bitrate: properties.audio_bitrate(),
-        codec: codec_name(path),
+        audio_bitrate,
+        quality: classify_quality(&codec, sample_rate, bit_depth, audio_bitrate),
+        codec,
         file_size: std::fs::metadata(path).ok().map(|value| value.len()),
         artwork_data_url,
         metadata_warning: None,
+    }
+}
+
+fn classify_quality(
+    codec: &str,
+    sample_rate: Option<u32>,
+    bit_depth: Option<u8>,
+    bitrate: Option<u32>,
+) -> Option<AudioQuality> {
+    match codec {
+        "WAV" | "FLAC"
+            if sample_rate.unwrap_or_default() >= 88_200 && bit_depth.unwrap_or_default() >= 24 =>
+        {
+            Some(AudioQuality::HiRes)
+        }
+        "WAV" | "FLAC" => Some(AudioQuality::Sq),
+        "MP3" if bitrate.unwrap_or_default() >= 256 => Some(AudioQuality::Hq),
+        _ => None,
     }
 }
 
@@ -123,5 +156,22 @@ mod tests {
         let metadata = read_track_details(Path::new("missing.wav"));
         assert_eq!(metadata.file_name, "missing.wav");
         assert!(metadata.metadata_warning.is_some());
+    }
+
+    #[test]
+    fn classifies_quality_with_explicit_precedence() {
+        assert_eq!(
+            classify_quality("FLAC", Some(96_000), Some(24), None),
+            Some(AudioQuality::HiRes)
+        );
+        assert_eq!(
+            classify_quality("WAV", Some(44_100), Some(16), None),
+            Some(AudioQuality::Sq)
+        );
+        assert_eq!(
+            classify_quality("MP3", Some(44_100), None, Some(320)),
+            Some(AudioQuality::Hq)
+        );
+        assert_eq!(classify_quality("MP3", Some(44_100), None, Some(192)), None);
     }
 }

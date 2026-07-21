@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { invokeTauri, isTauriRuntime } from "../../shared/bridge/tauri";
 import {
@@ -60,7 +60,10 @@ export function useDesktopLyricsWindow() {
     }
   }, [preview, refresh]);
 
-  return { busy, error, refresh, run, snapshot };
+  return useMemo(
+    () => ({ busy, error, refresh, run, snapshot }),
+    [busy, error, refresh, run, snapshot],
+  );
 }
 
 function sameSnapshot(

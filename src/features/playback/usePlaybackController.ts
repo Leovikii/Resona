@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 
-import { selectAudioFiles } from "../../shared/bridge/audioDialog";
+import { selectAudioFiles, selectAudioFolders } from "../../shared/bridge/audioDialog";
 import { invokeTauri, isTauriRuntime } from "../../shared/bridge/tauri";
 import type {
+  ActivePlaylistSnapshot,
   DefaultPlaylistSnapshot,
+  DefaultPlaylistMutationResult,
   OpenMediaResult,
+  PlaylistItem,
+  PlaylistPlaybackResult,
 } from "../../shared/model/library";
 import {
   emptyLyricsSnapshot,
@@ -21,17 +25,11 @@ import {
 } from "../../shared/model/playback";
 
 type PlaybackCommand =
-  | "append_to_queue"
-  | "clear_queue"
-  | "move_queue_item"
   | "next_playback"
   | "pause_playback"
   | "play_queue_item"
   | "previous_playback"
   | "refresh_output_devices"
-  | "replace_queue"
-  | "replace_queue_and_play"
-  | "remove_queue_item"
   | "resume_playback"
   | "seek_playback"
   | "select_output_device"
@@ -59,6 +57,12 @@ export function usePlaybackController() {
       ? defaultFromPlayback(previewPlayback)
       : emptyDefaultPlaylist,
   );
+  const [defaultRejectedCount, setDefaultRejectedCount] = useState(0);
+  const [activePlaylist, setActivePlaylist] = useState<ActivePlaylistSnapshot | null>(
+    preview && new URLSearchParams(window.location.search).get("preview") !== "empty"
+      ? { kind: "default", playlistId: null }
+      : null,
+  );
   const [pending, setPending] = useState(false);
   const [lyrics, setLyrics] = useState<LyricsSnapshot>(() =>
     preview ? previewLyricsSnapshot() : emptyLyricsSnapshot,
@@ -67,6 +71,7 @@ export function usePlaybackController() {
   const [openSequence, setOpenSequence] = useState(0);
   const [refreshError, setRefreshError] = useState<PlaybackFailure | null>(null);
   const snapshotRef = useRef(snapshot);
+  const defaultPlaylistRef = useRef(defaultPlaylist);
   const lyricsRevisionRef = useRef(lyrics.revision);
 
   useEffect(() => {
@@ -86,8 +91,22 @@ export function usePlaybackController() {
 
   const acceptOpenResult = useCallback((result: OpenMediaResult) => {
     acceptPlaybackSnapshot(result.playback);
+    setActivePlaylist(result.activePlaylist);
+    defaultPlaylistRef.current = result.defaultPlaylist;
     setDefaultPlaylist(result.defaultPlaylist);
+    setDefaultRejectedCount(0);
     setOpenSequence((current) => current + 1);
+    setRefreshError(null);
+  }, [acceptPlaybackSnapshot]);
+
+  const acceptDefaultPlaylist = useCallback((next: DefaultPlaylistSnapshot) => {
+    defaultPlaylistRef.current = next;
+    setDefaultPlaylist(next);
+  }, []);
+
+  const acceptPlaylistPlayback = useCallback((result: PlaylistPlaybackResult) => {
+    acceptPlaybackSnapshot(result.playback);
+    setActivePlaylist(result.activePlaylist);
     setRefreshError(null);
   }, [acceptPlaybackSnapshot]);
 
@@ -104,6 +123,9 @@ export function usePlaybackController() {
         knownLyricsRevision: lyricsRevisionRef.current,
       });
       acceptPlaybackSnapshot(next.playback);
+      setActivePlaylist((current) => sameActivePlaylist(current, next.activePlaylist)
+        ? current
+        : next.activePlaylist);
       setLyrics((current) => mergeLyricsSnapshot(current, next.lyrics));
       setRefreshError(null);
     } catch (error) {
@@ -115,11 +137,11 @@ export function usePlaybackController() {
     if (!isTauriRuntime()) return;
     void Promise.all([
       refresh(),
-      invokeTauri<DefaultPlaylistSnapshot>("get_default_playlist").then(setDefaultPlaylist),
+      invokeTauri<DefaultPlaylistSnapshot>("get_default_playlist").then(acceptDefaultPlaylist),
     ]).catch((error) => setRefreshError(toPlaybackFailure(error)));
     const timer = window.setInterval(() => void refresh(), 750);
     return () => window.clearInterval(timer);
-  }, [refresh]);
+  }, [acceptDefaultPlaylist, refresh]);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
@@ -149,7 +171,6 @@ export function usePlaybackController() {
     command: PlaybackCommand,
     args?: Record<string, unknown>,
   ) => {
-    setPending(true);
     try {
       const next = preview
         ? applyPreviewCommand(snapshotRef.current, command, args)
@@ -160,8 +181,6 @@ export function usePlaybackController() {
       const failure = toPlaybackFailure(error);
       setSnapshot((current) => ({ ...current, error: failure }));
       return null;
-    } finally {
-      setPending(false);
     }
   }, [acceptPlaybackSnapshot, preview]);
 
@@ -170,7 +189,11 @@ export function usePlaybackController() {
     try {
       if (preview) {
         const playback = playPreviewPath(snapshotRef.current, path);
-        acceptOpenResult({ playback, defaultPlaylist: defaultFromPlayback(playback) });
+        acceptOpenResult({
+          playback,
+          defaultPlaylist: defaultFromPlayback(playback),
+          activePlaylist: { kind: "default", playlistId: null },
+        });
         return playback;
       }
       const result = await invokeTauri<OpenMediaResult>("open_media_context", { path });
@@ -185,16 +208,39 @@ export function usePlaybackController() {
     }
   }, [acceptOpenResult, preview]);
 
-  const openFile = useCallback(async () => {
+  const addDefaultItems = useCallback(async (paths: string[]) => {
+    if (paths.length === 0) return null;
+    setPending(true);
+    try {
+      const result = preview
+        ? appendPreviewDefault(defaultPlaylistRef.current, paths)
+        : await invokeTauri<DefaultPlaylistMutationResult>("add_default_playlist_items", { paths });
+      acceptDefaultPlaylist(result.defaultPlaylist);
+      await refresh();
+      setDefaultRejectedCount(result.rejected.length);
+      setRefreshError(null);
+      return result;
+    } catch (error) {
+      const failure = toPlaybackFailure(error);
+      setSnapshot((current) => ({ ...current, error: failure }));
+      return null;
+    } finally {
+      setPending(false);
+    }
+  }, [acceptDefaultPlaylist, preview, refresh]);
+
+  const chooseAndAddDefault = useCallback(async (kind: "files" | "folders") => {
     setDialogOpen(true);
     try {
       if (preview) {
-        const path = snapshotRef.current.path ?? previewPlayback.path;
-        if (path) await openPath(path);
+        const paths = kind === "files"
+          ? ["C:\\Music\\Imported track.flac"]
+          : ["C:\\Music\\Imported\\Folder track.flac"];
+        await addDefaultItems(paths);
         return;
       }
-      const [path] = await selectAudioFiles(false);
-      if (path) await openPath(path);
+      const paths = kind === "files" ? await selectAudioFiles(true) : await selectAudioFolders();
+      await addDefaultItems(paths);
     } catch (error) {
       setSnapshot((current) => ({
         ...current,
@@ -203,19 +249,188 @@ export function usePlaybackController() {
     } finally {
       setDialogOpen(false);
     }
-  }, [openPath, preview, previewPlayback.path]);
+  }, [addDefaultItems, preview]);
+
+  const playDefaultItem = useCallback(async (itemId: number) => {
+    setPending(true);
+    try {
+      if (preview) {
+        const current = defaultPlaylistRef.current;
+        const selectedIndex = current.items.findIndex((item) => item.id === itemId);
+        const playback = replacePreviewAndPlay(
+          snapshotRef.current,
+          current.items.map((item) => item.path),
+          Math.max(0, selectedIndex),
+        );
+        acceptOpenResult({
+          playback,
+          defaultPlaylist: { ...current, selectedIndex: Math.max(0, selectedIndex) },
+          activePlaylist: { kind: "default", playlistId: null },
+        });
+        return playback;
+      }
+      const result = await invokeTauri<OpenMediaResult>("play_default_playlist_item", {
+        itemId,
+      });
+      acceptOpenResult(result);
+      return result.playback;
+    } catch (error) {
+      const failure = toPlaybackFailure(error);
+      setSnapshot((current) => ({ ...current, error: failure }));
+      return null;
+    } finally {
+      setPending(false);
+    }
+  }, [acceptOpenResult, preview]);
+
+  const removeDefaultItems = useCallback(async (itemIds: number[]) => {
+    if (itemIds.length === 0) return null;
+    setPending(true);
+    try {
+      if (preview) {
+        const selected = new Set(itemIds);
+        const next = {
+          ...defaultPlaylistRef.current,
+          revision: defaultPlaylistRef.current.revision + 1,
+          items: defaultPlaylistRef.current.items.filter((item) => !selected.has(item.id)),
+        };
+        acceptDefaultPlaylist(next);
+        return next;
+      }
+      const next = await invokeTauri<DefaultPlaylistSnapshot>("remove_default_playlist_items", { itemIds });
+      acceptDefaultPlaylist(next);
+      await refresh();
+      return next;
+    } catch (error) {
+      setSnapshot((current) => ({ ...current, error: toPlaybackFailure(error) }));
+      return null;
+    } finally {
+      setPending(false);
+    }
+  }, [acceptDefaultPlaylist, preview, refresh]);
+
+  const clearDefaultPlaylist = useCallback(async () => {
+    setPending(true);
+    try {
+      if (preview) {
+        const next = { ...defaultPlaylistRef.current, revision: defaultPlaylistRef.current.revision + 1, items: [] };
+        acceptDefaultPlaylist(next);
+        return next;
+      }
+      const next = await invokeTauri<DefaultPlaylistSnapshot>("clear_default_playlist");
+      acceptDefaultPlaylist(next);
+      await refresh();
+      return next;
+    } catch (error) {
+      setSnapshot((current) => ({ ...current, error: toPlaybackFailure(error) }));
+      return null;
+    } finally {
+      setPending(false);
+    }
+  }, [acceptDefaultPlaylist, preview, refresh]);
+
+  const moveDefaultItem = useCallback(async (itemId: number, toPosition: number) => {
+    setPending(true);
+    try {
+      if (preview) {
+        const items = [...defaultPlaylistRef.current.items];
+        const from = items.findIndex((item) => item.id === itemId);
+        if (from < 0) return null;
+        const [moved] = items.splice(from, 1);
+        items.splice(Math.max(0, Math.min(toPosition, items.length)), 0, moved);
+        const next = { ...defaultPlaylistRef.current, revision: defaultPlaylistRef.current.revision + 1, items };
+        acceptDefaultPlaylist(next);
+        return next;
+      }
+      const next = await invokeTauri<DefaultPlaylistSnapshot>("move_default_playlist_item", { itemId, toPosition });
+      acceptDefaultPlaylist(next);
+      await refresh();
+      return next;
+    } catch (error) {
+      setSnapshot((current) => ({ ...current, error: toPlaybackFailure(error) }));
+      return null;
+    } finally {
+      setPending(false);
+    }
+  }, [acceptDefaultPlaylist, preview, refresh]);
+
+  const playUserPlaylistItem = useCallback(async (
+    playlistId: number,
+    itemId: number,
+    previewItems: PlaylistItem[] = [],
+  ) => {
+    setPending(true);
+    try {
+      if (preview) {
+        const selectedIndex = previewItems.findIndex((item) => item.id === itemId);
+        const playback = selectedIndex >= 0
+          ? replacePreviewAndPlay(
+            snapshotRef.current,
+            previewItems.map((item) => item.path),
+            selectedIndex,
+          )
+          : snapshotRef.current;
+        const result: PlaylistPlaybackResult = {
+          playback,
+          activePlaylist: { kind: "user", playlistId },
+        };
+        acceptPlaylistPlayback(result);
+        return playback;
+      }
+      const result = await invokeTauri<PlaylistPlaybackResult>("play_user_playlist_item", {
+        playlistId,
+        itemId,
+      });
+      acceptPlaylistPlayback(result);
+      return result.playback;
+    } catch (error) {
+      const failure = toPlaybackFailure(error);
+      setSnapshot((current) => ({ ...current, error: failure }));
+      return null;
+    } finally {
+      setPending(false);
+    }
+  }, [acceptPlaylistPlayback, preview]);
+
+  const reloadDefaultPlaylist = useCallback(async () => {
+    if (preview) return;
+    try {
+      acceptDefaultPlaylist(await invokeTauri<DefaultPlaylistSnapshot>("get_default_playlist"));
+    } catch (error) {
+      setRefreshError(toPlaybackFailure(error));
+    }
+  }, [acceptDefaultPlaylist, preview]);
+
+  const chooseAndAddDefaultFiles = useCallback(
+    () => chooseAndAddDefault("files"),
+    [chooseAndAddDefault],
+  );
+  const chooseAndAddDefaultFolders = useCallback(
+    () => chooseAndAddDefault("folders"),
+    [chooseAndAddDefault],
+  );
 
   return {
     busy: pending || dialogOpen,
+    activePlaylist,
+    addDefaultItems,
+    chooseAndAddDefaultFiles,
+    chooseAndAddDefaultFolders,
     currentItem,
     defaultPlaylist,
+    defaultRejectedCount,
     dialogOpen,
     lyrics,
-    openFile,
     openPath,
     openSequence,
     refresh,
     refreshError,
+    playDefaultItem,
+    playUserPlaylistItem,
+    removeDefaultItems,
+    clearDefaultPlaylist,
+    moveDefaultItem,
+    reloadDefaultPlaylist,
     run,
     selectedPath,
     snapshot,
@@ -225,6 +440,7 @@ export function usePlaybackController() {
 interface NowPlayingSnapshot {
   playback: PlaybackSnapshot;
   lyrics: LyricsSnapshot;
+  activePlaylist: ActivePlaylistSnapshot | null;
 }
 
 export function toPlaybackFailure(error: unknown): PlaybackFailure {
@@ -245,31 +461,6 @@ function applyPreviewCommand(
   if (command === "pause_playback") return { ...snapshot, status: "paused", error: null };
   if (command === "resume_playback") return { ...snapshot, status: "playing", error: null };
   if (command === "stop_playback") return { ...snapshot, status: "stopped", positionMs: 0 };
-  if (command === "clear_queue") {
-    return { ...emptySnapshot, output: snapshot.output, volume: snapshot.volume };
-  }
-  if (command === "append_to_queue") {
-    const paths = stringPaths(args?.paths);
-    return insertPreviewPaths(snapshot, paths, snapshot.queue.length);
-  }
-  if (command === "replace_queue" || command === "replace_queue_and_play") {
-    const paths = stringPaths(args?.paths);
-    const replaced = replacePreviewPaths(snapshot, paths);
-    if (command === "replace_queue" || replaced.queue.length === 0) return replaced;
-    const selectedIndex = clamp(Number(args?.selectedIndex ?? 0), 0, replaced.queue.length - 1);
-    const selected = replaced.queue[selectedIndex];
-    return {
-      ...replaced,
-      currentItemId: selected.id,
-      path: selected.path,
-      durationMs: selected.durationMs,
-      status: "playing",
-      queue: replaced.queue.map((candidate, index) => ({
-        ...candidate,
-        status: index === selectedIndex ? "playing" as const : "pending" as const,
-      })),
-    };
-  }
   if (command === "seek_playback") {
     return { ...snapshot, positionMs: Number(args?.positionMs ?? 0) };
   }
@@ -316,20 +507,29 @@ function applyPreviewCommand(
       })),
     };
   }
-  if (command === "remove_queue_item") {
-    const id = Number(args?.id);
-    return { ...snapshot, queue: snapshot.queue.filter((candidate) => candidate.id !== id) };
-  }
-  if (command === "move_queue_item") {
-    const id = Number(args?.id);
-    const queue = [...snapshot.queue];
-    const fromIndex = queue.findIndex((candidate) => candidate.id === id);
-    if (fromIndex < 0) return snapshot;
-    const [moved] = queue.splice(fromIndex, 1);
-    queue.splice(clamp(Number(args?.toIndex), 0, queue.length), 0, moved);
-    return { ...snapshot, queue };
-  }
   return snapshot;
+}
+
+function replacePreviewAndPlay(
+  snapshot: PlaybackSnapshot,
+  paths: string[],
+  selectedIndex: number,
+) {
+  const replaced = replacePreviewPaths(snapshot, paths);
+  if (replaced.queue.length === 0) return replaced;
+  const index = clamp(selectedIndex, 0, replaced.queue.length - 1);
+  const selected = replaced.queue[index];
+  return {
+    ...replaced,
+    currentItemId: selected.id,
+    path: selected.path,
+    durationMs: selected.durationMs,
+    status: "playing" as const,
+    queue: replaced.queue.map((candidate, candidateIndex) => ({
+      ...candidate,
+      status: candidateIndex === index ? "playing" as const : "pending" as const,
+    })),
+  };
 }
 
 function playPreviewPath(snapshot: PlaybackSnapshot, path: string) {
@@ -346,10 +546,46 @@ function defaultFromPlayback(snapshot: PlaybackSnapshot): DefaultPlaylistSnapsho
     revision: snapshot.queue.length > 0 ? 1 : 0,
     sourceDirectory: snapshot.queue[0]?.path.replace(/[\\/][^\\/]+$/, "") ?? null,
     selectedIndex: selectedIndex !== -1 ? selectedIndex : null,
-    items: snapshot.queue.map((candidate) => ({
+    items: snapshot.queue.map((candidate, index) => ({
+      id: index + 1,
       path: candidate.path,
       displayName: candidate.displayName,
     })),
+  };
+}
+
+function appendPreviewDefault(
+  current: DefaultPlaylistSnapshot,
+  paths: string[],
+): DefaultPlaylistMutationResult {
+  const known = new Set(current.items.map((item) => item.path));
+  const accepted: string[] = [];
+  const rejected: DefaultPlaylistMutationResult["rejected"] = [];
+  for (const path of paths) {
+    if (known.has(path)) {
+      rejected.push({ path, reason: "duplicate" });
+    } else {
+      known.add(path);
+      accepted.push(path);
+    }
+  }
+  const items = [
+    ...current.items,
+    ...accepted.map((path, offset) => ({
+      id: Math.max(0, ...current.items.map((item) => item.id)) + offset + 1,
+      path,
+      displayName: path.split(/[\\/]/).pop() ?? path,
+    })),
+  ];
+  const directories = new Set(items.map((item) => item.path.replace(/[\\/][^\\/]+$/, "")));
+  return {
+    defaultPlaylist: {
+      ...current,
+      revision: accepted.length > 0 ? Math.max(1, current.revision + 1) : current.revision,
+      sourceDirectory: directories.size === 1 ? [...directories][0] : null,
+      items,
+    },
+    rejected,
   };
 }
 
@@ -375,12 +611,6 @@ function replacePreviewPaths(snapshot: PlaybackSnapshot, paths: string[]): Playb
     0,
   );
   return { ...next, status: paths.length > 0 ? "stopped" : "idle" };
-}
-
-function stringPaths(value: unknown) {
-  return Array.isArray(value)
-    ? value.filter((path): path is string => typeof path === "string")
-    : [];
 }
 
 function clamp(value: number, minimum: number, maximum: number) {
@@ -426,6 +656,13 @@ function sameQueue(left: PlaybackSnapshot["queue"], right: PlaybackSnapshot["que
 
 function sameFailure(left: PlaybackFailure | null, right: PlaybackFailure | null) {
   return left === right || (left?.code === right?.code && left?.message === right?.message);
+}
+
+function sameActivePlaylist(
+  left: ActivePlaylistSnapshot | null,
+  right: ActivePlaylistSnapshot | null,
+) {
+  return left?.kind === right?.kind && left?.playlistId === right?.playlistId;
 }
 
 function sameOutput(left: PlaybackSnapshot["output"], right: PlaybackSnapshot["output"]) {

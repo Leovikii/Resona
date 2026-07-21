@@ -11,7 +11,10 @@ use crate::compression::{
 };
 use crate::compression_window;
 use crate::lyrics::{LyricsService, LyricsSnapshot};
-use crate::media_import::{DefaultPlaylistSnapshot, MediaImportService, OpenMediaResult};
+use crate::media_import::{
+    ActivePlaylistSnapshot, DefaultPlaylistMutationResult, DefaultPlaylistSnapshot,
+    MediaImportService, OpenMediaResult, PlaylistPlaybackResult,
+};
 use crate::metadata::{normalized_path, read_track_details, TrackDetails};
 use crate::persistence::{
     PersistenceFailure, PersistenceService, PlaylistItemRecord, PlaylistSummary, RecentPlayRecord,
@@ -117,6 +120,7 @@ pub async fn get_track_details(path: String) -> TrackDetails {
 pub struct NowPlayingSnapshot {
     pub playback: PlaybackSnapshot,
     pub lyrics: LyricsSnapshot,
+    pub active_playlist: Option<ActivePlaylistSnapshot>,
 }
 
 async fn run_engine_operation<F>(
@@ -163,46 +167,106 @@ pub async fn get_default_playlist(
 }
 
 #[tauri::command]
-pub async fn replace_queue(
+pub async fn add_default_playlist_items(
     paths: Vec<String>,
-    engine: State<'_, ManagedPlaybackEngine>,
-) -> Result<PlaybackSnapshot, PlaybackFailure> {
-    let engine = Arc::clone(engine.inner());
-    run_engine_operation(engine, move |engine| {
-        engine.replace_queue(paths.into_iter().map(PathBuf::from).collect())
+    media_import: State<'_, ManagedMediaImportService>,
+) -> Result<DefaultPlaylistMutationResult, PlaybackFailure> {
+    let media_import = Arc::clone(media_import.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        media_import.add_paths(paths.into_iter().map(PathBuf::from).collect())
     })
     .await
+    .map_err(|error| {
+        PlaybackFailure::task_failed(format!("default playlist task failed: {error}"))
+    })?
 }
 
 #[tauri::command]
-pub async fn replace_queue_and_play(
-    paths: Vec<String>,
+pub async fn remove_default_playlist_items(
+    item_ids: Vec<u64>,
+    media_import: State<'_, ManagedMediaImportService>,
+) -> Result<DefaultPlaylistSnapshot, PlaybackFailure> {
+    let media_import = Arc::clone(media_import.inner());
+    tauri::async_runtime::spawn_blocking(move || media_import.remove_items(&item_ids))
+        .await
+        .map_err(|error| {
+            PlaybackFailure::task_failed(format!("default playlist task failed: {error}"))
+        })?
+}
+
+#[tauri::command]
+pub async fn clear_default_playlist(
+    media_import: State<'_, ManagedMediaImportService>,
+) -> Result<DefaultPlaylistSnapshot, PlaybackFailure> {
+    let media_import = Arc::clone(media_import.inner());
+    tauri::async_runtime::spawn_blocking(move || media_import.clear_default_playlist())
+        .await
+        .map_err(|error| {
+            PlaybackFailure::task_failed(format!("default playlist task failed: {error}"))
+        })?
+}
+
+#[tauri::command]
+pub async fn move_default_playlist_item(
+    item_id: u64,
+    to_position: usize,
+    media_import: State<'_, ManagedMediaImportService>,
+) -> Result<DefaultPlaylistSnapshot, PlaybackFailure> {
+    let media_import = Arc::clone(media_import.inner());
+    tauri::async_runtime::spawn_blocking(move || media_import.move_item(item_id, to_position))
+        .await
+        .map_err(|error| {
+            PlaybackFailure::task_failed(format!("default playlist task failed: {error}"))
+        })?
+}
+
+#[tauri::command]
+pub async fn play_default_playlist_item(
     selected_index: usize,
-    engine: State<'_, ManagedPlaybackEngine>,
+    media_import: State<'_, ManagedMediaImportService>,
     persistence: State<'_, ManagedPersistence>,
-) -> Result<PlaybackSnapshot, PlaybackFailure> {
-    let engine = Arc::clone(engine.inner());
-    let snapshot = run_engine_operation(engine, move |engine| {
-        engine.replace_queue_and_play(
-            paths.into_iter().map(PathBuf::from).collect(),
+) -> Result<OpenMediaResult, PlaybackFailure> {
+    let media_import = Arc::clone(media_import.inner());
+    let result =
+        tauri::async_runtime::spawn_blocking(move || media_import.play_item(selected_index))
+            .await
+            .map_err(|error| {
+                PlaybackFailure::task_failed(format!("default playlist task failed: {error}"))
+            })??;
+    record_recent(persistence.inner(), &result.playback).await;
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn play_user_playlist_item(
+    playlist_id: i64,
+    item_id: i64,
+    media_import: State<'_, ManagedMediaImportService>,
+    persistence: State<'_, ManagedPersistence>,
+) -> Result<PlaylistPlaybackResult, PlaybackFailure> {
+    let media_import = Arc::clone(media_import.inner());
+    let database = Arc::clone(persistence.inner());
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let items = database
+            .list_playlist_items(playlist_id)
+            .map_err(|error| PlaybackFailure::task_failed(error.to_string()))?;
+        let selected_index = items
+            .iter()
+            .position(|item| item.id == item_id)
+            .ok_or_else(|| PlaybackFailure::task_failed("playlist item not found".to_owned()))?;
+        media_import.play_user_playlist(
+            playlist_id,
+            items
+                .into_iter()
+                .map(|item| PathBuf::from(item.path))
+                .collect(),
             selected_index,
         )
     })
-    .await?;
-    record_recent(persistence.inner(), &snapshot).await;
-    Ok(snapshot)
-}
-
-#[tauri::command]
-pub async fn append_to_queue(
-    paths: Vec<String>,
-    engine: State<'_, ManagedPlaybackEngine>,
-) -> Result<PlaybackSnapshot, PlaybackFailure> {
-    let engine = Arc::clone(engine.inner());
-    run_engine_operation(engine, move |engine| {
-        engine.append_queue(paths.into_iter().map(PathBuf::from).collect())
-    })
     .await
+    .map_err(|error| PlaybackFailure::task_failed(format!("playlist task failed: {error}")))??;
+    record_recent(persistence.inner(), &result.playback).await;
+    Ok(result)
 }
 
 #[tauri::command]
@@ -215,25 +279,6 @@ pub async fn play_queue_item(
     let snapshot = run_engine_operation(engine, move |engine| engine.play_queue_item(id)).await?;
     record_recent(persistence.inner(), &snapshot).await;
     Ok(snapshot)
-}
-
-#[tauri::command]
-pub async fn remove_queue_item(
-    id: u64,
-    engine: State<'_, ManagedPlaybackEngine>,
-) -> Result<PlaybackSnapshot, PlaybackFailure> {
-    let engine = Arc::clone(engine.inner());
-    run_engine_operation(engine, move |engine| engine.remove_queue_item(id)).await
-}
-
-#[tauri::command]
-pub async fn move_queue_item(
-    id: u64,
-    to_index: usize,
-    engine: State<'_, ManagedPlaybackEngine>,
-) -> Result<PlaybackSnapshot, PlaybackFailure> {
-    let engine = Arc::clone(engine.inner());
-    run_engine_operation(engine, move |engine| engine.move_queue_item(id, to_index)).await
 }
 
 #[tauri::command]
@@ -265,14 +310,6 @@ pub async fn previous_playback(
     let snapshot = run_engine_operation(engine, PlaybackEngine::previous).await?;
     record_recent(persistence.inner(), &snapshot).await;
     Ok(snapshot)
-}
-
-#[tauri::command]
-pub async fn clear_queue(
-    engine: State<'_, ManagedPlaybackEngine>,
-) -> Result<PlaybackSnapshot, PlaybackFailure> {
-    let engine = Arc::clone(engine.inner());
-    run_engine_operation(engine, PlaybackEngine::clear_queue).await
 }
 
 #[tauri::command]
@@ -347,13 +384,20 @@ pub async fn get_now_playing_state(
     known_lyrics_revision: Option<u64>,
     engine: State<'_, ManagedPlaybackEngine>,
     lyrics: State<'_, ManagedLyricsService>,
+    media_import: State<'_, ManagedMediaImportService>,
 ) -> Result<NowPlayingSnapshot, PlaybackFailure> {
     let engine = Arc::clone(engine.inner());
     let lyrics = Arc::clone(lyrics.inner());
+    let media_import = Arc::clone(media_import.inner());
     tauri::async_runtime::spawn_blocking(move || {
         let playback = engine.snapshot().map_err(|error| error.failure())?;
         let lyrics = lyrics.snapshot(&playback, known_lyrics_revision);
-        Ok(NowPlayingSnapshot { playback, lyrics })
+        let active_playlist = media_import.active_playlist()?;
+        Ok(NowPlayingSnapshot {
+            playback,
+            lyrics,
+            active_playlist,
+        })
     })
     .await
     .map_err(|error| PlaybackFailure::task_failed(format!("now playing task failed: {error}")))?
@@ -513,11 +557,24 @@ pub async fn rename_playlist(
 pub async fn delete_playlist(
     id: i64,
     persistence: State<'_, ManagedPersistence>,
+    media_import: State<'_, ManagedMediaImportService>,
 ) -> Result<(), PersistenceFailure> {
-    run_persistence_operation(Arc::clone(persistence.inner()), move |service| {
-        service.delete_playlist(id)
+    let database = Arc::clone(persistence.inner());
+    let media_import = Arc::clone(media_import.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        database
+            .delete_playlist(id)
+            .map_err(|error| error.failure())?;
+        media_import
+            .detach_deleted_user_playlist(id)
+            .map_err(playlist_sync_failure)?;
+        Ok(())
     })
     .await
+    .map_err(|error| PersistenceFailure {
+        code: "playlist_task_failed".to_owned(),
+        message: format!("playlist task failed: {error}"),
+    })?
 }
 
 #[tauri::command]
@@ -549,16 +606,35 @@ pub async fn add_playlist_items(
     paths: Vec<String>,
     position: Option<i64>,
     persistence: State<'_, ManagedPersistence>,
+    media_import: State<'_, ManagedMediaImportService>,
 ) -> Result<PlaylistMutationResult, PersistenceFailure> {
-    run_persistence_operation(Arc::clone(persistence.inner()), move |service| {
-        crate::playlists::add_playlist_items(
-            service,
+    let database = Arc::clone(persistence.inner());
+    let media_import = Arc::clone(media_import.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let previous = database
+            .list_playlist_items(playlist_id)
+            .map_err(|error| error.failure())?;
+        let result = crate::playlists::add_playlist_items(
+            &database,
             playlist_id,
             paths.into_iter().map(PathBuf::from).collect(),
             position,
         )
+        .map_err(|error| error.failure())?;
+        media_import
+            .sync_user_insert(
+                playlist_id,
+                &playlist_paths(&previous),
+                &playlist_paths(&result.items),
+            )
+            .map_err(playlist_sync_failure)?;
+        Ok(result)
     })
     .await
+    .map_err(|error| PersistenceFailure {
+        code: "playlist_task_failed".to_owned(),
+        message: format!("playlist task failed: {error}"),
+    })?
 }
 
 #[tauri::command]
@@ -566,11 +642,94 @@ pub async fn remove_playlist_item(
     playlist_id: i64,
     item_id: i64,
     persistence: State<'_, ManagedPersistence>,
+    media_import: State<'_, ManagedMediaImportService>,
 ) -> Result<Vec<PlaylistItemRecord>, PersistenceFailure> {
-    run_persistence_operation(Arc::clone(persistence.inner()), move |service| {
-        service.remove_playlist_item(playlist_id, item_id)
+    let database = Arc::clone(persistence.inner());
+    let media_import = Arc::clone(media_import.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let previous = database
+            .list_playlist_items(playlist_id)
+            .map_err(|error| error.failure())?;
+        let items = database
+            .remove_playlist_item(playlist_id, item_id)
+            .map_err(|error| error.failure())?;
+        media_import
+            .sync_user_remove(
+                playlist_id,
+                &playlist_paths(&previous),
+                &playlist_paths(&items),
+            )
+            .map_err(playlist_sync_failure)?;
+        Ok(items)
     })
     .await
+    .map_err(|error| PersistenceFailure {
+        code: "playlist_task_failed".to_owned(),
+        message: format!("playlist task failed: {error}"),
+    })?
+}
+
+#[tauri::command]
+pub async fn remove_playlist_items(
+    playlist_id: i64,
+    item_ids: Vec<i64>,
+    persistence: State<'_, ManagedPersistence>,
+    media_import: State<'_, ManagedMediaImportService>,
+) -> Result<Vec<PlaylistItemRecord>, PersistenceFailure> {
+    let database = Arc::clone(persistence.inner());
+    let media_import = Arc::clone(media_import.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let previous = database
+            .list_playlist_items(playlist_id)
+            .map_err(|error| error.failure())?;
+        let items = database
+            .remove_playlist_items(playlist_id, &item_ids)
+            .map_err(|error| error.failure())?;
+        media_import
+            .sync_user_remove_many(
+                playlist_id,
+                &playlist_paths(&previous),
+                &playlist_paths(&items),
+            )
+            .map_err(playlist_sync_failure)?;
+        Ok(items)
+    })
+    .await
+    .map_err(|error| PersistenceFailure {
+        code: "playlist_task_failed".to_owned(),
+        message: format!("playlist task failed: {error}"),
+    })?
+}
+
+#[tauri::command]
+pub async fn clear_playlist_items(
+    playlist_id: i64,
+    persistence: State<'_, ManagedPersistence>,
+    media_import: State<'_, ManagedMediaImportService>,
+) -> Result<Vec<PlaylistItemRecord>, PersistenceFailure> {
+    let database = Arc::clone(persistence.inner());
+    let media_import = Arc::clone(media_import.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let previous = database
+            .list_playlist_items(playlist_id)
+            .map_err(|error| error.failure())?;
+        let items = database
+            .clear_playlist_items(playlist_id)
+            .map_err(|error| error.failure())?;
+        media_import
+            .sync_user_remove_many(
+                playlist_id,
+                &playlist_paths(&previous),
+                &playlist_paths(&items),
+            )
+            .map_err(playlist_sync_failure)?;
+        Ok(items)
+    })
+    .await
+    .map_err(|error| PersistenceFailure {
+        code: "playlist_task_failed".to_owned(),
+        message: format!("playlist task failed: {error}"),
+    })?
 }
 
 #[tauri::command]
@@ -579,11 +738,51 @@ pub async fn move_playlist_item(
     item_id: i64,
     to_position: i64,
     persistence: State<'_, ManagedPersistence>,
+    media_import: State<'_, ManagedMediaImportService>,
 ) -> Result<Vec<PlaylistItemRecord>, PersistenceFailure> {
-    run_persistence_operation(Arc::clone(persistence.inner()), move |service| {
-        service.move_playlist_item(playlist_id, item_id, to_position)
+    let database = Arc::clone(persistence.inner());
+    let media_import = Arc::clone(media_import.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let previous = database
+            .list_playlist_items(playlist_id)
+            .map_err(|error| error.failure())?;
+        let from_position = previous
+            .iter()
+            .position(|item| item.id == item_id)
+            .ok_or_else(|| crate::persistence::PersistenceError::PlaylistItemNotFound.failure())?;
+        let items = database
+            .move_playlist_item(playlist_id, item_id, to_position)
+            .map_err(|error| error.failure())?;
+        let next_position = items
+            .iter()
+            .position(|item| item.id == item_id)
+            .ok_or_else(|| crate::persistence::PersistenceError::PlaylistItemNotFound.failure())?;
+        media_import
+            .sync_user_move(
+                playlist_id,
+                &playlist_paths(&previous),
+                from_position,
+                next_position,
+            )
+            .map_err(playlist_sync_failure)?;
+        Ok(items)
     })
     .await
+    .map_err(|error| PersistenceFailure {
+        code: "playlist_task_failed".to_owned(),
+        message: format!("playlist task failed: {error}"),
+    })?
+}
+
+fn playlist_paths(items: &[PlaylistItemRecord]) -> Vec<PathBuf> {
+    items.iter().map(|item| PathBuf::from(&item.path)).collect()
+}
+
+fn playlist_sync_failure(failure: PlaybackFailure) -> PersistenceFailure {
+    PersistenceFailure {
+        code: "playback_sequence_sync_failed".to_owned(),
+        message: failure.message,
+    }
 }
 
 #[tauri::command]

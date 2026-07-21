@@ -13,7 +13,8 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use rodio::source::Done;
-use rodio::{Decoder, Player, Source};
+use rodio::source::SeekError;
+use rodio::{ChannelCount, Decoder, Player, SampleRate, Source};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -222,8 +223,12 @@ impl PlaybackError {
 }
 
 pub trait PlaybackEngine {
-    fn replace_queue(&self, paths: Vec<PathBuf>) -> Result<PlaybackSnapshot, PlaybackError>;
     fn append_queue(&self, paths: Vec<PathBuf>) -> Result<PlaybackSnapshot, PlaybackError>;
+    fn insert_queue(
+        &self,
+        paths: Vec<PathBuf>,
+        at_index: usize,
+    ) -> Result<PlaybackSnapshot, PlaybackError>;
     fn replace_queue_and_play(
         &self,
         paths: Vec<PathBuf>,
@@ -235,7 +240,6 @@ pub trait PlaybackEngine {
     fn previous(&self) -> Result<PlaybackSnapshot, PlaybackError>;
     fn next(&self) -> Result<PlaybackSnapshot, PlaybackError>;
     fn set_playback_mode(&self, mode: PlaybackMode) -> Result<PlaybackSnapshot, PlaybackError>;
-    fn clear_queue(&self) -> Result<PlaybackSnapshot, PlaybackError>;
     fn refresh_output_devices(&self) -> Result<PlaybackSnapshot, PlaybackError>;
     fn select_output_device(
         &self,
@@ -257,12 +261,13 @@ type CommandResult = Result<PlaybackSnapshot, PlaybackError>;
 type ResponseSender = Sender<CommandResult>;
 
 enum AudioCommand {
-    ReplaceQueue {
+    AppendQueue {
         paths: Vec<PathBuf>,
         response: ResponseSender,
     },
-    AppendQueue {
+    InsertQueue {
         paths: Vec<PathBuf>,
+        at_index: usize,
         response: ResponseSender,
     },
     ReplaceQueueAndPlay {
@@ -289,7 +294,6 @@ enum AudioCommand {
         mode: PlaybackMode,
         response: ResponseSender,
     },
-    ClearQueue(ResponseSender),
     RefreshOutputDevices(ResponseSender),
     SelectOutputDevice {
         device_id: Option<String>,
@@ -358,12 +362,16 @@ impl Default for RodioPlaybackEngine {
 }
 
 impl PlaybackEngine for RodioPlaybackEngine {
-    fn replace_queue(&self, paths: Vec<PathBuf>) -> CommandResult {
-        self.request(|response| AudioCommand::ReplaceQueue { paths, response })
-    }
-
     fn append_queue(&self, paths: Vec<PathBuf>) -> CommandResult {
         self.request(|response| AudioCommand::AppendQueue { paths, response })
+    }
+
+    fn insert_queue(&self, paths: Vec<PathBuf>, at_index: usize) -> CommandResult {
+        self.request(|response| AudioCommand::InsertQueue {
+            paths,
+            at_index,
+            response,
+        })
     }
 
     fn replace_queue_and_play(&self, paths: Vec<PathBuf>, selected_index: usize) -> CommandResult {
@@ -400,10 +408,6 @@ impl PlaybackEngine for RodioPlaybackEngine {
 
     fn set_playback_mode(&self, mode: PlaybackMode) -> CommandResult {
         self.request(|response| AudioCommand::SetPlaybackMode { mode, response })
-    }
-
-    fn clear_queue(&self) -> CommandResult {
-        self.request(AudioCommand::ClearQueue)
     }
 
     fn refresh_output_devices(&self) -> CommandResult {
@@ -467,10 +471,102 @@ struct AudioActor {
     queue: Vec<QueueItem>,
     next_queue_id: u64,
     current_index: Option<usize>,
-    source_signals: VecDeque<(usize, Arc<AtomicUsize>)>,
+    source_signals: VecDeque<QueuedSourceSignal>,
     last_device_poll: Instant,
     recovery: Option<OutputRecovery>,
     restored_position_ms: Option<u64>,
+}
+
+const SOURCE_QUEUED: usize = 0;
+const SOURCE_STARTED: usize = 1;
+const SOURCE_CANCELLED: usize = 2;
+
+struct QueuedSourceSignal {
+    index: usize,
+    done: Arc<AtomicUsize>,
+    state: Arc<AtomicUsize>,
+}
+
+impl QueuedSourceSignal {
+    fn cancel_if_queued(&self) -> bool {
+        self.state
+            .compare_exchange(
+                SOURCE_QUEUED,
+                SOURCE_CANCELLED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+    }
+}
+
+struct CancelableSource<S> {
+    input: S,
+    state: Arc<AtomicUsize>,
+}
+
+impl<S> Iterator for CancelableSource<S>
+where
+    S: Source,
+{
+    type Item = S::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let state = self.state.load(Ordering::Acquire);
+        if state == SOURCE_CANCELLED {
+            return None;
+        }
+        if state == SOURCE_QUEUED {
+            let _ = self.state.compare_exchange(
+                SOURCE_QUEUED,
+                SOURCE_STARTED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            );
+        }
+        if self.state.load(Ordering::Acquire) == SOURCE_CANCELLED {
+            None
+        } else {
+            self.input.next()
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        if self.state.load(Ordering::Acquire) == SOURCE_CANCELLED {
+            (0, Some(0))
+        } else {
+            self.input.size_hint()
+        }
+    }
+}
+
+impl<S> Source for CancelableSource<S>
+where
+    S: Source,
+{
+    fn current_span_len(&self) -> Option<usize> {
+        if self.state.load(Ordering::Acquire) == SOURCE_CANCELLED {
+            Some(0)
+        } else {
+            self.input.current_span_len()
+        }
+    }
+
+    fn channels(&self) -> ChannelCount {
+        self.input.channels()
+    }
+
+    fn sample_rate(&self) -> SampleRate {
+        self.input.sample_rate()
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        self.input.total_duration()
+    }
+
+    fn try_seek(&mut self, position: Duration) -> Result<(), SeekError> {
+        self.input.try_seek(position)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -558,12 +654,14 @@ impl AudioActor {
 
     fn handle(&mut self, command: AudioCommand) {
         let (result, response, replace_state_on_error) = match command {
-            AudioCommand::ReplaceQueue { paths, response } => {
-                (self.replace_queue(paths), response, false)
-            }
             AudioCommand::AppendQueue { paths, response } => {
                 (self.append_queue(paths), response, false)
             }
+            AudioCommand::InsertQueue {
+                paths,
+                at_index,
+                response,
+            } => (self.insert_queue(paths, at_index), response, false),
             AudioCommand::ReplaceQueueAndPlay {
                 paths,
                 selected_index,
@@ -589,7 +687,6 @@ impl AudioActor {
             AudioCommand::SetPlaybackMode { mode, response } => {
                 (self.set_playback_mode(mode), response, false)
             }
-            AudioCommand::ClearQueue(response) => (self.clear_queue(), response, false),
             AudioCommand::RefreshOutputDevices(response) => {
                 (self.refresh_output_devices(), response, false)
             }
@@ -693,6 +790,41 @@ impl AudioActor {
         }
         if self.current_index.is_some() && self.player.is_some() {
             self.preload_next()?;
+        }
+        self.sync_snapshot_queue();
+        Ok(self.snapshot.clone())
+    }
+
+    fn insert_queue(&mut self, paths: Vec<PathBuf>, at_index: usize) -> CommandResult {
+        if paths.is_empty() {
+            return Ok(self.snapshot.clone());
+        }
+        let insertion = at_index.min(self.queue.len());
+        if insertion == self.queue.len() {
+            return self.append_queue(paths);
+        }
+        let added = paths
+            .into_iter()
+            .map(|path| {
+                let id = self.next_queue_id;
+                self.next_queue_id = self.next_queue_id.saturating_add(1);
+                QueueItem::new(id, path)
+            })
+            .collect::<Vec<_>>();
+        let added_count = added.len();
+        self.queue.splice(insertion..insertion, added);
+        if let Some(current) = self.current_index {
+            self.current_index = Some(if insertion <= current {
+                current + added_count
+            } else {
+                current
+            });
+            if matches!(
+                self.snapshot.status,
+                PlaybackStatus::Playing | PlaybackStatus::Paused
+            ) {
+                self.rebuild_current_player()?;
+            }
         }
         self.sync_snapshot_queue();
         Ok(self.snapshot.clone())
@@ -811,10 +943,13 @@ impl AudioActor {
     }
 
     fn set_playback_mode(&mut self, mode: PlaybackMode) -> CommandResult {
-        self.snapshot.playback_mode = mode;
-        if self.player.is_some() {
-            self.rebuild_current_player()?;
+        self.refresh_playback_state();
+        if self.snapshot.playback_mode == mode {
+            return Ok(self.snapshot.clone());
         }
+        self.snapshot.playback_mode = mode;
+        self.cancel_preloaded_sources();
+        self.preload_next()?;
         Ok(self.snapshot.clone())
     }
 
@@ -834,20 +969,6 @@ impl AudioActor {
             .map(|(index, _)| index)
             .unwrap_or(current);
         self.start_from_index(previous)
-    }
-
-    fn clear_queue(&mut self) -> CommandResult {
-        self.stop_player();
-        self.queue.clear();
-        self.current_index = None;
-        self.snapshot = PlaybackSnapshot {
-            status: PlaybackStatus::Idle,
-            volume: self.snapshot.volume,
-            playback_mode: self.snapshot.playback_mode,
-            output: self.output.snapshot(),
-            ..PlaybackSnapshot::default()
-        };
-        Ok(self.snapshot.clone())
     }
 
     fn refresh_output_devices(&mut self) -> CommandResult {
@@ -918,7 +1039,7 @@ impl AudioActor {
                 .ok_or(PlaybackError::EngineUnavailable)?;
             let player = Player::connect_new(output.mixer());
             player.set_volume(self.snapshot.volume);
-            let signal = append_marked(&player, decoder);
+            let signal = append_marked(&player, decoder, candidate);
             player.play();
             let bounded_position =
                 duration_ms.map_or(position_ms, |duration| position_ms.min(duration));
@@ -928,7 +1049,7 @@ impl AudioActor {
                     .map_err(|error| PlaybackError::Seek(error.to_string()))?;
             }
             self.player = Some(player);
-            self.source_signals.push_back((candidate, signal));
+            self.source_signals.push_back(signal);
             self.current_index = Some(candidate);
             self.queue[candidate].status = QueueItemStatus::Playing;
             self.queue[candidate].error = None;
@@ -1083,7 +1204,7 @@ impl AudioActor {
         let last_loaded = self
             .source_signals
             .back()
-            .map(|(index, _)| *index)
+            .map(|source| source.index)
             .or(self.current_index)
             .unwrap_or(0);
         let mut next = self.next_valid_index(last_loaded.saturating_add(1));
@@ -1108,8 +1229,8 @@ impl AudioActor {
             };
             self.queue[index].duration_ms = duration_ms;
             let player = self.player.as_ref().ok_or(PlaybackError::NothingLoaded)?;
-            let signal = append_marked(player, decoder);
-            self.source_signals.push_back((index, signal));
+            let signal = append_marked(player, decoder, index);
+            self.source_signals.push_back(signal);
             return Ok(());
         }
         Ok(())
@@ -1133,6 +1254,19 @@ impl AudioActor {
     fn sync_snapshot_queue(&mut self) {
         self.snapshot.queue = self.queue.iter().map(QueueItem::snapshot).collect();
         self.sync_current_snapshot();
+    }
+
+    fn cancel_preloaded_sources(&mut self) {
+        let mut retained = VecDeque::with_capacity(self.source_signals.len());
+        if let Some(current) = self.source_signals.pop_front() {
+            retained.push_back(current);
+        }
+        while let Some(source) = self.source_signals.pop_front() {
+            if !source.cancel_if_queued() {
+                retained.push_back(source);
+            }
+        }
+        self.source_signals = retained;
     }
 
     fn rebuild_current_player(&mut self) -> Result<(), PlaybackError> {
@@ -1250,12 +1384,12 @@ impl AudioActor {
         while self
             .source_signals
             .front()
-            .is_some_and(|(_, signal)| signal.load(Ordering::Relaxed) == 0)
+            .is_some_and(|source| source.done.load(Ordering::Relaxed) == 0)
         {
-            let Some((finished_index, _)) = self.source_signals.pop_front() else {
+            let Some(finished) = self.source_signals.pop_front() else {
                 break;
             };
-            self.finish_source(finished_index);
+            self.finish_source(finished.index);
         }
         if self.snapshot.status == PlaybackStatus::Playing
             && self.source_signals.is_empty()
@@ -1287,7 +1421,7 @@ impl AudioActor {
             return;
         }
 
-        let queued_next = self.source_signals.front().map(|(index, _)| *index);
+        let queued_next = self.source_signals.front().map(|source| source.index);
         if let Some(next_index) = queued_next {
             self.current_index = Some(next_index);
             if let Some(item) = self.queue.get_mut(next_index) {
@@ -1333,8 +1467,8 @@ impl AudioActor {
         let (decoder, duration_ms) = decode_path(&self.queue[index].path)?;
         self.queue[index].duration_ms = duration_ms;
         let player = self.player.as_ref().ok_or(PlaybackError::NothingLoaded)?;
-        let signal = append_marked(player, decoder);
-        self.source_signals.push_back((index, signal));
+        let signal = append_marked(player, decoder, index);
+        self.source_signals.push_back(signal);
         Ok(())
     }
 
@@ -1393,13 +1527,20 @@ fn decode_path(path: &Path) -> Result<(Decoder<BufReader<File>>, Option<u64>), P
     Ok((decoder, duration_ms))
 }
 
-fn append_marked<S>(player: &Player, source: S) -> Arc<AtomicUsize>
+fn append_marked<S>(player: &Player, source: S, index: usize) -> QueuedSourceSignal
 where
     S: Source + Send + 'static,
 {
-    let signal = Arc::new(AtomicUsize::new(1));
-    player.append(Done::new(source, Arc::clone(&signal)));
-    signal
+    let done = Arc::new(AtomicUsize::new(1));
+    let state = Arc::new(AtomicUsize::new(SOURCE_QUEUED));
+    player.append(Done::new(
+        CancelableSource {
+            input: source,
+            state: Arc::clone(&state),
+        },
+        Arc::clone(&done),
+    ));
+    QueuedSourceSignal { index, done, state }
 }
 
 fn validate_audio_path(path: &Path) -> Result<(), PlaybackError> {
@@ -1431,7 +1572,52 @@ mod tests {
     use std::io::Write;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use rodio::source::Zero;
+
     use super::*;
+
+    #[test]
+    fn queued_source_can_be_cancelled_without_starting_it() {
+        let state = Arc::new(AtomicUsize::new(SOURCE_QUEUED));
+        let mut source = CancelableSource {
+            input: Zero::new_samples(
+                ChannelCount::new(2).expect("channel count"),
+                SampleRate::new(44_100).expect("sample rate"),
+                8,
+            ),
+            state: Arc::clone(&state),
+        };
+        let control = QueuedSourceSignal {
+            index: 1,
+            done: Arc::new(AtomicUsize::new(1)),
+            state,
+        };
+
+        assert!(control.cancel_if_queued());
+        assert_eq!(source.next(), None);
+    }
+
+    #[test]
+    fn started_source_cannot_be_cancelled_as_preload() {
+        let state = Arc::new(AtomicUsize::new(SOURCE_QUEUED));
+        let mut source = CancelableSource {
+            input: Zero::new_samples(
+                ChannelCount::new(2).expect("channel count"),
+                SampleRate::new(44_100).expect("sample rate"),
+                8,
+            ),
+            state: Arc::clone(&state),
+        };
+        let control = QueuedSourceSignal {
+            index: 1,
+            done: Arc::new(AtomicUsize::new(1)),
+            state,
+        };
+
+        assert_eq!(source.next(), Some(0.0));
+        assert!(!control.cancel_if_queued());
+        assert_eq!(source.next(), Some(0.0));
+    }
 
     #[test]
     fn validates_supported_extensions_case_insensitively() {
@@ -1566,10 +1752,11 @@ mod tests {
 
     #[test]
     fn queue_operations_preserve_ids_across_append_move_and_remove() {
-        let engine = RodioPlaybackEngine::new();
+        let mut engine = AudioActor::new();
         let first = PathBuf::from("first.wav");
         let second = PathBuf::from("second.flac");
         let third = PathBuf::from("third.mp3");
+        let inserted = PathBuf::from("inserted.flac");
 
         let replaced = engine
             .replace_queue(vec![first.clone(), second.clone()])
@@ -1589,16 +1776,28 @@ mod tests {
             ["first.wav", "second.flac", "third.mp3"]
         );
 
+        let inserted = engine
+            .insert_queue(vec![inserted], 1)
+            .expect("insert queue item");
+        assert_eq!(
+            inserted
+                .queue
+                .iter()
+                .map(|item| item.id)
+                .collect::<Vec<_>>(),
+            [1, 4, 2, 3]
+        );
+
         let moved = engine.move_queue_item(3, 1).expect("move queue item");
         assert_eq!(
             moved.queue.iter().map(|item| item.id).collect::<Vec<_>>(),
-            [1, 3, 2]
+            [1, 3, 4, 2]
         );
 
         let removed = engine.remove_queue_item(1).expect("remove queue item");
         assert_eq!(
             removed.queue.iter().map(|item| item.id).collect::<Vec<_>>(),
-            [3, 2]
+            [3, 4, 2]
         );
     }
 
@@ -1730,13 +1929,9 @@ mod tests {
         let engine = RodioPlaybackEngine::new();
         let first = fixture_directory().join("seek_48000_24_stereo.flac");
         let second = fixture_directory().join("wav_44100_16_stereo.wav");
-        let queued = engine
-            .replace_queue(vec![first, second])
-            .expect("replace queue");
-        let first_id = queued.queue[0].id;
         let playing = engine
-            .play_queue_item(first_id)
-            .expect("play first queue item");
+            .replace_queue_and_play(vec![first, second], 0)
+            .expect("replace queue and play");
         assert_eq!(playing.status, PlaybackStatus::Playing);
         assert_eq!(playing.queue[1].status, QueueItemStatus::Pending);
 
@@ -1747,6 +1942,33 @@ mod tests {
             PlaybackStatus::Playing | PlaybackStatus::Stopped
         ));
         assert_eq!(advanced.queue[0].status, QueueItemStatus::Played);
+        engine.stop().ok();
+    }
+
+    #[test]
+    #[ignore = "requires a system audio output device"]
+    fn changing_playback_mode_keeps_the_current_source_running() {
+        let engine = RodioPlaybackEngine::new();
+        let first = fixture_directory().join("seek_48000_24_stereo.flac");
+        let second = fixture_directory().join("wav_44100_16_stereo.wav");
+        let playing = engine
+            .replace_queue_and_play(vec![first, second], 0)
+            .expect("replace queue and play");
+        let current_id = playing.current_item_id;
+
+        std::thread::sleep(Duration::from_millis(250));
+        let before = engine.snapshot().expect("snapshot before mode change");
+        let changed = engine
+            .set_playback_mode(PlaybackMode::Shuffle)
+            .expect("change playback mode");
+        std::thread::sleep(Duration::from_millis(150));
+        let after = engine.snapshot().expect("snapshot after mode change");
+
+        assert_eq!(changed.current_item_id, current_id);
+        assert_eq!(after.current_item_id, current_id);
+        assert_eq!(after.status, PlaybackStatus::Playing);
+        assert!(changed.position_ms >= before.position_ms);
+        assert!(after.position_ms >= changed.position_ms);
         engine.stop().ok();
     }
 

@@ -1,8 +1,10 @@
 # ADR 0015：播放列表激活、队列入口与单一状态展示
 
-- 状态：Accepted
+- 状态：Accepted；独立队列入口部分已由 [ADR 0018](0018-playlist-as-playback-sequence.md) 替代
 - 日期：2026-07-20
 - 补充：[ADR 0014](0014-player-only-scope-and-transient-default-playlist.md)
+
+> 当前约束：标题唯一性、状态只在底栏表达、激活态优先和渲染隔离继续有效；列表与队列是不同产品对象、底栏打开独立队列抽屉的决定已经废止。底栏列表按钮现在定位并编辑当前播放列表。
 
 ## 背景
 

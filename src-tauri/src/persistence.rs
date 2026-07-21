@@ -293,6 +293,66 @@ impl PersistenceService {
         list_playlist_items_with_connection(&connection, playlist_id)
     }
 
+    pub fn remove_playlist_items(
+        &self,
+        playlist_id: i64,
+        item_ids: &[i64],
+    ) -> Result<Vec<PlaylistItemRecord>, PersistenceError> {
+        if item_ids.is_empty() {
+            return self.list_playlist_items(playlist_id);
+        }
+        let mut unique_ids = item_ids.to_vec();
+        unique_ids.sort_unstable();
+        unique_ids.dedup();
+        if unique_ids.len() != item_ids.len() {
+            return Err(PersistenceError::PlaylistItemNotFound);
+        }
+        let connection = self.connection.lock().map_err(|_| poisoned())?;
+        ensure_playlist_exists(&connection, playlist_id)?;
+        let transaction = connection.unchecked_transaction().map_err(query_error)?;
+        let existing = list_playlist_items_with_connection(&transaction, playlist_id)?;
+        let existing_ids = existing
+            .iter()
+            .map(|item| item.id)
+            .collect::<std::collections::HashSet<_>>();
+        if !unique_ids
+            .iter()
+            .all(|item_id| existing_ids.contains(item_id))
+        {
+            return Err(PersistenceError::PlaylistItemNotFound);
+        }
+        for item_id in unique_ids {
+            transaction
+                .execute(
+                    "DELETE FROM playlist_items WHERE playlist_id = ?1 AND id = ?2",
+                    params![playlist_id, item_id],
+                )
+                .map_err(query_error)?;
+        }
+        normalize_item_positions(&transaction, playlist_id)?;
+        touch_playlist(&transaction, playlist_id)?;
+        transaction.commit().map_err(query_error)?;
+        list_playlist_items_with_connection(&connection, playlist_id)
+    }
+
+    pub fn clear_playlist_items(
+        &self,
+        playlist_id: i64,
+    ) -> Result<Vec<PlaylistItemRecord>, PersistenceError> {
+        let connection = self.connection.lock().map_err(|_| poisoned())?;
+        ensure_playlist_exists(&connection, playlist_id)?;
+        let transaction = connection.unchecked_transaction().map_err(query_error)?;
+        transaction
+            .execute(
+                "DELETE FROM playlist_items WHERE playlist_id = ?1",
+                params![playlist_id],
+            )
+            .map_err(query_error)?;
+        touch_playlist(&transaction, playlist_id)?;
+        transaction.commit().map_err(query_error)?;
+        Ok(Vec::new())
+    }
+
     pub fn move_playlist_item(
         &self,
         playlist_id: i64,
@@ -1034,6 +1094,47 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![("Third.mp3", 0), ("Second.flac", 1)]
         );
+    }
+
+    #[test]
+    fn removes_many_or_clears_playlist_items_atomically() {
+        let service = service();
+        let created = service
+            .create_playlist_with_items(
+                "Selection",
+                &[
+                    "C:\\Music\\one.flac".to_owned(),
+                    "C:\\Music\\two.flac".to_owned(),
+                    "C:\\Music\\three.flac".to_owned(),
+                ],
+                None,
+                false,
+            )
+            .expect("create playlist");
+        let retained = service
+            .remove_playlist_items(
+                created.playlist.id,
+                &[created.items[0].id, created.items[2].id],
+            )
+            .expect("remove selected items");
+        assert_eq!(retained.len(), 1);
+        assert_eq!(retained[0].path, "C:\\Music\\two.flac");
+        assert_eq!(retained[0].position, 0);
+        assert!(matches!(
+            service.remove_playlist_items(created.playlist.id, &[999_999]),
+            Err(PersistenceError::PlaylistItemNotFound)
+        ));
+        assert_eq!(
+            service
+                .list_playlist_items(created.playlist.id)
+                .expect("items retained after failed transaction")
+                .len(),
+            1
+        );
+        assert!(service
+            .clear_playlist_items(created.playlist.id)
+            .expect("clear playlist")
+            .is_empty());
     }
 
     #[test]

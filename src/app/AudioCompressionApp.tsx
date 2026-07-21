@@ -24,7 +24,6 @@ import {
   ChevronRight,
   CircleAlert,
   FileAudio,
-  Files,
   Folder,
   FolderOpen,
   Trash2,
@@ -40,6 +39,7 @@ import type {
   CompressionPreset,
   CompressionScanNode,
 } from "../shared/model/compression";
+import { AddMediaMenu } from "../shared/ui/AddMediaMenu";
 
 export default function AudioCompressionApp() {
   const { t } = useTranslation();
@@ -143,19 +143,18 @@ export default function AudioCompressionApp() {
             <Text c="dimmed" size="xs">{t("tools.compressionScope")}</Text>
           </div>
         </Group>
-        <Badge color={compression.scan.readyFiles > 0 ? undefined : "gray"} variant="light">
-          {t("compression.readyCount", { count: compression.scan.readyFiles })}
-        </Badge>
       </header>
 
       <section className="compression-toolbar" aria-label={t("compression.inputs")}>
         <Group className="compression-input-actions" gap="xs" wrap="nowrap">
-          <Button disabled={locked} leftSection={<Files size={16} />} onClick={() => void addFiles()} size="xs" variant="default">
-            {t("compression.addFiles")}
-          </Button>
-          <Button disabled={locked} leftSection={<FolderOpen size={16} />} onClick={() => void addFolders()} size="xs" variant="default">
-            {t("compression.addFolder")}
-          </Button>
+          <AddMediaMenu
+            buttonLabel={t("common.add")}
+            disabled={locked}
+            fileLabel={t("compression.addFiles")}
+            folderLabel={t("compression.addFolder")}
+            onAddFiles={() => void addFiles()}
+            onAddFolders={() => void addFolders()}
+          />
           {scanBusy ? (
             <Button color="red" onClick={() => void compression.cancelScan()} size="xs" variant="subtle">
               {t("compression.cancelScan")}

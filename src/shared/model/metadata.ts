@@ -13,4 +13,5 @@ export interface TrackDetails {
   fileSize: number | null;
   artworkDataUrl: string | null;
   metadataWarning: string | null;
+  quality: "hi_res" | "sq" | "hq" | null;
 }

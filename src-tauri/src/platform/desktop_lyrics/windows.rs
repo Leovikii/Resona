@@ -416,7 +416,7 @@ fn helper_bounds(
     let helper_size = (HELPER_LOGICAL_SIZE * scale).round().max(1.0) as u32;
     let inset = (HELPER_LOGICAL_INSET * scale).round() as i32;
     HelperBounds {
-        x: position.x + size.width as i32 - helper_size as i32 - inset,
+        x: position.x + (size.width as i32 - helper_size as i32) / 2,
         y: position.y + inset,
         size: helper_size,
     }
@@ -812,7 +812,7 @@ mod tests {
                 1.0,
             ),
             HelperBounds {
-                x: 814,
+                x: 461,
                 y: 208,
                 size: 38,
             }
@@ -824,7 +824,7 @@ mod tests {
                 1.5,
             ),
             HelperBounds {
-                x: -129,
+                x: -659,
                 y: 92,
                 size: 57,
             }

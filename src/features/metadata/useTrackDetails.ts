@@ -35,6 +35,7 @@ export function useTrackDetails(path: string | null) {
           fileSize: 58_240_000,
           artworkDataUrl: null,
           metadataWarning: null,
+          quality: "hi_res",
         },
       });
       return;

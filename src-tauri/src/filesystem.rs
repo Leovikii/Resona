@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -21,6 +22,7 @@ pub enum RejectedPathReason {
     Unsupported,
     Unreadable,
     EmptyFolder,
+    Duplicate,
 }
 
 pub struct AudioFileContext {
@@ -62,12 +64,13 @@ pub fn audio_file_context(path: &Path) -> Result<AudioFileContext, PlaybackFailu
 pub fn resolve_audio_paths(paths: Vec<PathBuf>) -> ResolvedAudioPaths {
     let mut resolved = Vec::new();
     let mut rejected = Vec::new();
+    let mut seen = HashSet::new();
 
     for path in paths {
         match fs::metadata(&path) {
             Ok(metadata) if metadata.is_file() => {
                 if is_supported_audio(&path) {
-                    resolved.push(path);
+                    push_unique(path, &mut resolved, &mut rejected, &mut seen);
                 } else {
                     rejected.push(rejected_path(path, RejectedPathReason::Unsupported));
                 }
@@ -76,7 +79,11 @@ pub fn resolve_audio_paths(paths: Vec<PathBuf>) -> ResolvedAudioPaths {
                 Ok(audio) if audio.is_empty() => {
                     rejected.push(rejected_path(path, RejectedPathReason::EmptyFolder));
                 }
-                Ok(mut audio) => resolved.append(&mut audio),
+                Ok(audio) => {
+                    for path in audio {
+                        push_unique(path, &mut resolved, &mut rejected, &mut seen);
+                    }
+                }
                 Err(_) => rejected.push(rejected_path(path, RejectedPathReason::Unreadable)),
             },
             Ok(_) => rejected.push(rejected_path(path, RejectedPathReason::Unsupported)),
@@ -90,6 +97,19 @@ pub fn resolve_audio_paths(paths: Vec<PathBuf>) -> ResolvedAudioPaths {
     ResolvedAudioPaths {
         paths: resolved,
         rejected,
+    }
+}
+
+fn push_unique(
+    path: PathBuf,
+    resolved: &mut Vec<PathBuf>,
+    rejected: &mut Vec<RejectedPath>,
+    seen: &mut HashSet<PathBuf>,
+) {
+    if seen.insert(path.clone()) {
+        resolved.push(path);
+    } else {
+        rejected.push(rejected_path(path, RejectedPathReason::Duplicate));
     }
 }
 
@@ -172,12 +192,32 @@ mod tests {
         let root = test_directory();
         File::create(root.join("one.wav")).expect("create audio file");
         File::create(root.join("notes.txt")).expect("create unsupported file");
+        let nested = root.join("nested");
+        fs::create_dir(&nested).expect("create nested directory");
+        File::create(nested.join("two.flac")).expect("create nested audio file");
         let missing = root.join("missing.flac");
 
         let resolved = resolve_audio_paths(vec![root.clone(), missing]);
         assert_eq!(resolved.paths, [root.join("one.wav")]);
         assert_eq!(resolved.rejected.len(), 1);
         assert_eq!(resolved.rejected[0].reason, RejectedPathReason::Missing);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn deduplicates_overlapping_files_and_folders() {
+        let root = test_directory();
+        let audio = root.join("one.wav");
+        File::create(&audio).expect("create audio file");
+
+        let resolved = resolve_audio_paths(vec![audio.clone(), root.clone(), audio.clone()]);
+        assert_eq!(resolved.paths, [audio]);
+        assert_eq!(resolved.rejected.len(), 2);
+        assert!(resolved
+            .rejected
+            .iter()
+            .all(|rejected| rejected.reason == RejectedPathReason::Duplicate));
 
         let _ = fs::remove_dir_all(root);
     }
