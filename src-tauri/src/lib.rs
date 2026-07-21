@@ -5,6 +5,7 @@ mod compression;
 mod compression_window;
 mod filesystem;
 mod lyrics;
+mod main_window;
 mod media_import;
 mod metadata;
 mod persistence;
@@ -23,14 +24,15 @@ use commands::{
     cancel_audio_compression_scan, clear_audio_compression_inputs, clear_default_playlist,
     clear_playlist_items, create_playlist, delete_playlist, desktop_lyrics_window_ready,
     get_audio_compression_scan_state, get_audio_compression_state, get_default_playlist,
-    get_desktop_lyrics_window_state, get_now_playing_state, get_playback_state, get_track_details,
-    hide_desktop_lyrics_window, list_playlist_items, list_playlists, list_recent_play,
-    lock_desktop_lyrics_window, move_default_playlist_item, move_playlist, move_playlist_item,
-    next_playback, open_main_settings, open_media_context, pause_playback,
-    play_default_playlist_item, play_queue_item, play_user_playlist_item, previous_playback,
-    refresh_output_devices, remove_audio_compression_inputs, remove_default_playlist_items,
-    remove_playlist_item, remove_playlist_items, rename_playlist, resume_playback,
-    scan_audio_compression_inputs, seek_playback, select_output_device, set_playback_mode,
+    get_desktop_lyrics_window_state, get_main_window_state, get_now_playing_state,
+    get_playback_state, get_track_details, hide_desktop_lyrics_window, list_playlist_items,
+    list_playlists, list_recent_play, lock_desktop_lyrics_window, main_window_ready,
+    move_default_playlist_item, move_playlist, move_playlist_item, next_playback,
+    open_main_settings, open_media_context, pause_playback, play_default_playlist_item,
+    play_queue_item, play_user_playlist_item, previous_playback, refresh_output_devices,
+    remove_audio_compression_inputs, remove_default_playlist_items, remove_playlist_item,
+    remove_playlist_items, rename_playlist, resume_playback, scan_audio_compression_inputs,
+    seek_playback, select_output_device, set_main_window_layout_mode, set_playback_mode,
     set_playback_volume, show_audio_compression_window, show_desktop_lyrics_window,
     start_audio_compression, start_desktop_lyrics_drag, stop_playback,
     unlock_desktop_lyrics_window,
@@ -68,12 +70,28 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .on_page_load(|webview, payload| {
-            if matches!(webview.label(), "main" | compression_window::LABEL)
-                && payload.event() == PageLoadEvent::Finished
-            {
+            if webview.label() == compression_window::LABEL
+                && payload.event() == PageLoadEvent::Finished {
                 if let Err(error) = webview.window().show() {
                     eprintln!("{} window show after page load failed: {error}", webview.label());
                 }
+            } else if webview.label() == "main" && payload.event() == PageLoadEvent::Finished {
+                let app = webview.app_handle().clone();
+                let _ = std::thread::Builder::new()
+                    .name("resona-main-window-ready-fallback".to_owned())
+                    .spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_secs(3));
+                        let Some(window) = app.get_webview_window("main") else {
+                            return;
+                        };
+                        if window.is_visible().unwrap_or(false) {
+                            return;
+                        }
+                        eprintln!("main window ready timed out; showing the restored fallback frame");
+                        if let Err(error) = window.show() {
+                            eprintln!("main window fallback show failed: {error}");
+                        }
+                    });
             }
         })
         .manage(playback_engine)
@@ -91,6 +109,11 @@ pub fn run() {
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
             restore_playback_preferences(&playback_for_restore, &database);
             app.manage(Arc::new(database));
+            let main_window = Arc::new(main_window::MainWindowService::load(&data_dir));
+            if let Err(error) = main_window.restore(app.handle()) {
+                eprintln!("main window restore failed: {error:?}");
+            }
+            app.manage(main_window);
             let arguments = std::env::args().collect::<Vec<_>>();
             let current_directory = std::env::current_dir().unwrap_or_default();
             if let Some(path) =
@@ -121,6 +144,9 @@ pub fn run() {
             seek_playback,
             set_playback_volume,
             get_playback_state,
+            get_main_window_state,
+            set_main_window_layout_mode,
+            main_window_ready,
             get_now_playing_state,
             get_track_details,
             start_audio_compression,
@@ -165,6 +191,9 @@ pub fn run() {
                 if label == compression_window::LABEL {
                     compression_window::persist_geometry(app_handle);
                 } else if label == "main" {
+                    app_handle
+                        .state::<Arc<main_window::MainWindowService>>()
+                        .capture(app_handle);
                     compression_window::persist_geometry(app_handle);
                     app_handle
                         .state::<Arc<DesktopLyricsWindowService>>()
@@ -176,6 +205,18 @@ pub fn run() {
                     app_handle.exit(0);
                     return;
                 }
+            }
+            if matches!(
+                &event,
+                tauri::RunEvent::WindowEvent {
+                    label,
+                    event: WindowEvent::Moved(_) | WindowEvent::Resized(_),
+                    ..
+                } if label == "main"
+            ) {
+                app_handle
+                    .state::<Arc<main_window::MainWindowService>>()
+                    .observe(app_handle);
             }
             #[cfg(target_os = "windows")]
             let should_start = matches!(

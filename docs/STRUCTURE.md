@@ -16,12 +16,17 @@ src/
 ├─ features/
 │  ├─ lyrics/                 # 桌面歌词窗口状态与权威正在播放快照 hooks
 │  ├─ library/                # 用户播放列表、项目操作与最近播放 hooks
-│  └─ playback/usePlaybackController.ts
+│  ├─ playback/               # 播放控制与无回跳 seek transaction hooks
+│  └─ window/                 # 主窗口布局模式 typed hook；不持有原生坐标
 ├─ shared/
 │  ├─ bridge/                 # 类型化 Tauri command/event 与单实例文件选择边界
 │  ├─ i18n/                   # zh-CN/en 资源与 i18next 初始化
 │  ├─ model/                  # 播放、播放列表、歌词和桌面窗口共享契约
-│  ├─ ui/usePointerReorder.ts # 不依赖组件库的播放列表指针排序行为
+│  ├─ ui/
+│  │  ├─ AddMediaMenu.tsx     # 播放列表/压缩窗口统一添加菜单
+│  │  ├─ OverflowMarquee.tsx  # 少量高价值单行文本的按溢出滚动展示
+│  │  ├─ PlaylistTrackList.tsx # 默认/用户列表共享曲目交互
+│  │  └─ usePointerReorder.ts # 不依赖组件库的播放列表指针排序行为
 │  └─ utils/format.ts         # 时间等纯格式化函数
 ├─ windows/
 │  └─ DesktopLyricsWindow.tsx # 不加载应用壳的轻量桌面歌词入口
@@ -33,6 +38,7 @@ src-tauri/
 │  ├─ commands.rs             # 薄 Tauri command 边界
 │  ├─ filesystem.rs           # 直属音频上下文枚举与拖入路径展开
 │  ├─ lyrics.rs               # LRC/SRT/WebVTT 发现、解码、解析、缓存和同步
+│  ├─ main_window.rs          # 主窗口宽/窄模式、两套几何、可见约束与首帧 ready
 │  ├─ media_import.rs         # 默认列表、当前列表来源、执行序列同步与 external-open 协调
 │  ├─ metadata.rs             # 后续按需元数据 adapter 源文件，当前不编译
 │  ├─ persistence.rs          # 用户列表、最近历史与 schema v3 migration
@@ -63,9 +69,11 @@ scripts/
 └─ verify-release-webview.ps1 # 验证 Release 主窗口实际可见并清理进程
 ```
 
-Mantine 直接导入仍限制在 `src/app`；`shared/ui/usePointerReorder.ts` 是播放列表使用的纯 Pointer Events 排序行为，不导入 Mantine、Tauri 或领域服务。当前仍没有需要统一平台行为或领域语义的 Mantine 适配控件，不为每个组件创建空包装层。
+Mantine 直接导入仍限制在 `src/app` 与 `src/shared/ui`；`AddMediaMenu` 统一跨窗口添加来源行为，`PlaylistTrackList` 统一默认/用户列表选择与排序，`OverflowMarquee` 只负责按尺寸判断的单行展示，`usePointerReorder.ts` 是不导入 Mantine、Tauri 或领域服务的纯 Pointer Events 行为。不为每个 Mantine 组件创建空包装层。
 
 0.0.13 已删除 managed-folder/media-library 运行时代码；`src/features/library` 保持为播放列表与最近历史，不为目录整洁做无收益搬迁。桌面歌词仍通过通用 facade 隔离 Windows 实现。0.0.17 的 `src/windows/AudioCompressionWindow.tsx` 只提供轻量窗口入口，Mantine 组合位于 `src/app/AudioCompressionApp.tsx`；Rust `compression_window.rs` 只管理普通辅助窗口生命周期，扫描和转换仍归 `CompressionService`。
+
+ADR 0020 已由 `main_window.rs` 与 `features/window` 实现：Rust 保存模式和原生几何，React 只消费布局快照。当前 ScrollArea 组合没有形成重复默认值或复杂行为，因此继续在 `src/app` 直接组合 Mantine，不增加无收益包装层。
 
 ## 目标结构
 

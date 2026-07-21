@@ -3,6 +3,8 @@ export const resources = {
     translation: {
       app: { name: "Resona", version: "0.0.17" },
       nav: {
+        navigation: "导航",
+        open: "打开导航",
         playlists: "播放列表",
         recent: "最近播放",
         tools: "工具",
@@ -175,6 +177,9 @@ export const resources = {
         dark: "深色",
         accent: "主题色",
         language: "语言",
+        windowLayout: "窗口布局",
+        wideLayout: "宽屏",
+        compactLayout: "窄屏",
         languageSystem: "跟随系统",
         chinese: "中文",
         english: "English",
@@ -212,6 +217,8 @@ export const resources = {
     translation: {
       app: { name: "Resona", version: "0.0.17" },
       nav: {
+        navigation: "Navigation",
+        open: "Open navigation",
         playlists: "Playlists",
         recent: "Recently played",
         tools: "Tools",
@@ -384,6 +391,9 @@ export const resources = {
         dark: "Dark",
         accent: "Accent color",
         language: "Language",
+        windowLayout: "Window layout",
+        wideLayout: "Wide",
+        compactLayout: "Compact",
         languageSystem: "System",
         chinese: "中文",
         english: "English",

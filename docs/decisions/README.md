@@ -24,5 +24,6 @@ ADR 记录会长期影响代码、依赖或产品边界且无法仅从实现看�
 - [0017 - 完整播放器作为右侧主内容视图](0017-full-player-as-main-content-view.md)
 - [0018 - 播放列表即当前播放序列](0018-playlist-as-playback-sequence.md)
 - [0019 - 临时默认列表退出语义与桌面歌词三分区工具栏](0019-transient-default-playlist-and-lyrics-toolbar.md)
+- [0020 - 主窗口宽屏/窄屏模式与几何恢复](0020-main-window-layout-modes-and-geometry.md)
 
 新 ADR 不修改历史决定的原文；如果决定被替代，新增 ADR 并将旧记录标记为 `Superseded`。

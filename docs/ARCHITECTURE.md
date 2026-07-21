@@ -67,11 +67,15 @@ Mantine 是 UI 实现依赖，不是领域 API。采用三层策略：
 - 0.0.11 目标是将桌面歌词显示/隐藏作为播放运行时动作放到底部播放器；设置页只保存持久偏好。主窗口必须保留锁定状态下的解锁和隐藏恢复路径。
 - Mantine 负责控件和主题渲染；业务组件使用语义 token，不直接依赖固定深色十六进制颜色。
 - `UiPreferences` 只包含 `colorScheme`、`accentColor` 和 `locale` 等展示偏好。0.0.5 可用 localStorage 持久化，字段保持框架无关，以后可迁移到统一设置服务。
+- 主窗口布局模式与窗口几何影响原生最小尺寸和首次可见帧，由 Rust/Tauri 在显示前恢复，不进入仅在 WebView 加载后可用的 localStorage。宽屏/窄屏复用同一 React 选择和领域 hooks，具体约束见 ADR 0020。
+- 窄屏使用常驻单图标栏和复用完整 `Sidebar` 的显式侧面板；导航只改变既有页面选择，不复制路由、列表或播放器状态。窄屏底栏直接显示全部八个固定控制槽，不以“更多”菜单隐藏常用能力。
+- 少量高价值单行文本通过共享 `OverflowMarquee` 在实际溢出时滚动；尺寸判断只响应元素尺寸变化，动画只修改 `transform`/`opacity`。播放列表曲目等大集合继续使用省略和完整 `title`，不得为每行创建观察器或持续动画。
 - 本地化使用 `i18next` + `react-i18next`。React 组件只读取翻译 key；Rust 返回稳定错误码和参数，不把固定语言文案当作前端契约。
 - “工具”只是路由和能力入口；主窗口不直接承载压缩工作流。音频压缩使用按需创建的单实例普通 WebView 工作窗口，标签编辑后置。
 - `audio-compression` 窗口只展示 Rust 权威扫描/任务快照并提交类型化操作；递归文件系统、FFmpeg 生命周期和文件写入均不得进入 React。该窗口使用独立最小 capability，不复用桌面歌词的透明、置顶、穿透或原生 helper 边界。
 - 压缩目录树默认折叠子目录，每个展开节点最多增量渲染 200 个直属项，并使用浏览器 `content-visibility` 跳过离屏布局；这为大目录提供有界首帧成本，不为首版增加第二个列表组件库。实测不足时再评估成熟虚拟化依赖。
 - 压缩扫描的 WAV 候选校验使用进程内 `hound` 读取 RIFF/WAVE 头；扫描阶段禁止按文件启动 FFmpeg/ffprobe。FFmpeg 只在用户开始转换后运行，ffprobe 只验证输入转换参数和临时 FLAC 结果；Windows 子进程统一使用无控制台标志。
+- 所有用户可见的主窗口滚动轨道由 Mantine `ScrollArea` 提供；设置、侧栏、播放信息和窄屏内容不得回退为 WebView 原生滚动条。歌词可以隐藏轨道，但仍使用同一组件 viewport，以维持 ref 定位和键盘滚动。
 
 ## 播放边界
 
@@ -87,6 +91,8 @@ Mantine 是 UI 实现依赖，不是领域 API。采用三层策略：
 - `PlaybackClock`：生成权威播放位置并按 UI 实际需要节流
 
 0.0.2 的 `PlaybackSnapshot` 对外提供 `positionMs`、`durationMs`、`volume` 与 `seekable`；定位和音量仍通过 audio actor 串行执行。Tauri 错误边界使用稳定 `code` + `message`，UI 不依赖 Rodio/Symphonia 异常文本。
+
+Slider 拖动、轨道点击和完整播放器歌词点击统一进入一个前端 seek transaction，再调用既有 `seek_playback` command。提交后本地目标值保持到对应权威快照接管；连续定位使用递增事务标识忽略迟到结果，不能让旧快照造成视觉回跳。该交互状态只限播放器区域，Rust 仍是最终位置权威来源。
 
 音频回调不获取应用全局锁，不执行文件、数据库或 WebView IPC。解码、设备恢复和队列准备在 Rust 后台完成；音频样本不经过 Tauri IPC 或 WebView。前端在后端时间锚点之间做视觉插值。
 

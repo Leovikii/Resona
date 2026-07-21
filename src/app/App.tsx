@@ -9,6 +9,7 @@ import {
   Button,
   ColorInput,
   Divider,
+  Drawer,
   Group,
   Loader,
   Menu,
@@ -44,6 +45,7 @@ import {
   Minimize2,
   Music2,
   Pause,
+  PanelLeftOpen,
   Play,
   Plus,
   RefreshCw,
@@ -68,6 +70,8 @@ import { useLibrary } from "../features/library/useLibrary";
 import { useTrackDetails } from "../features/metadata/useTrackDetails";
 import { showAudioCompressionWindow } from "../shared/bridge/compressionWindow";
 import { usePlaybackController } from "../features/playback/usePlaybackController";
+import { useSeekTransaction } from "../features/playback/useSeekTransaction";
+import { useMainWindowLayout } from "../features/window/useMainWindowLayout";
 import { isTauriRuntime } from "../shared/bridge/tauri";
 import type {
   DefaultPlaylistItem,
@@ -83,6 +87,7 @@ import { fileNameFromPath, formatDuration } from "../shared/utils/format";
 import { listInsertionPositionAtY } from "../shared/ui/usePointerReorder";
 import { PlaylistTrackList } from "../shared/ui/PlaylistTrackList";
 import { AddMediaMenu } from "../shared/ui/AddMediaMenu";
+import { OverflowMarquee } from "../shared/ui/OverflowMarquee";
 import { accentColors, type AccentColor, usePreferences } from "./preferences";
 
 type Selection =
@@ -103,12 +108,14 @@ export default function App() {
   const playback = usePlaybackController();
   const library = useLibrary();
   const desktopLyrics = useDesktopLyricsWindow();
+  const mainWindow = useMainWindowLayout();
   const [selection, setSelection] = useState<Selection>({ kind: "recent" });
   const [createPlaylistOpen, setCreatePlaylistOpen] = useState(false);
   const [playlistName, setPlaylistName] = useState("");
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const [externalDragActive, setExternalDragActive] = useState(false);
   const [playerExpanded, setPlayerExpanded] = useState(false);
+  const [navigationOpen, setNavigationOpen] = useState(false);
   const dropActionsRef = useRef({ library, playback, t });
   dropActionsRef.current = { library, playback, t };
 
@@ -119,6 +126,12 @@ export default function App() {
     [playback.selectedPath, t],
   );
   const trackDetails = useTrackDetails(playback.selectedPath);
+  const runSeek = useCallback(
+    (positionMs: number) => playback.run("seek_playback", { positionMs }),
+    [playback.run],
+  );
+  const seek = useSeekTransaction(playback.snapshot.positionMs, runSeek);
+  const compact = mainWindow.snapshot.layoutMode === "compact";
 
   useEffect(() => {
     if (!hasCurrentTrack) setPlayerExpanded(false);
@@ -245,6 +258,7 @@ export default function App() {
   }, []);
   const selectNavigation = useCallback((next: Selection) => {
     setPlayerExpanded(false);
+    setNavigationOpen(false);
     if (next.kind === "user") selectUserPlaylist(next.playlistId);
     else setSelection(next);
   }, [selectUserPlaylist]);
@@ -314,20 +328,53 @@ export default function App() {
   const selectedPlaylist = selection.kind === "user"
     ? library.playlists.find((playlist) => playlist.id === selection.playlistId) ?? null
     : null;
+  const sidebar = (
+    <MemoSidebar
+      activePlaylist={playback.activePlaylist}
+      dropTarget={dropTarget}
+      externalDragActive={externalDragActive}
+      onCreate={openCreatePlaylist}
+      onClearDefault={clearDefaultItems}
+      onDeletePlaylist={deleteUserPlaylist}
+      onRenamePlaylist={renamePlaylistById}
+      onSelect={selectNavigation}
+      playlists={library.playlists}
+      selection={selection}
+    />
+  );
   return (
-    <main className="app-shell">
-      <MemoSidebar
-        activePlaylist={playback.activePlaylist}
-        dropTarget={dropTarget}
-        externalDragActive={externalDragActive}
-        onCreate={openCreatePlaylist}
-        onClearDefault={clearDefaultItems}
-        onDeletePlaylist={deleteUserPlaylist}
-        onRenamePlaylist={renamePlaylistById}
-        onSelect={selectNavigation}
-        playlists={library.playlists}
-        selection={selection}
-      />
+    <main className="app-shell" data-layout={mainWindow.snapshot.layoutMode}>
+      {compact ? (
+        <>
+          <CompactNavigationRail
+            onExpand={() => setNavigationOpen(true)}
+            onSelect={selectNavigation}
+            selection={selection}
+          />
+          <Drawer
+            className="navigation-drawer"
+            onClose={() => setNavigationOpen(false)}
+            opened={navigationOpen}
+            padding={0}
+            size="min(78vw, 280px)"
+            title={t("nav.navigation")}
+          >
+            <MemoSidebar
+              activePlaylist={playback.activePlaylist}
+              dropTarget={dropTarget}
+              externalDragActive={externalDragActive}
+              hideBrand
+              onCreate={openCreatePlaylist}
+              onClearDefault={clearDefaultItems}
+              onDeletePlaylist={deleteUserPlaylist}
+              onRenamePlaylist={renamePlaylistById}
+              onSelect={selectNavigation}
+              playlists={library.playlists}
+              selection={selection}
+            />
+          </Drawer>
+        </>
+      ) : sidebar}
 
       <section className="main-region" data-player-expanded={playerExpanded || undefined}>
         {playerExpanded && hasCurrentTrack ? (
@@ -336,8 +383,10 @@ export default function App() {
             error={trackDetails.error}
             loading={trackDetails.loading}
             lyrics={playback.lyrics}
+            onSeek={seek.requestSeek}
             onClose={closePlayer}
             output={playback.snapshot.output}
+            seekable={playback.snapshot.seekable && (playback.snapshot.status === "playing" || playback.snapshot.status === "paused")}
             title={currentTitle}
           />
         ) : (
@@ -389,7 +438,10 @@ export default function App() {
               <MemoSettingsView
                 busy={playback.busy}
                 desktopLyrics={desktopLyrics}
+                layoutBusy={mainWindow.busy}
+                layoutMode={mainWindow.snapshot.layoutMode}
                 onRefresh={refreshOutputs}
+                onSetLayoutMode={mainWindow.setLayoutMode}
                 onSelectOutput={selectOutput}
                 output={playback.snapshot.output}
               />
@@ -402,6 +454,7 @@ export default function App() {
           <ErrorBanner failure={(playback.snapshot.error ?? playback.refreshError)!} />
         )}
         {library.error && <div className="error-banner" role="alert">{library.error}</div>}
+        {mainWindow.error && <div className="error-banner" role="alert">{mainWindow.error.message}</div>}
         {library.rejectedCount + playback.defaultRejectedCount > 0 && (
           <div className="import-notice">
             {t("import.rejected", {
@@ -419,8 +472,10 @@ export default function App() {
         expanded={playerExpanded}
         onToggleExpanded={togglePlayer}
         onRun={playback.run}
+        seek={seek}
         snapshot={playback.snapshot}
         title={currentTitle}
+        compact={compact}
       />
 
       <Modal
@@ -477,6 +532,7 @@ function Sidebar({
   activePlaylist,
   dropTarget,
   externalDragActive,
+  hideBrand = false,
   onCreate,
   onClearDefault,
   onDeletePlaylist,
@@ -488,6 +544,7 @@ function Sidebar({
   activePlaylist: ReturnType<typeof usePlaybackController>["activePlaylist"];
   dropTarget: DropTarget | null;
   externalDragActive: boolean;
+  hideBrand?: boolean;
   onCreate: () => void;
   onClearDefault: () => void;
   onDeletePlaylist: (playlistId: number) => void;
@@ -509,14 +566,14 @@ function Sidebar({
   }, []);
   return (
     <aside className="sidebar">
-      <div className="brand-lockup">
+      {!hideBrand && <div className="brand-lockup">
         <ThemeIcon radius="sm" size={34} variant="light">
           <Music2 size={20} strokeWidth={1.8} />
         </ThemeIcon>
         <div className="brand-copy">
           <Text fw={700}>{t("app.name")}</Text>
         </div>
-      </div>
+      </div>}
 
       <nav className="sidebar-primary" aria-label={t("app.name")}>
         <NavButton
@@ -542,28 +599,30 @@ function Sidebar({
           onClick={() => onSelect({ kind: "default" })}
           onContextMenu={(event) => { event.preventDefault(); setContextMenu({ x: event.clientX, y: event.clientY, playlist: null, isDefault: true }); }}
         />
-        <div className="playlist-nav-list" data-external-drag={externalDragActive || undefined}>
-          <PlaylistGap active={dropTarget?.kind === "playlist-gap" && dropTarget.position === 0} position={0} />
-          {playlists.map((playlist, index) => (
-            <div key={playlist.id}>
-              <PlaylistNavItem
-                active={selection.kind === "user" && selection.playlistId === playlist.id}
-                dropActive={dropTarget?.kind === "playlist" && dropTarget.playlistId === playlist.id}
-                icon={<ListMusic />}
-                label={playlist.name}
-                onClick={() => onSelect({ kind: "user", playlistId: playlist.id })}
-                onDelete={() => onDeletePlaylist(playlist.id)}
-                onContextMenu={(event) => { event.preventDefault(); setContextMenu({ x: event.clientX, y: event.clientY, playlist, isDefault: false }); }}
-                playing={activePlaylist?.kind === "user" && activePlaylist.playlistId === playlist.id}
-                playlistId={playlist.id}
-              />
-              <PlaylistGap
-                active={dropTarget?.kind === "playlist-gap" && dropTarget.position === index + 1}
-                position={index + 1}
-              />
-            </div>
-          ))}
-        </div>
+        <ScrollArea className="playlist-nav-scroll" type="auto">
+          <div className="playlist-nav-list" data-external-drag={externalDragActive || undefined}>
+            <PlaylistGap active={dropTarget?.kind === "playlist-gap" && dropTarget.position === 0} position={0} />
+            {playlists.map((playlist, index) => (
+              <div key={playlist.id}>
+                <PlaylistNavItem
+                  active={selection.kind === "user" && selection.playlistId === playlist.id}
+                  dropActive={dropTarget?.kind === "playlist" && dropTarget.playlistId === playlist.id}
+                  icon={<ListMusic />}
+                  label={playlist.name}
+                  onClick={() => onSelect({ kind: "user", playlistId: playlist.id })}
+                  onDelete={() => onDeletePlaylist(playlist.id)}
+                  onContextMenu={(event) => { event.preventDefault(); setContextMenu({ x: event.clientX, y: event.clientY, playlist, isDefault: false }); }}
+                  playing={activePlaylist?.kind === "user" && activePlaylist.playlistId === playlist.id}
+                  playlistId={playlist.id}
+                />
+                <PlaylistGap
+                  active={dropTarget?.kind === "playlist-gap" && dropTarget.position === index + 1}
+                  position={index + 1}
+                />
+              </div>
+            ))}
+          </div>
+        </ScrollArea>
       </nav>
       {contextMenu && <Portal><Paper className="app-context-menu" ref={contextMenuRef} shadow="md" style={{ left: contextMenu.x, top: contextMenu.y }} withBorder>
         {contextMenu.isDefault ? (
@@ -596,6 +655,80 @@ function Sidebar({
   );
 }
 
+function CompactNavigationRail({ onExpand, onSelect, selection }: {
+  onExpand: () => void;
+  onSelect: (selection: Selection) => void;
+  selection: Selection;
+}) {
+  const { t } = useTranslation();
+  return (
+    <aside className="compact-navigation-rail" aria-label={t("nav.navigation")}>
+      <Tooltip label={t("nav.navigation")} position="right" withArrow>
+        <ActionIcon
+          aria-label={t("nav.navigation")}
+          className="compact-rail-brand"
+          onClick={onExpand}
+          size={34}
+          variant="light"
+        >
+          <PanelLeftOpen size={18} strokeWidth={1.8} />
+        </ActionIcon>
+      </Tooltip>
+      <nav className="compact-rail-primary">
+        <CompactRailButton
+          active={selection.kind === "recent"}
+          icon={<History />}
+          label={t("nav.recent")}
+          onClick={() => onSelect({ kind: "recent" })}
+        />
+        <CompactRailButton
+          active={selection.kind === "default" || selection.kind === "user"}
+          icon={<ListMusic />}
+          label={t("nav.playlists")}
+          onClick={onExpand}
+        />
+      </nav>
+      <nav className="compact-rail-bottom">
+        <CompactRailButton
+          active={selection.kind === "tools"}
+          icon={<Wrench />}
+          label={t("nav.tools")}
+          onClick={() => onSelect({ kind: "tools" })}
+        />
+        <CompactRailButton
+          active={selection.kind === "settings"}
+          icon={<Settings />}
+          label={t("nav.settings")}
+          onClick={() => onSelect({ kind: "settings" })}
+        />
+      </nav>
+    </aside>
+  );
+}
+
+function CompactRailButton({ active, icon, label, onClick }: {
+  active: boolean;
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <Tooltip label={label} position="right" withArrow>
+      <ActionIcon
+        aria-current={active ? "page" : undefined}
+        aria-label={label}
+        className="compact-rail-button"
+        color={active ? undefined : "gray"}
+        onClick={onClick}
+        size={34}
+        variant={active ? "light" : "subtle"}
+      >
+        {icon}
+      </ActionIcon>
+    </Tooltip>
+  );
+}
+
 function NavButton({ active, icon, label, onClick }: {
   active: boolean;
   icon: ReactNode;
@@ -610,7 +743,7 @@ function NavButton({ active, icon, label, onClick }: {
       onClick={onClick}
     >
       <span className="nav-icon">{icon}</span>
-      <span className="nav-label">{label}</span>
+      <OverflowMarquee className="nav-label" text={label} />
     </UnstyledButton>
   );
 }
@@ -640,7 +773,7 @@ function PlaylistNavItem({ active, dropActive, icon, label, onClick, onContextMe
         onClick={onClick}
       >
         <span className="nav-icon">{playing ? <span aria-label="Playing" className="playlist-playing-indicator"><i /><i /><i /></span> : icon}</span>
-        <span className="nav-label">{label}</span>
+        <OverflowMarquee className="nav-label" text={label} />
       </UnstyledButton>
       {onDelete && <Tooltip label={t("library.delete")}><ActionIcon aria-label={t("library.delete")} className="playlist-nav-delete" color="red" onClick={(event) => { event.stopPropagation(); onDelete(); }} size="sm" variant="subtle"><Trash2 size={14} /></ActionIcon></Tooltip>}
     </div>
@@ -879,6 +1012,7 @@ function ToolsView() {
     ? ((compression.snapshot.completed + compression.snapshot.currentProgress) / compression.snapshot.total) * 100
     : 0;
   return (
+    <ScrollArea className="page-scroll" type="auto">
     <div className="page-content">
       <Title className="page-heading" order={2}>{t("tools.title")}</Title>
       <div className="tool-list">
@@ -905,13 +1039,17 @@ function ToolsView() {
         </Paper>
       </div>
     </div>
+    </ScrollArea>
   );
 }
 
-function SettingsView({ busy, desktopLyrics, onRefresh, onSelectOutput, output }: {
+function SettingsView({ busy, desktopLyrics, layoutBusy, layoutMode, onRefresh, onSetLayoutMode, onSelectOutput, output }: {
   busy: boolean;
   desktopLyrics: ReturnType<typeof useDesktopLyricsWindow>;
+  layoutBusy: boolean;
+  layoutMode: "wide" | "compact";
   onRefresh: () => void;
+  onSetLayoutMode: (mode: "wide" | "compact") => Promise<boolean>;
   onSelectOutput: (id: string | null) => void;
   output: PlaybackSnapshot["output"];
 }) {
@@ -928,6 +1066,7 @@ function SettingsView({ busy, desktopLyrics, onRefresh, onSelectOutput, output }
   const [backgroundOpacity, setBackgroundOpacity] = useState(lyricsPreferences.backgroundOpacity);
   useEffect(() => setBackgroundOpacity(lyricsPreferences.backgroundOpacity), [lyricsPreferences.backgroundOpacity]);
   return (
+    <ScrollArea className="settings-scroll" type="auto">
     <div className="page-content settings-page">
       <Title className="page-heading" order={2}>{t("settings.title")}</Title>
       <section className="settings-section">
@@ -969,6 +1108,18 @@ function SettingsView({ busy, desktopLyrics, onRefresh, onSelectOutput, output }
             onChange={(value) => setLocale(value as "system" | "zh-CN" | "en")}
             size="xs"
             value={locale}
+          />
+        </SettingRow>
+        <SettingRow label={t("settings.windowLayout")}>
+          <SegmentedControl
+            data={[
+              { label: t("settings.wideLayout"), value: "wide" },
+              { label: t("settings.compactLayout"), value: "compact" },
+            ]}
+            disabled={layoutBusy}
+            onChange={(value) => void onSetLayoutMode(value as "wide" | "compact")}
+            size="xs"
+            value={layoutMode}
           />
         </SettingRow>
       </section>
@@ -1061,6 +1212,7 @@ function SettingsView({ busy, desktopLyrics, onRefresh, onSelectOutput, output }
         </Text>
       </section>
     </div>
+    </ScrollArea>
   );
 }
 
@@ -1073,32 +1225,30 @@ function SettingRow({ children, label }: { children: ReactNode; label: string })
   );
 }
 
-function PlayerBar({ busy, desktopLyrics, details, expanded, hasCurrentTrack, onRun, onToggleExpanded, snapshot, title }: {
+function PlayerBar({ busy, compact, desktopLyrics, details, expanded, hasCurrentTrack, onRun, onToggleExpanded, seek, snapshot, title }: {
   busy: boolean;
+  compact: boolean;
   desktopLyrics: ReturnType<typeof useDesktopLyricsWindow>;
   details: ReturnType<typeof useTrackDetails>["details"];
   expanded: boolean;
   hasCurrentTrack: boolean;
   onRun: ReturnType<typeof usePlaybackController>["run"];
   onToggleExpanded: () => void;
+  seek: ReturnType<typeof useSeekTransaction>;
   snapshot: PlaybackSnapshot;
   title: string;
 }) {
   const { t } = useTranslation();
-  const [seeking, setSeeking] = useState(false);
-  const [seekValue, setSeekValue] = useState(snapshot.positionMs);
   const [changingVolume, setChangingVolume] = useState(false);
   const [volume, setVolume] = useState(Math.round(snapshot.volume * 100));
-  const [volumeOpen, setVolumeOpen] = useState(false);
   useEffect(() => {
-    if (!seeking) setSeekValue(snapshot.positionMs);
     if (!changingVolume) setVolume(Math.round(snapshot.volume * 100));
-  }, [changingVolume, seeking, snapshot.positionMs, snapshot.volume]);
+  }, [changingVolume, snapshot.volume]);
 
   const canControl = snapshot.status === "playing" || snapshot.status === "paused";
   const currentId = snapshot.currentItemId ?? snapshot.queue[0]?.id;
   return (
-    <footer className="player-bar" data-expanded={expanded || undefined}>
+    <footer className="player-bar" data-expanded={expanded || undefined} data-layout={compact ? "compact" : "wide"}>
       <Slider
         aria-label={t("playback.progress")}
         className="player-progress"
@@ -1106,15 +1256,9 @@ function PlayerBar({ busy, desktopLyrics, details, expanded, hasCurrentTrack, on
         label={formatDuration}
         max={Math.max(snapshot.durationMs ?? 0, 1)}
         min={0}
-        onChange={(value) => {
-          setSeeking(true);
-          setSeekValue(value);
-        }}
-        onChangeEnd={(value) => {
-          setSeeking(false);
-          void onRun("seek_playback", { positionMs: Math.round(value) });
-        }}
-        value={Math.min(seekValue, Math.max(snapshot.durationMs ?? 0, 1))}
+        onChange={seek.setDragPosition}
+        onChangeEnd={(value) => void seek.requestSeek(value)}
+        value={Math.min(seek.displayPositionMs, Math.max(snapshot.durationMs ?? 0, 1))}
       />
       <div className="player-track">
         <UnstyledButton
@@ -1130,91 +1274,207 @@ function PlayerBar({ busy, desktopLyrics, details, expanded, hasCurrentTrack, on
           </span>
         </UnstyledButton>
         <div className="player-track-copy">
-          <Text fw={650} lineClamp={1} size="sm">{title}</Text>
+          <OverflowMarquee auto className="player-track-title" text={title} />
           <Text c="dimmed" size="xs">
-            {formatDuration(seeking ? seekValue : snapshot.positionMs)} / {formatDuration(snapshot.durationMs)}
+            {formatDuration(seek.displayPositionMs)} / {formatDuration(snapshot.durationMs)}
           </Text>
         </div>
       </div>
-      <Group className="player-controls" gap="xs" justify="center" wrap="nowrap">
-        <Tooltip label={t("playback.previous")}>
-          <ActionIcon aria-label={t("playback.previous")} disabled={!canControl || busy} onClick={() => void onRun("previous_playback")} size="lg" variant="default">
-            <SkipBack fill="currentColor" size={16} />
-          </ActionIcon>
-        </Tooltip>
-        <Tooltip label={snapshot.status === "playing" ? t("playback.pause") : snapshot.status === "paused" ? t("playback.resume") : t("playback.play")}>
-          <ActionIcon
-            aria-label={snapshot.status === "playing" ? t("playback.pause") : snapshot.status === "paused" ? t("playback.resume") : t("playback.play")}
-            disabled={currentId === undefined || busy}
-            onClick={() => {
-              if (snapshot.status === "playing") void onRun("pause_playback");
-              else if (snapshot.status === "paused") void onRun("resume_playback");
-              else if (currentId !== undefined) void onRun("play_queue_item", { id: currentId });
+      {compact ? (
+        <CompactPlayerControls
+          busy={busy}
+          canControl={canControl}
+          currentId={currentId}
+          desktopLyrics={desktopLyrics}
+          details={details}
+          hasCurrentTrack={hasCurrentTrack}
+          mode={snapshot.playbackMode}
+          onRun={onRun}
+          snapshot={snapshot}
+          onVolumeChange={(value) => {
+            setChangingVolume(true);
+            setVolume(value);
+          }}
+          onVolumeChangeEnd={(value) => {
+            setChangingVolume(false);
+            void onRun("set_playback_volume", { volume: value / 100 });
+          }}
+          volume={volume}
+        />
+      ) : <>
+        <PlaybackCoreControls
+          busy={busy}
+          canControl={canControl}
+          currentId={currentId}
+          onRun={onRun}
+          snapshot={snapshot}
+        />
+        <div className="player-actions">
+          <AudioQualityBadge quality={details?.quality ?? null} />
+          <PlaybackModeButton busy={busy} mode={snapshot.playbackMode} onRun={onRun} />
+          <DesktopLyricsButton busy={busy} controller={desktopLyrics} hasCurrentTrack={hasCurrentTrack} />
+          <VolumeButton
+            busy={busy}
+            onChange={(value) => {
+              setChangingVolume(true);
+              setVolume(value);
             }}
-            size="lg"
-            variant="filled"
-          >
-            {snapshot.status === "playing" ? <Pause fill="currentColor" size={17} /> : <Play fill="currentColor" size={17} />}
-          </ActionIcon>
-        </Tooltip>
-        <Tooltip label={t("playback.next")}>
-          <ActionIcon aria-label={t("playback.next")} disabled={!canControl || busy} onClick={() => void onRun("next_playback")} size="lg" variant="default">
-            <SkipForward fill="currentColor" size={16} />
-          </ActionIcon>
-        </Tooltip>
-        <Tooltip label={t("playback.stop")}>
-          <ActionIcon aria-label={t("playback.stop")} disabled={!canControl || busy} onClick={() => void onRun("stop_playback")} size="lg" variant="subtle">
-            <Square fill="currentColor" size={14} />
-          </ActionIcon>
-        </Tooltip>
-      </Group>
-      <div className="player-actions">
-        <AudioQualityBadge quality={details?.quality ?? null} />
-        <PlaybackModeButton busy={busy} mode={snapshot.playbackMode} onRun={onRun} />
-        <Tooltip label={desktopLyrics.snapshot.visible ? t("desktopLyrics.hide") : t("desktopLyrics.show")}>
-          <ActionIcon
-            aria-label={desktopLyrics.snapshot.visible ? t("desktopLyrics.hide") : t("desktopLyrics.show")}
-            color={desktopLyrics.snapshot.visible ? undefined : "gray"}
-            disabled={busy || desktopLyrics.busy || !hasCurrentTrack || !desktopLyrics.snapshot.supported}
-            onClick={() => void desktopLyrics.run(
-              desktopLyrics.snapshot.visible
-                ? "hide_desktop_lyrics_window"
-                : "show_desktop_lyrics_window",
-            )}
-            variant={desktopLyrics.snapshot.visible ? "light" : "subtle"}
-          >
-            <Captions size={17} />
-          </ActionIcon>
-        </Tooltip>
-        <Popover onChange={setVolumeOpen} opened={volumeOpen} position="top" shadow="md" width={190} withArrow>
-          <Popover.Target>
-            <Tooltip label={t("playback.volume")}>
-              <ActionIcon aria-label={t("playback.volume")} disabled={busy} onClick={() => setVolumeOpen((open) => !open)} variant="subtle">
-                <Volume2 size={17} />
-              </ActionIcon>
-            </Tooltip>
-          </Popover.Target>
-          <Popover.Dropdown className="player-volume-popover">
-            <Slider
-              aria-label={t("playback.volume")}
-              disabled={busy}
-              label={(value) => `${Math.round(value)}%`}
-              max={100}
-              min={0}
-              onChange={(value) => {
-                setChangingVolume(true);
-                setVolume(value);
-              }}
-              onChangeEnd={(value) => {
-                setChangingVolume(false);
-                void onRun("set_playback_volume", { volume: value / 100 });
-              }}
-              value={volume}
-            />
-          </Popover.Dropdown>
-        </Popover>
-      </div>
+            onChangeEnd={(value) => {
+              setChangingVolume(false);
+              void onRun("set_playback_volume", { volume: value / 100 });
+            }}
+            volume={volume}
+          />
+        </div>
+      </>}
     </footer>
+  );
+}
+
+function PlaybackCoreControls({ busy, canControl, currentId, onRun, snapshot }: {
+  busy: boolean;
+  canControl: boolean;
+  currentId: number | undefined;
+  onRun: ReturnType<typeof usePlaybackController>["run"];
+  snapshot: PlaybackSnapshot;
+}) {
+  const { t } = useTranslation();
+  const toggleLabel = snapshot.status === "playing"
+    ? t("playback.pause")
+    : snapshot.status === "paused"
+      ? t("playback.resume")
+      : t("playback.play");
+  return (
+    <Group className="player-controls" gap="xs" justify="center" wrap="nowrap">
+      <Tooltip label={t("playback.previous")}>
+        <ActionIcon aria-label={t("playback.previous")} disabled={!canControl || busy} onClick={() => void onRun("previous_playback")} size="lg" variant="default">
+          <SkipBack fill="currentColor" size={16} />
+        </ActionIcon>
+      </Tooltip>
+      <Tooltip label={toggleLabel}>
+        <ActionIcon
+          aria-label={toggleLabel}
+          disabled={currentId === undefined || busy}
+          onClick={() => {
+            if (snapshot.status === "playing") void onRun("pause_playback");
+            else if (snapshot.status === "paused") void onRun("resume_playback");
+            else if (currentId !== undefined) void onRun("play_queue_item", { id: currentId });
+          }}
+          size="lg"
+          variant="filled"
+        >
+          {snapshot.status === "playing" ? <Pause fill="currentColor" size={17} /> : <Play fill="currentColor" size={17} />}
+        </ActionIcon>
+      </Tooltip>
+      <Tooltip label={t("playback.next")}>
+        <ActionIcon aria-label={t("playback.next")} disabled={!canControl || busy} onClick={() => void onRun("next_playback")} size="lg" variant="default">
+          <SkipForward fill="currentColor" size={16} />
+        </ActionIcon>
+      </Tooltip>
+      <Tooltip label={t("playback.stop")}>
+        <ActionIcon aria-label={t("playback.stop")} disabled={!canControl || busy} onClick={() => void onRun("stop_playback")} size="lg" variant="subtle">
+          <Square fill="currentColor" size={14} />
+        </ActionIcon>
+      </Tooltip>
+    </Group>
+  );
+}
+
+function CompactPlayerControls({ busy, canControl, currentId, desktopLyrics, details, hasCurrentTrack, mode, onRun, onVolumeChange, onVolumeChangeEnd, snapshot, volume }: {
+  busy: boolean;
+  canControl: boolean;
+  currentId: number | undefined;
+  desktopLyrics: ReturnType<typeof useDesktopLyricsWindow>;
+  details: TrackDetails | null;
+  hasCurrentTrack: boolean;
+  mode: PlaybackSnapshot["playbackMode"];
+  onRun: ReturnType<typeof usePlaybackController>["run"];
+  onVolumeChange: (value: number) => void;
+  onVolumeChangeEnd: (value: number) => void;
+  snapshot: PlaybackSnapshot;
+  volume: number;
+}) {
+  return (
+    <div className="compact-player-controls">
+      <div className="compact-player-side compact-player-side-left">
+        <AudioQualityBadge quality={details?.quality ?? null} />
+        <PlaybackModeButton busy={busy} mode={mode} onRun={onRun} />
+      </div>
+      <PlaybackCoreControls
+        busy={busy}
+        canControl={canControl}
+        currentId={currentId}
+        onRun={onRun}
+        snapshot={snapshot}
+      />
+      <div className="compact-player-side compact-player-side-right">
+        <DesktopLyricsButton busy={busy} controller={desktopLyrics} hasCurrentTrack={hasCurrentTrack} />
+        <VolumeButton
+          busy={busy}
+          onChange={onVolumeChange}
+          onChangeEnd={onVolumeChangeEnd}
+          volume={volume}
+        />
+      </div>
+    </div>
+  );
+}
+
+function VolumeButton({ busy, onChange, onChangeEnd, volume }: {
+  busy: boolean;
+  onChange: (value: number) => void;
+  onChangeEnd: (value: number) => void;
+  volume: number;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover onChange={setOpen} opened={open} position="top" shadow="md" width={190} withArrow>
+      <Popover.Target>
+        <Tooltip label={t("playback.volume")}>
+          <ActionIcon aria-label={t("playback.volume")} disabled={busy} onClick={() => setOpen((value) => !value)} variant="subtle">
+            <Volume2 size={17} />
+          </ActionIcon>
+        </Tooltip>
+      </Popover.Target>
+      <Popover.Dropdown className="player-volume-popover">
+        <Slider
+          aria-label={t("playback.volume")}
+          disabled={busy}
+          label={(value) => `${Math.round(value)}%`}
+          max={100}
+          min={0}
+          onChange={onChange}
+          onChangeEnd={onChangeEnd}
+          value={volume}
+        />
+      </Popover.Dropdown>
+    </Popover>
+  );
+}
+
+function DesktopLyricsButton({ busy, controller, hasCurrentTrack }: {
+  busy: boolean;
+  controller: ReturnType<typeof useDesktopLyricsWindow>;
+  hasCurrentTrack: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Tooltip label={controller.snapshot.visible ? t("desktopLyrics.hide") : t("desktopLyrics.show")}>
+      <ActionIcon
+        aria-label={controller.snapshot.visible ? t("desktopLyrics.hide") : t("desktopLyrics.show")}
+        color={controller.snapshot.visible ? undefined : "gray"}
+        disabled={busy || controller.busy || !hasCurrentTrack || !controller.snapshot.supported}
+        onClick={() => void controller.run(
+          controller.snapshot.visible
+            ? "hide_desktop_lyrics_window"
+            : "show_desktop_lyrics_window",
+        )}
+        variant={controller.snapshot.visible ? "light" : "subtle"}
+      >
+        <Captions size={17} />
+      </ActionIcon>
+    </Tooltip>
   );
 }
 
@@ -1277,18 +1537,20 @@ function PlaybackModeButton({ busy, mode, onRun }: {
   );
 }
 
-function FullPlayerView({ details, error, loading, lyrics, onClose, output, title }: {
+function FullPlayerView({ details, error, loading, lyrics, onClose, onSeek, output, seekable, title }: {
   details: ReturnType<typeof useTrackDetails>["details"];
   error: string | null;
   loading: boolean;
   lyrics: LyricsSnapshot;
   onClose: () => void;
+  onSeek: (positionMs: number) => Promise<boolean>;
   output: PlaybackSnapshot["output"];
+  seekable: boolean;
   title: string;
 }) {
   const { t } = useTranslation();
   const [tab, setTab] = useState<"lyrics" | "details">("lyrics");
-  const activeLyricRef = useRef<HTMLParagraphElement | null>(null);
+  const activeLyricRef = useRef<HTMLButtonElement | null>(null);
   const lines = lyrics.document?.lines ?? [];
   useEffect(() => {
     if (tab !== "lyrics" || lyrics.activeLineIndex === null) return;
@@ -1318,6 +1580,10 @@ function FullPlayerView({ details, error, loading, lyrics, onClose, output, titl
           {(error || details?.metadataWarning) && <Text c="yellow" size="xs">{t("metadata.partial")}</Text>}
         </div>
       </div>
+      <div className="full-player-compact-copy">
+        <Title order={3} lineClamp={1}>{details?.title || title}</Title>
+        <Text c="dimmed" lineClamp={1} size="sm">{details?.artist || t("metadata.unknownArtist")}</Text>
+      </div>
       <div className="full-player-right">
         <div className="full-player-view-switch">
           <SegmentedControl
@@ -1333,28 +1599,35 @@ function FullPlayerView({ details, error, loading, lyrics, onClose, output, titl
           />
         </div>
         {tab === "lyrics" ? (
-          <div className="full-player-panel full-player-lyrics" aria-label={t("lyrics.region")}>
+          <ScrollArea className="full-player-panel full-player-lyrics" type="never" aria-label={t("lyrics.region")}>
+            <div className="full-player-lyrics-content">
             {lines.length === 0 ? (
               <EmptyView icon={<Captions />} label={t("playback.noLyrics")} />
             ) : (
               lines.map((line, index) => (
-                <Text
+                <UnstyledButton
+                  aria-label={`${line.text} · ${formatDuration(line.startMs)}`}
                   className="full-player-lyric-line"
                   data-active={index === lyrics.activeLineIndex || undefined}
+                  disabled={!seekable}
                   key={`${line.startMs}-${index}`}
+                  onClick={() => void onSeek(line.startMs)}
                   ref={index === lyrics.activeLineIndex ? activeLyricRef : undefined}
-                >{line.text}</Text>
+                >{line.text}</UnstyledButton>
               ))
             )}
-          </div>
+            </div>
+          </ScrollArea>
         ) : (
-          <div className="full-player-panel full-player-details">
+          <ScrollArea className="full-player-panel full-player-details" type="auto">
+            <div className="full-player-details-content">
             <MetadataRow label={t("metadata.artist")} value={details?.artist} />
             <MetadataRow label={t("metadata.album")} value={details?.album} />
             <MetadataRow compact label={t("metadata.inputInfo")} value={formatInputAudioInfo(details, t)} />
             <MetadataRow compact label={t("metadata.outputInfo")} value={formatOutputAudioInfo(output, t)} />
             <MetadataRow label={t("metadata.path")} value={details?.path} />
-          </div>
+            </div>
+          </ScrollArea>
         )}
       </div>
     </section>

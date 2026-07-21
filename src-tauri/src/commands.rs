@@ -11,6 +11,9 @@ use crate::compression::{
 };
 use crate::compression_window;
 use crate::lyrics::{LyricsService, LyricsSnapshot};
+use crate::main_window::{
+    MainWindowFailure, MainWindowLayoutMode, MainWindowService, MainWindowSnapshot,
+};
 use crate::media_import::{
     ActivePlaylistSnapshot, DefaultPlaylistMutationResult, DefaultPlaylistSnapshot,
     MediaImportService, OpenMediaResult, PlaylistPlaybackResult,
@@ -33,6 +36,31 @@ type ManagedMediaImportService = Arc<MediaImportService>;
 type ManagedLyricsService = Arc<LyricsService>;
 type ManagedDesktopLyricsWindowService = Arc<DesktopLyricsWindowService>;
 type ManagedCompressionService = Arc<CompressionService>;
+type ManagedMainWindowService = Arc<MainWindowService>;
+
+#[tauri::command]
+pub async fn get_main_window_state(
+    service: State<'_, ManagedMainWindowService>,
+) -> Result<MainWindowSnapshot, MainWindowFailure> {
+    service.snapshot()
+}
+
+#[tauri::command]
+pub async fn set_main_window_layout_mode(
+    mode: MainWindowLayoutMode,
+    app: AppHandle,
+    service: State<'_, ManagedMainWindowService>,
+) -> Result<MainWindowSnapshot, MainWindowFailure> {
+    service.set_layout_mode(&app, mode)
+}
+
+#[tauri::command]
+pub async fn main_window_ready(
+    app: AppHandle,
+    service: State<'_, ManagedMainWindowService>,
+) -> Result<MainWindowSnapshot, MainWindowFailure> {
+    service.show(&app)
+}
 
 #[tauri::command]
 pub async fn show_audio_compression_window(app: AppHandle) -> Result<(), CompressionFailure> {

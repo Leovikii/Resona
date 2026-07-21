@@ -26,13 +26,3 @@ createRoot(document.getElementById("root")!).render(
     </AppProvider>
   </StrictMode>,
 );
-
-if (isTauriRuntime() && !desktopLyricsWindow && !audioCompressionWindow) {
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      void getCurrentWindow().show().catch((error) => {
-        console.error("Unable to show the Resona main window", error);
-      });
-    });
-  });
-}
