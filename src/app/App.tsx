@@ -948,7 +948,7 @@ function ToolsView() {
     : 0;
   return (
     <ScrollArea className="page-scroll" type="auto">
-    <div className="page-content">
+    <div className="page-content tools-page">
       <Title className="page-heading" order={2}>{t("tools.title")}</Title>
       <div className="tool-list">
         <Paper className="tool-row tool-entry" withBorder>
@@ -1222,6 +1222,7 @@ function PlayerBar({ busy, compact, desktopLyrics, details, expanded, hasCurrent
         min={0}
         onChange={seek.setDragPosition}
         onChangeEnd={(value) => void seek.requestSeek(value)}
+        size="xs"
         value={Math.min(seek.displayPositionMs, Math.max(snapshot.durationMs ?? 0, 1))}
       />
       <div className="player-track">

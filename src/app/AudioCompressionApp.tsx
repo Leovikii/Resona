@@ -35,6 +35,7 @@ import { useTranslation } from "react-i18next";
 import { useAudioCompression } from "../features/compression/useAudioCompression";
 import { selectCompressionFolders, selectWavFiles } from "../shared/bridge/audioDialog";
 import { isTauriRuntime } from "../shared/bridge/tauri";
+import { initializeCurrentWindowMaterial } from "../shared/bridge/windowAppearance";
 import type {
   CompressionPreset,
   CompressionScanNode,
@@ -60,9 +61,11 @@ export default function AudioCompressionApp() {
     document.title = `${t("app.name")} - ${t("tools.compression")}`;
     if (isTauriRuntime()) {
       void getCurrentWindow().setTitle(document.title);
-      void getCurrentWindow().show().catch((error) => {
-        console.error("Unable to show the audio compression window", error);
-      });
+      void initializeCurrentWindowMaterial()
+        .then(() => getCurrentWindow().show())
+        .catch((error) => {
+          console.error("Unable to show the audio compression window", error);
+        });
     }
     return () => {
       delete document.documentElement.dataset.window;
@@ -138,10 +141,9 @@ export default function AudioCompressionApp() {
     >
       <header className="compression-window-header">
         <Group gap="sm" wrap="nowrap">
-          <ThemeIcon size={36} variant="light"><Wrench size={18} /></ThemeIcon>
+          <ThemeIcon size={32} variant="light"><Wrench size={17} /></ThemeIcon>
           <div className="compression-window-title">
             <Title order={1}>{t("tools.compression")}</Title>
-            <Text c="dimmed" size="xs">{t("tools.compressionScope")}</Text>
           </div>
         </Group>
       </header>

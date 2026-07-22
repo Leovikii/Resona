@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { invokeTauri, isTauriRuntime } from "../../shared/bridge/tauri";
+import { initializeCurrentWindowMaterial } from "../../shared/bridge/windowAppearance";
 import type {
   MainWindowFailure,
   MainWindowLayoutMode,
@@ -24,8 +25,11 @@ export function useMainWindowLayout() {
 
   useEffect(() => {
     if (preview) return;
-    void invokeTauri<MainWindowSnapshot>("get_main_window_state")
-      .then((next) => {
+    void Promise.all([
+      invokeTauri<MainWindowSnapshot>("get_main_window_state"),
+      initializeCurrentWindowMaterial(),
+    ])
+      .then(([next]) => {
         setSnapshot(next);
         setError(null);
       })

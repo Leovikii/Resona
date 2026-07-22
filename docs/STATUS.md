@@ -2,6 +2,22 @@
 
 最后更新：2026-07-22
 
+### 2026-07-22 Mica 可见性与系统主题同步修复
+
+- 确认 Windows 11 原生 Mica adapter 正常工作；主窗口材质不明显的根因是连续 content/chrome 表面叠加了深色遮罩。现改为 ADR 0022 的单层材质模型：Mica 只由根窗口承载，侧栏、窄屏导航、主内容、完整播放器、底栏及音频压缩工作区的大面积表面透明，以 hairline 分区；工具入口等独立工作单元保留一层轻量实体表面。桌面歌词透明/穿透边界不变。
+- 项目所有者的 Release 截图揭示第一次修订仍显示完全一致的 `#101113`。原生调试确认 Windows 构建和主题同步均返回 `Mica`，实际覆盖源是 Mantine 全局 `body { background-color: var(--mantine-color-body) }`；应用壳透明后仍会露出该实色。现以窗口材质选择器明确清除 `html`、`body` 和 `#root` 背景，同时保留 `--mantine-color-body` 供组件实体表面使用。用于定位的红色探针和动态主窗口实验均已撤销，原有隐藏到首帧及 Windows 10/Linux solid 回退保持不变。
+- 设置页移除卡片背景、外框、圆角和阴影，改用标题、间距与相邻分组细线建立 WinUI 式层级；工具入口统一为无阴影轻量表面。播放进度 Slider 收敛为细轨道，thumb 只在 hover/focus 时出现，避免与内容滚动条混淆。
+- 修复“手动浅色后无法恢复跟随系统”及原生标题栏不同步：前端不再把 `auto` 提前解析成受当前窗口覆盖影响的亮/暗值，`auto`/`light`/`dark` 原样传入 Rust；`auto` 清除 Tauri 原生主题覆盖并使用自适应 Mica，手动模式才固定标题栏和 Mica 变体。
+- 浏览器回归覆盖 `1080×700` 宽屏完整播放器、`360×600` 窄屏设置/工具页和 `720×500` 音频压缩窗口；验证深色/浅色/跟随系统、Mica/窗口标识、大区域透明、局部表面无嵌套、设置分组和零横向溢出。TypeScript/Vite build、许可证、Rust format、Clippy `-D warnings` 和差异检查通过；67 个普通 Rust 测试通过，8 个真实音频设备测试按约定忽略。Windows Release 主窗口可见性门禁通过；额外原生像素门禁确认原 `#101113` 已被 Mica 采样色替代。产物为 `src-tauri/target/release/resona.exe`，18,006,528 bytes，SHA-256 `543A40ADD51A413E8C6C1E97BD3AA2647E51D32F31C9AA17B9CF334AE6B8A5A5`。
+
+### 2026-07-22 原生窗口材质与跨窗口设计语言
+
+- 接受并实现 [ADR 0022](decisions/0022-native-window-materials-and-surface-hierarchy.md)：Windows 11 客户端的主窗口与音频压缩窗口使用 Tauri 2 内置 Mica；Windows 10、Windows Server、Linux 和其他不支持路径保持 Mantine 实色回退。没有引入第三方材质插件、第二套 UI 组件库、全局 Acrylic/`backdrop-filter` 或自绘标题栏。
+- 新增 `platform/window_material.rs` 统一 Windows 版本检测、Mica 应用和原生亮暗主题同步。主窗口透明创建属性隔离在 `tauri.windows.conf.json`，通用配置仍跨平台不透明；Mica 在主窗口可见前初始化，错误保持可诊断并回退实色。
+- 主窗口、宽/窄导航、完整播放器、底栏、设置分组和音频压缩工作区改用共享语义表面 token。压缩窗口标题区收敛为紧凑桌面工具标题栏并删除重复说明。桌面歌词不叠加 Mica，只把字体、圆角、边界和轻量 ActionIcon 状态对齐同一设计语言，保留透明/穿透专用边界。
+- 浏览器验证覆盖 Mica 预览下的 `1080×700` 深色宽屏、`360×600` 浅色窄屏、`720×500` 压缩窗口和长歌词窗口；页面零横向溢出、无越界控件或控制组重排，控制台无 warning/error。TypeScript/Vite build、Rust `cargo check --all-targets` 和差异检查通过；完整门禁与 Windows Release 结果见本阶段后续记录。
+- 完整门禁通过：66 个普通 Rust 测试通过、8 个真实设备测试按约定忽略，TypeScript/Vite build、许可证、Rust format、Clippy `-D warnings` 和差异检查通过。Windows Release 主窗口可见性探针通过；新产物为 `src-tauri/target/release/resona.exe`，18,007,552 bytes，SHA-256 `1FC3D7251496FBAF64CBA5609DF5C41557FF769E44B3027046421B09F896D9CC`。
+
 ### 2026-07-22 窄屏导航与两行底栏收口
 
 - 曲目列表将“播放中”与“已选中”拆为正交视觉状态：当前曲目使用主题浅色背景和三柱动画，选择使用高对比中性底色；边框交回 Mantine `Paper withBorder`，不绘制左右实心条或组合态浅色外框。曲目工作区占满滚动视口，单击任意非曲目、非控件空白区域清除全部选择。

@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { AppProvider } from "./app/preferences";
 import { isTauriRuntime } from "./shared/bridge/tauri";
+import { prepareWindowAppearance } from "./shared/bridge/windowAppearance";
 import "./shared/i18n";
 import "./styles.css";
 
@@ -11,6 +12,12 @@ const desktopLyricsWindow = new URLSearchParams(window.location.search).get("win
   || (isTauriRuntime() && getCurrentWindow().label === "desktop-lyrics");
 const audioCompressionWindow = new URLSearchParams(window.location.search).get("window") === "audio-compression"
   || (isTauriRuntime() && getCurrentWindow().label === "audio-compression");
+document.documentElement.dataset.window = desktopLyricsWindow
+  ? "desktop-lyrics"
+  : audioCompressionWindow
+    ? "audio-compression"
+    : "main";
+prepareWindowAppearance();
 const RootWindow = desktopLyricsWindow
   ? lazy(() => import("./windows/DesktopLyricsWindow"))
   : audioCompressionWindow

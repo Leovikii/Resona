@@ -1,12 +1,18 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { PropsWithChildren } from "react";
 import type { MantineColor } from "@mantine/core";
-import { createTheme, localStorageColorSchemeManager, MantineProvider } from "@mantine/core";
+import {
+  createTheme,
+  localStorageColorSchemeManager,
+  MantineProvider,
+  useMantineColorScheme,
+} from "@mantine/core";
 import "@mantine/core/styles.css";
 
 import i18n, { resolveLocale } from "../shared/i18n";
 import type { LocalePreference } from "../shared/i18n";
 import type { CompressionPreset } from "../shared/model/compression";
+import { syncCurrentWindowTheme } from "../shared/bridge/windowAppearance";
 
 export const accentColors = ["cyan", "blue", "teal", "green", "orange", "pink"] as const;
 export type AccentColor = (typeof accentColors)[number];
@@ -140,9 +146,20 @@ export function AppProvider({ children }: PropsWithChildren) {
       defaultColorScheme="auto"
       theme={theme}
     >
+      <WindowAppearanceSync />
       <PreferencesContext.Provider value={value}>{children}</PreferencesContext.Provider>
     </MantineProvider>
   );
+}
+
+function WindowAppearanceSync() {
+  const { colorScheme } = useMantineColorScheme();
+
+  useEffect(() => {
+    void syncCurrentWindowTheme(colorScheme);
+  }, [colorScheme]);
+
+  return null;
 }
 
 export function usePreferences() {

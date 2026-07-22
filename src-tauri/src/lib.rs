@@ -35,7 +35,7 @@ use commands::{
     scan_audio_compression_inputs, seek_playback, select_output_device,
     set_main_window_layout_mode, set_playback_mode, set_playback_volume,
     show_audio_compression_window, show_desktop_lyrics_window, start_audio_compression,
-    start_desktop_lyrics_drag, unlock_desktop_lyrics_window,
+    start_desktop_lyrics_drag, sync_window_theme, unlock_desktop_lyrics_window,
 };
 use compression::CompressionService;
 use lyrics::LyricsService;
@@ -113,6 +113,11 @@ pub fn run() {
             if let Err(error) = main_window.restore(app.handle()) {
                 eprintln!("main window restore failed: {error:?}");
             }
+            if let Some(window) = app.get_webview_window("main") {
+                if let Err(error) = platform::window_material::apply(&window) {
+                    eprintln!("main window material unavailable; using solid fallback: {error:?}");
+                }
+            }
             app.manage(main_window);
             let arguments = std::env::args().collect::<Vec<_>>();
             let current_directory = std::env::current_dir().unwrap_or_default();
@@ -146,6 +151,7 @@ pub fn run() {
             get_main_window_state,
             set_main_window_layout_mode,
             main_window_ready,
+            sync_window_theme,
             get_now_playing_state,
             get_track_details,
             start_audio_compression,

@@ -2,6 +2,7 @@
 
 pub mod desktop_lyrics;
 pub mod media_session;
+pub mod window_material;
 
 #[cfg(target_os = "windows")]
 pub fn initialize_process() {

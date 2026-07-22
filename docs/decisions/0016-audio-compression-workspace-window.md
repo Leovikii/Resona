@@ -2,6 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-07-20
+- 补充：[ADR 0022](0022-native-window-materials-and-surface-hierarchy.md) 的普通窗口材质
 - 补充：[ADR 0014](0014-player-only-scope-and-transient-default-playlist.md) 的工具入口决定
 - 部分替代：[ADR 0014](0014-player-only-scope-and-transient-default-playlist.md) 中“0.1.0 不提供递归扫描”的笼统表述；只允许压缩工作流的一次性递归发现
 
@@ -16,7 +17,7 @@
 ### 窗口与入口
 
 - 主窗口“工具”页只展示工具入口和必要的当前任务摘要，不直接承载压缩参数、待转换树或结果列表。
-- 点击“音频压缩”打开或聚焦单实例普通 Tauri WebView 窗口 `audio-compression`。它不是透明、置顶或鼠标穿透窗口，不复用桌面歌词的 Win32 helper。
+- 点击“音频压缩”打开或聚焦单实例普通 Tauri WebView 窗口 `audio-compression`。它不是桌面歌词式透明、置顶或鼠标穿透窗口，不复用 Win32 helper；Windows 11 可按 ADR 0022 使用普通窗口 Mica 背景。
 - 压缩窗口使用与主窗口相同的主题、主题色和中英文偏好，允许调整尺寸并记忆最后的有效尺寸和位置。
 - 压缩窗口默认尺寸为 `800×560`、最小尺寸为 `700×500`；顶部使用与播放列表一致的单一添加菜单提供文件/文件夹入口，避免重复按钮和重复计数。
 - 关闭压缩窗口只释放该 WebView，不销毁 Rust `CompressionService` 的权威任务状态；重新打开时从类型化快照恢复。关闭主应用仍由统一应用生命周期安全取消活动任务、终止 sidecar 并清理临时文件。

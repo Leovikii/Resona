@@ -25,6 +25,7 @@ use crate::persistence::{
 use crate::platform::desktop_lyrics::{
     DesktopLyricsWindowFailure, DesktopLyricsWindowService, DesktopLyricsWindowSnapshot,
 };
+use crate::platform::window_material::{self, WindowMaterial, WindowMaterialFailure, WindowTheme};
 use crate::playback::{
     PlaybackEngine, PlaybackFailure, PlaybackMode, PlaybackSnapshot, RodioPlaybackEngine,
 };
@@ -60,6 +61,15 @@ pub async fn main_window_ready(
     service: State<'_, ManagedMainWindowService>,
 ) -> Result<MainWindowSnapshot, MainWindowFailure> {
     service.show(&app)
+}
+
+#[tauri::command]
+pub async fn sync_window_theme(
+    label: String,
+    theme: WindowTheme,
+    app: AppHandle,
+) -> Result<WindowMaterial, WindowMaterialFailure> {
+    window_material::sync_theme(&app, &label, theme)
 }
 
 #[tauri::command]

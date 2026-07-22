@@ -7,6 +7,7 @@ use tauri::{
 };
 
 use crate::compression::CompressionFailure;
+use crate::platform::window_material;
 
 pub const LABEL: &str = "audio-compression";
 const GEOMETRY_FILE: &str = "audio-compression-window.json";
@@ -38,22 +39,24 @@ pub fn show<R: Runtime>(app: &AppHandle<R>) -> Result<(), CompressionFailure> {
             .map_err(|error| window_error("focus_failed", error))?;
         return Ok(());
     }
-    let window = WebviewWindowBuilder::new(
-        app,
-        LABEL,
-        WebviewUrl::App("index.html?window=audio-compression".into()),
-    )
-    .title("Resona - Audio Compression")
-    .inner_size(DEFAULT_WIDTH, DEFAULT_HEIGHT)
-    .min_inner_size(MIN_WIDTH as f64, MIN_HEIGHT as f64)
-    .resizable(true)
-    .decorations(true)
-    .background_color((16, 17, 19, 255).into())
-    .visible(false)
-    .center()
-    .build()
-    .or_else(|error| app.get_webview_window(LABEL).ok_or(error))
-    .map_err(|error| window_error("create_failed", error))?;
+    let material = window_material::preferred_for(LABEL);
+    let url = format!(
+        "index.html?window=audio-compression&material={}",
+        material.query_value()
+    );
+    let builder = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App(url.into()))
+        .title("Resona - Audio Compression")
+        .inner_size(DEFAULT_WIDTH, DEFAULT_HEIGHT)
+        .min_inner_size(MIN_WIDTH as f64, MIN_HEIGHT as f64)
+        .resizable(true)
+        .decorations(true)
+        .background_color((16, 17, 19, 255).into())
+        .visible(false)
+        .center();
+    let window = window_material::configure_builder(builder, material)
+        .build()
+        .or_else(|error| app.get_webview_window(LABEL).ok_or(error))
+        .map_err(|error| window_error("create_failed", error))?;
     restore_geometry(app, &window);
     Ok(())
 }

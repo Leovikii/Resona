@@ -1,6 +1,29 @@
 :root {
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  --resona-window-background: var(--mantine-color-body);
+  --resona-content-surface: var(--mantine-color-body);
+  --resona-chrome-surface: light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-8));
+  --resona-subtle-surface: light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-7));
+  --resona-hairline: var(--mantine-color-default-border);
+}
+
+html[data-window-material="mica"] {
+  --resona-window-background: transparent;
+  --resona-content-surface: transparent;
+  --resona-chrome-surface: transparent;
+  --resona-subtle-surface: light-dark(rgb(255 255 255 / 58%), rgb(255 255 255 / 5.5%));
+  --resona-hairline: light-dark(rgb(20 30 40 / 13%), rgb(255 255 255 / 11%));
+}
+
+html[data-window-material="mica"],
+html[data-window-material="mica"] body,
+html[data-window-material="mica"] #root {
+  background: transparent;
+}
+
+html[data-window-material-preview] {
+  --resona-window-background: light-dark(rgb(243 243 243), rgb(32 32 32));
 }
 
 * {
@@ -18,7 +41,7 @@ body,
 body {
   min-height: 100vh;
   overflow: hidden;
-  background: var(--mantine-color-body);
+  background: var(--resona-window-background);
 }
 
 .app-shell {
@@ -48,7 +71,7 @@ html[data-window="audio-compression"] #root {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: var(--mantine-color-body);
+  background: var(--resona-window-background);
 }
 
 .compression-window {
@@ -60,17 +83,19 @@ html[data-window="audio-compression"] #root {
   display: flex;
   flex-direction: column;
   color: var(--mantine-color-text);
-  background: var(--mantine-color-body);
+  background: var(--resona-content-surface);
 }
 
 .compression-window-header {
   min-width: 0;
-  padding: 14px 18px 12px;
+  min-height: 52px;
+  padding: 9px 16px;
   display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: 18px;
-  border-bottom: 1px solid var(--mantine-color-default-border);
+  border-bottom: 1px solid var(--resona-hairline);
+  background: var(--resona-chrome-surface);
 }
 
 .compression-window-title {
@@ -78,7 +103,8 @@ html[data-window="audio-compression"] #root {
 }
 
 .compression-window-title h1 {
-  font-size: 20px;
+  font-size: 18px;
+  line-height: 1.25;
   letter-spacing: 0;
 }
 
@@ -90,7 +116,8 @@ html[data-window="audio-compression"] #root {
   grid-template-columns: auto minmax(230px, 320px) minmax(250px, auto);
   align-items: center;
   gap: 14px;
-  border-bottom: 1px solid var(--mantine-color-default-border);
+  border-bottom: 1px solid var(--resona-hairline);
+  background: var(--resona-content-surface);
 }
 
 .compression-scan-progress {
@@ -119,8 +146,8 @@ html[data-window="audio-compression"] #root {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   align-items: start;
   gap: 14px;
-  border-bottom: 1px solid var(--mantine-color-default-border);
-  background: light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-7));
+  border-bottom: 1px solid var(--resona-hairline);
+  background: var(--resona-subtle-surface);
 }
 
 .compression-workspace {
@@ -129,6 +156,7 @@ html[data-window="audio-compression"] #root {
   display: grid;
   display: block;
   flex: 1;
+  background: var(--resona-content-surface);
 }
 
 .compression-tree-panel {
@@ -146,7 +174,7 @@ html[data-window="audio-compression"] #root {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border-bottom: 1px solid var(--mantine-color-default-border);
+  border-bottom: 1px solid var(--resona-hairline);
 }
 
 .compression-tree-scroll {
@@ -274,6 +302,7 @@ html[data-window="audio-compression"] #root {
   color: rgb(255 255 255 / 82%);
   cursor: grab;
   user-select: none;
+  font-family: var(--mantine-font-family);
 }
 
 .desktop-lyrics-window:not([data-ready]) {
@@ -293,10 +322,10 @@ html[data-window="audio-compression"] #root {
   padding: 0;
   display: grid;
   place-items: center;
-  border: 1px solid rgb(255 255 255 / 14%);
-  border-radius: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--mantine-radius-sm);
   color: rgb(255 255 255 / 70%);
-  background: rgb(0 0 0 / 34%);
+  background: rgb(0 0 0 / 24%);
   cursor: ew-resize;
   opacity: 0;
   pointer-events: none;
@@ -316,6 +345,7 @@ html[data-window="audio-compression"] #root {
 
 .desktop-lyrics-resize-handle:hover,
 .desktop-lyrics-resize-handle:focus-visible {
+  border-color: rgb(255 255 255 / 16%);
   color: rgb(255 255 255 / 96%);
   background: rgb(0 0 0 / 58%);
   opacity: 1;
@@ -340,7 +370,7 @@ html[data-window="audio-compression"] #root {
   position: absolute;
   inset: 0;
   z-index: 0;
-  border-radius: 8px;
+  border-radius: var(--mantine-radius-sm);
   background: rgb(0 0 0 / var(--desktop-lyrics-background-opacity, 0));
   pointer-events: none;
   transition: background-color 140ms ease;
@@ -402,10 +432,10 @@ html[data-window="audio-compression"] #root {
   padding: 0;
   display: grid;
   place-items: center;
-  border: 0;
-  border-radius: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--mantine-radius-sm);
   color: inherit;
-  background: rgb(0 0 0 / 28%);
+  background: transparent;
   cursor: pointer;
   opacity: 0.82;
   transition: background-color 120ms ease, opacity 120ms ease, transform 120ms ease;
@@ -413,7 +443,8 @@ html[data-window="audio-compression"] #root {
 
 .desktop-lyrics-button:hover:not(:disabled),
 .desktop-lyrics-button:focus-visible {
-  background: rgb(0 0 0 / 52%);
+  border-color: rgb(255 255 255 / 12%);
+  background: rgb(255 255 255 / 11%);
   opacity: 1;
 }
 
@@ -552,7 +583,7 @@ input {
   display: grid;
   grid-template-columns: 208px minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) 104px;
-  background: var(--mantine-color-body);
+  background: var(--resona-window-background);
   color: var(--mantine-color-text);
 }
 
@@ -562,8 +593,8 @@ input {
   padding: 18px 14px 14px;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--mantine-color-default-border);
-  background: light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-8));
+  border-right: 1px solid var(--resona-hairline);
+  background: var(--resona-chrome-surface);
 }
 
 .brand-lockup {
@@ -840,6 +871,7 @@ input {
   position: relative;
   display: grid;
   grid-template-rows: minmax(0, 1fr);
+  background: var(--resona-content-surface);
 }
 
 .full-player {
@@ -853,7 +885,7 @@ input {
   grid-template-columns: minmax(260px, 0.9fr) minmax(320px, 1.1fr);
   align-items: center;
   gap: 42px;
-  background: var(--mantine-color-body);
+  background: var(--resona-content-surface);
   animation: view-in 180ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
 }
 
@@ -1329,6 +1361,9 @@ h2.page-heading {
   display: flex;
   align-items: center;
   gap: 12px;
+  border-color: var(--resona-hairline);
+  background: var(--resona-subtle-surface);
+  box-shadow: none;
 }
 
 .tool-entry {
@@ -1341,28 +1376,43 @@ h2.page-heading {
 }
 
 .tool-list {
+  width: 100%;
+  max-width: 920px;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   align-items: start;
 }
 
+.tools-page > .page-heading {
+  min-height: 36px;
+  margin-bottom: 12px;
+}
+
 .settings-page {
-  gap: 12px;
+  gap: 0;
 }
 
 .settings-page > .page-heading {
-  margin-bottom: 2px;
+  min-height: 36px;
+  margin-bottom: 8px;
 }
 
 .settings-section {
-  padding: 14px 16px;
+  padding: 12px 2px 16px;
   display: grid;
   gap: 0;
-  border: 1px solid var(--mantine-color-default-border);
-  border-radius: var(--mantine-radius-sm);
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.settings-section + .settings-section {
+  padding-top: 18px;
+  border-top: 1px solid var(--resona-hairline);
 }
 
 .settings-section-title {
-  margin-bottom: 6px;
+  margin-bottom: 8px;
   font-size: 14px;
 }
 
@@ -1429,8 +1479,8 @@ h2.page-heading {
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 16px;
-  border-top: 1px solid var(--mantine-color-default-border);
-  background: var(--mantine-color-body);
+  border-top: 1px solid var(--resona-hairline);
+  background: var(--resona-content-surface);
   transition: border-color 160ms ease, background-color 160ms ease;
 }
 
@@ -1440,11 +1490,21 @@ h2.page-heading {
 
 .player-progress {
   position: absolute;
-  inset: -4px 0 auto;
+  inset: -2px 0 auto;
 }
 
 .player-progress .mantine-Slider-track {
   border-radius: 0;
+}
+
+.player-progress .mantine-Slider-thumb {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.player-progress:hover .mantine-Slider-thumb,
+.player-progress:focus-within .mantine-Slider-thumb {
+  opacity: 1;
 }
 
 .player-track {
@@ -1615,8 +1675,8 @@ h2.page-heading {
   grid-column: 1;
   grid-row: 1;
   grid-template-rows: 40px 36px;
-  border-bottom: 1px solid var(--mantine-color-default-border);
-  background: light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-8));
+  border-bottom: 1px solid var(--resona-hairline);
+  background: var(--resona-chrome-surface);
 }
 
 .compact-global-navigation {
@@ -1648,7 +1708,7 @@ h2.page-heading {
   grid-template-columns: minmax(0, 1fr) 30px;
   align-items: center;
   gap: 4px;
-  border-top: 1px solid color-mix(in srgb, var(--mantine-color-default-border) 72%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--resona-hairline) 72%, transparent);
 }
 
 .compact-playlist-scroll,

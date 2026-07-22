@@ -20,6 +20,7 @@ src/
 │  └─ window/                 # 主窗口布局模式 typed hook；不持有原生坐标
 ├─ shared/
 │  ├─ bridge/                 # 类型化 Tauri command/event 与单实例文件选择边界
+│  │  └─ windowAppearance.ts  # 当前窗口材质初始化、DOM 语义与原生主题同步
 │  ├─ i18n/                   # zh-CN/en 资源与 i18next 初始化
 │  ├─ model/                  # 播放、播放列表、歌词和桌面窗口共享契约
 │  ├─ ui/
@@ -49,15 +50,17 @@ src-tauri/
 │  │  ├─ desktop_lyrics/
 │  │  │  └─ windows.rs       # Tauri 歌词窗与 Win32 原生解锁辅助窗
 │  │  ├─ media_session.rs    # SMTC/MPRIS capability 边界
-│  │  └─ media_session/
-│  │     └─ windows.rs       # souvlaki Windows SMTC adapter
+│  │  ├─ media_session/
+│  │  │  └─ windows.rs       # souvlaki Windows SMTC adapter
+│  │  └─ window_material.rs  # Windows Mica/跨平台实色回退与主题同步
 │  ├─ playback/
 │  │  ├─ mod.rs              # 播放契约、Rodio actor、内部执行序列与测试
 │  │  └─ output.rs           # CPAL 输出枚举、选择与错误回调
 │  ├─ lib.rs                  # Tauri 组装
 │  └─ main.rs                 # 桌面入口
 ├─ Cargo.toml
-└─ tauri.conf.json
+├─ tauri.conf.json            # 跨平台不透明窗口默认
+└─ tauri.windows.conf.json    # Windows 主窗口透明创建属性
 tests/
 └─ fixtures/
    ├─ audio/                  # 可再生成的 WAV/FLAC/MP3 与边界样本
@@ -74,6 +77,8 @@ Mantine 直接导入仍限制在 `src/app` 与 `src/shared/ui`；`AddMediaMenu` 
 0.0.13 已删除 managed-folder/media-library 运行时代码；`src/features/library` 保持为播放列表与最近历史，不为目录整洁做无收益搬迁。桌面歌词仍通过通用 facade 隔离 Windows 实现。0.0.17 的 `src/windows/AudioCompressionWindow.tsx` 只提供轻量窗口入口，Mantine 组合位于 `src/app/AudioCompressionApp.tsx`；Rust `compression_window.rs` 只管理普通辅助窗口生命周期，扫描和转换仍归 `CompressionService`。
 
 ADR 0020 已由 `main_window.rs` 与 `features/window` 实现：Rust 保存模式和原生几何，React 只消费布局快照。当前 ScrollArea 组合没有形成重复默认值或复杂行为，因此继续在 `src/app` 直接组合 Mantine，不增加无收益包装层。
+
+ADR 0022 由 `platform/window_material.rs`、`shared/bridge/windowAppearance.ts` 和 `styles.css` 的语义表面 token 实现。Windows 版本判断与 Tauri Window Effects 在 Rust 边界终止；React 不出现 Windows 条件分支。桌面歌词继续使用独立透明平台边界，不经过普通窗口材质 adapter。
 
 ## 目标结构
 
