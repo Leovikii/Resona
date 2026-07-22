@@ -41,7 +41,6 @@ import {
   ListMusic,
   Maximize2,
   Minimize2,
-  Music2,
   Pause,
   Play,
   Plus,
@@ -83,6 +82,7 @@ import { fileNameFromPath, formatDuration } from "../shared/utils/format";
 import { listInsertionPositionAtY } from "../shared/ui/usePointerReorder";
 import { PlaylistTrackList } from "../shared/ui/PlaylistTrackList";
 import { AddMediaMenu } from "../shared/ui/AddMediaMenu";
+import { BrandWordmark } from "../shared/ui/BrandWordmark";
 import { CompactTopNavigation, type CompactNavigationSelection } from "../shared/ui/CompactTopNavigation";
 import { OverflowMarquee } from "../shared/ui/OverflowMarquee";
 import { accentColors, type AccentColor, usePreferences } from "./preferences";
@@ -639,15 +639,9 @@ function Sidebar({
 }
 
 function BrandLockup() {
-  const { t } = useTranslation();
   return (
     <div className="brand-lockup">
-      <ThemeIcon radius="sm" size={34} variant="light">
-        <Music2 size={20} strokeWidth={1.8} />
-      </ThemeIcon>
-      <div className="brand-copy">
-        <Text fw={700}>{t("app.name")}</Text>
-      </div>
+      <BrandWordmark className="brand-wordmark-sidebar" />
     </div>
   );
 }

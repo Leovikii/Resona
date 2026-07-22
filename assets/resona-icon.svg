@@ -1,5 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Resona">
-  <rect width="512" height="512" rx="88" fill="#101113"/>
-  <circle cx="256" cy="256" r="154" fill="none" stroke="#3bc9db" stroke-width="28"/>
-  <path d="M154 270h38l24-88 40 154 36-126 26 60h40" fill="none" stroke="#f1f3f5" stroke-linecap="round" stroke-linejoin="round" stroke-width="28"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="79 79 393 393" role="img" aria-labelledby="title desc">
+  <title id="title">Resona application icon</title>
+  <desc id="desc">A transparent angular blackletter R in violet and black with a hollow play-shaped counter.</desc>
+  <defs>
+    <g id="r-letterform">
+      <path d="M28 208V58l21-20 21 18v152l-21 18z"/>
+      <path d="M49 38l101 68v42l-30 24 56 44-28 16-80-54v-34l52-38-52-34V56z"/>
+    </g>
+  </defs>
+  <use href="#r-letterform" fill="#17151c" transform="translate(82 19) scale(1.95)"/>
+  <use href="#r-letterform" fill="#845ef7" transform="translate(70 5) scale(1.95)"/>
 </svg>

@@ -1,10 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="79 79 393 393" role="img" aria-labelledby="title desc">
   <title id="title">Resona R mark</title>
   <desc id="desc">A transparent angular blackletter R in violet and black with a hollow play-shaped counter.</desc>
   <defs>
     <g id="r-letterform">
       <path d="M28 208V58l21-20 21 18v152l-21 18z"/>
-      <path d="M49 38l101 68v42l-30 24 56 44-28 16-78-54v-34l50-38-50-34V56z"/>
+      <path d="M49 38l101 68v42l-30 24 56 44-28 16-80-54v-34l52-38-52-34V56z"/>
     </g>
   </defs>
   <use href="#r-letterform" fill="#17151c" transform="translate(82 19) scale(1.95)"/>

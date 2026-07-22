@@ -619,10 +619,19 @@ input {
   padding: 0 8px;
   display: flex;
   align-items: center;
-  gap: 10px;
 }
 
-.brand-copy,
+.brand-wordmark {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  user-select: none;
+}
+
+.brand-wordmark-sidebar {
+  width: 132px;
+}
+
 .topbar-title,
 .track-copy,
 .player-track-copy {
@@ -1727,11 +1736,9 @@ h2.page-heading {
   gap: 8px;
 }
 
-.compact-brand-name {
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+.compact-brand-wordmark {
+  width: 108px;
+  flex: 0 1 auto;
 }
 
 .compact-global-actions {
