@@ -197,11 +197,12 @@ pub async fn get_default_playlist(
 #[tauri::command]
 pub async fn add_default_playlist_items(
     paths: Vec<String>,
+    position: Option<usize>,
     media_import: State<'_, ManagedMediaImportService>,
 ) -> Result<DefaultPlaylistMutationResult, PlaybackFailure> {
     let media_import = Arc::clone(media_import.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        media_import.add_paths(paths.into_iter().map(PathBuf::from).collect())
+        media_import.add_paths(paths.into_iter().map(PathBuf::from).collect(), position)
     })
     .await
     .map_err(|error| {
@@ -250,17 +251,16 @@ pub async fn move_default_playlist_item(
 
 #[tauri::command]
 pub async fn play_default_playlist_item(
-    selected_index: usize,
+    item_id: u64,
     media_import: State<'_, ManagedMediaImportService>,
     persistence: State<'_, ManagedPersistence>,
 ) -> Result<OpenMediaResult, PlaybackFailure> {
     let media_import = Arc::clone(media_import.inner());
-    let result =
-        tauri::async_runtime::spawn_blocking(move || media_import.play_item(selected_index))
-            .await
-            .map_err(|error| {
-                PlaybackFailure::task_failed(format!("default playlist task failed: {error}"))
-            })??;
+    let result = tauri::async_runtime::spawn_blocking(move || media_import.play_item(item_id))
+        .await
+        .map_err(|error| {
+            PlaybackFailure::task_failed(format!("default playlist task failed: {error}"))
+        })??;
     record_recent(persistence.inner(), &result.playback).await;
     Ok(result)
 }
@@ -371,14 +371,6 @@ pub async fn resume_playback(
 ) -> Result<PlaybackSnapshot, PlaybackFailure> {
     let engine = Arc::clone(engine.inner());
     run_engine_operation(engine, PlaybackEngine::resume).await
-}
-
-#[tauri::command]
-pub async fn stop_playback(
-    engine: State<'_, ManagedPlaybackEngine>,
-) -> Result<PlaybackSnapshot, PlaybackFailure> {
-    let engine = Arc::clone(engine.inner());
-    run_engine_operation(engine, PlaybackEngine::stop).await
 }
 
 #[tauri::command]

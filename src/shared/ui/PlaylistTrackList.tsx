@@ -15,6 +15,7 @@ export interface PlaylistTrackListItem {
 interface PlaylistTrackListProps {
   busy: boolean;
   currentPath: string | null;
+  externalInsertionPosition: number | null;
   items: PlaylistTrackListItem[];
   onAddFiles: () => void;
   onAddFolders: () => void;
@@ -27,6 +28,7 @@ interface PlaylistTrackListProps {
 export function PlaylistTrackList({
   busy,
   currentPath,
+  externalInsertionPosition,
   items,
   onAddFiles,
   onAddFolders,
@@ -75,6 +77,10 @@ export function PlaylistTrackList({
   }, []);
 
   const selectedIds = useMemo(() => [...selected], [selected]);
+  const clearSelection = useCallback(() => {
+    setSelected(new Set());
+    setAnchor(null);
+  }, []);
   const selectTrack = useCallback((event: React.MouseEvent, itemId: number) => {
     const itemIndex = items.findIndex((item) => item.id === itemId);
     if (itemIndex < 0) return;
@@ -119,12 +125,18 @@ export function PlaylistTrackList({
   const removeSelected = useCallback(() => {
     if (selectedIds.length === 0) return;
     onRemove(selectedIds);
-    setSelected(new Set());
-    setAnchor(null);
-  }, [onRemove, selectedIds]);
+    clearSelection();
+  }, [clearSelection, onRemove, selectedIds]);
 
   return (
-    <div className="playlist-track-area" onContextMenu={openBlankMenu}>
+    <div
+      className="playlist-track-area"
+      onClick={(event) => {
+        if ((event.target as Element).closest("[data-track-id], button, input, [role='button']")) return;
+        clearSelection();
+      }}
+      onContextMenu={openBlankMenu}
+    >
       <div className="playlist-selection-actions">
         <Text c="dimmed" size="sm">{t("common.tracks", { count: items.length })}</Text>
         <div className="playlist-selection-buttons">
@@ -133,23 +145,25 @@ export function PlaylistTrackList({
       </div>
       <div
         className="playlist-track-list saved-track-list"
+        data-external-drag={externalInsertionPosition !== null || undefined}
         data-internal-drag={reorder.draggedId !== null || undefined}
-        onClick={(event) => {
-          if ((event.target as Element).closest("[data-track-id]")) return;
-          setSelected(new Set());
-          setAnchor(null);
-        }}
         ref={reorder.listRef}
       >
-        {items.map((item, index) => <div className="saved-track-slot" key={item.id}>
-          <div className="saved-track-gap" data-active={reorder.insertionPosition === index || undefined}><span /></div>
+        {items.map((item, index) => {
+          const current = currentPath === item.path;
+          return <div className="saved-track-slot" key={item.id}>
+          <div
+            className="saved-track-gap"
+            data-active={reorder.insertionPosition === index || externalInsertionPosition === index || undefined}
+          ><span /></div>
           <Paper
             className="saved-track-row"
-            data-current={currentPath === item.path || undefined}
+            data-current={current || undefined}
             data-dragging={reorder.draggedId === item.id || undefined}
             data-selected={selected.has(item.id) || undefined}
             data-track-id={item.id}
             data-track-position={index}
+            aria-selected={selected.has(item.id)}
             onClick={(event) => {
               if (!reorder.consumeClick()) selectTrack(event, item.id);
             }}
@@ -173,14 +187,24 @@ export function PlaylistTrackList({
             tabIndex={0}
             withBorder
           >
-            <span className="track-index">{index + 1}</span>
+            <span className="track-index">
+              {current ? (
+                <span aria-label={t("playback.playing")} className="playlist-playing-indicator track-playing-indicator">
+                  <i /><i /><i />
+                </span>
+              ) : index + 1}
+            </span>
             <div className="track-copy">
               <OverflowMarquee className="track-title" observe={false} text={item.displayName} />
               <OverflowMarquee className="track-path" observe={false} text={item.path} />
             </div>
           </Paper>
-        </div>)}
-        <div className="saved-track-gap" data-active={reorder.insertionPosition === items.length || undefined}><span /></div>
+        </div>;
+        })}
+        <div
+          className="saved-track-gap"
+          data-active={reorder.insertionPosition === items.length || externalInsertionPosition === items.length || undefined}
+        ><span /></div>
       </div>
       {contextMenu && <Portal>
         <Paper className="app-context-menu" ref={contextMenuRef} shadow="md" style={{ left: contextMenu.x, top: contextMenu.y }} withBorder>
@@ -189,7 +213,7 @@ export function PlaylistTrackList({
           )}
           <button disabled={selectedIds.length === 0} onClick={() => { removeSelected(); setContextMenu(null); }} type="button"><Trash2 size={14} />{t("common.remove")}</button>
           <button onClick={() => { setSelected(new Set(items.map((item) => item.id))); setAnchor(items[0]?.id ?? null); setContextMenu(null); }} type="button">{t("library.selectAll")}</button>
-          <button onClick={() => { setSelected(new Set()); setAnchor(null); setContextMenu(null); }} type="button"><X size={14} />{t("library.clearSelection")}</button>
+          <button onClick={() => { clearSelection(); setContextMenu(null); }} type="button"><X size={14} />{t("library.clearSelection")}</button>
           {contextMenu.trackId === null && <>
             <button onClick={() => { onAddFiles(); setContextMenu(null); }} type="button">{t("library.addFiles")}</button>
             <button onClick={() => { onAddFolders(); setContextMenu(null); }} type="button">{t("library.addFolder")}</button>

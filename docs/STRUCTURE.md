@@ -69,7 +69,7 @@ scripts/
 └─ verify-release-webview.ps1 # 验证 Release 主窗口实际可见并清理进程
 ```
 
-Mantine 直接导入仍限制在 `src/app` 与 `src/shared/ui`；`AddMediaMenu` 统一跨窗口添加来源行为，`PlaylistTrackList` 统一默认/用户列表选择与排序，`OverflowMarquee` 只负责按尺寸判断的单行展示，`usePointerReorder.ts` 是不导入 Mantine、Tauri 或领域服务的纯 Pointer Events 行为。不为每个 Mantine 组件创建空包装层。
+Mantine 直接导入仍限制在 `src/app` 与 `src/shared/ui`；`AddMediaMenu` 统一跨窗口添加来源行为，`PlaylistTrackList` 统一默认/用户列表选择与排序，`CompactTopNavigation` 负责窄屏顶部全局导航和播放列表 Tabs，`OverflowMarquee` 只负责按尺寸判断的单行展示，`usePointerReorder.ts` 是不导入 Mantine、Tauri 或领域服务的纯 Pointer Events 行为。不为每个 Mantine 组件创建空包装层。
 
 0.0.13 已删除 managed-folder/media-library 运行时代码；`src/features/library` 保持为播放列表与最近历史，不为目录整洁做无收益搬迁。桌面歌词仍通过通用 facade 隔离 Windows 实现。0.0.17 的 `src/windows/AudioCompressionWindow.tsx` 只提供轻量窗口入口，Mantine 组合位于 `src/app/AudioCompressionApp.tsx`；Rust `compression_window.rs` 只管理普通辅助窗口生命周期，扫描和转换仍归 `CompressionService`。
 

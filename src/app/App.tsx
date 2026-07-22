@@ -9,7 +9,6 @@ import {
   Button,
   ColorInput,
   Divider,
-  Drawer,
   Group,
   Loader,
   Menu,
@@ -45,7 +44,6 @@ import {
   Minimize2,
   Music2,
   Pause,
-  PanelLeftOpen,
   Play,
   Plus,
   RefreshCw,
@@ -55,7 +53,6 @@ import {
   SkipBack,
   SkipForward,
   Shuffle,
-  Square,
   Tags,
   Trash2,
   Volume2,
@@ -87,18 +84,15 @@ import { fileNameFromPath, formatDuration } from "../shared/utils/format";
 import { listInsertionPositionAtY } from "../shared/ui/usePointerReorder";
 import { PlaylistTrackList } from "../shared/ui/PlaylistTrackList";
 import { AddMediaMenu } from "../shared/ui/AddMediaMenu";
+import { CompactTopNavigation, type CompactNavigationSelection } from "../shared/ui/CompactTopNavigation";
 import { OverflowMarquee } from "../shared/ui/OverflowMarquee";
 import { accentColors, type AccentColor, usePreferences } from "./preferences";
 
-type Selection =
-  | { kind: "recent" }
-  | { kind: "default" }
-  | { kind: "user"; playlistId: number }
-  | { kind: "tools" }
-  | { kind: "settings" };
+type Selection = CompactNavigationSelection;
 
 type DropTarget =
   | { kind: "default" }
+  | { kind: "default-track-gap"; position: number }
   | { kind: "playlist"; playlistId: number }
   | { kind: "playlist-gap"; position: number }
   | { kind: "track-gap"; playlistId: number; position: number };
@@ -110,13 +104,12 @@ export default function App() {
   const desktopLyrics = useDesktopLyricsWindow();
   const { desktopLyrics: lyricsPreferences, setDesktopLyrics } = usePreferences();
   const mainWindow = useMainWindowLayout();
-  const [selection, setSelection] = useState<Selection>({ kind: "recent" });
+  const [selection, setSelection] = useState<Selection>({ kind: "default" });
   const [createPlaylistOpen, setCreatePlaylistOpen] = useState(false);
   const [playlistName, setPlaylistName] = useState("");
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const [externalDragActive, setExternalDragActive] = useState(false);
   const [playerExpanded, setPlayerExpanded] = useState(false);
-  const [navigationOpen, setNavigationOpen] = useState(false);
   const dropActionsRef = useRef({ library, playback, t });
   const autoLyricsPathRef = useRef<string | null>(null);
   dropActionsRef.current = { library, playback, t };
@@ -225,8 +218,9 @@ export default function App() {
       setExternalDragActive(false);
       if (!target || event.payload.paths.length === 0) return;
       const { library: actions, playback: playbackActions, t: translate } = dropActionsRef.current;
-      if (target.kind === "default") {
-        void playbackActions.addDefaultItems(event.payload.paths).then((result) => {
+      if (target.kind === "default" || target.kind === "default-track-gap") {
+        const position = target.kind === "default-track-gap" ? target.position : null;
+        void playbackActions.addDefaultItems(event.payload.paths, position).then((result) => {
           if (result) setSelection({ kind: "default" });
         });
       } else if (target.kind === "playlist-gap") {
@@ -271,7 +265,6 @@ export default function App() {
   }, []);
   const selectNavigation = useCallback((next: Selection) => {
     setPlayerExpanded(false);
-    setNavigationOpen(false);
     if (next.kind === "user") selectUserPlaylist(next.playlistId);
     else setSelection(next);
   }, [selectUserPlaylist]);
@@ -331,6 +324,11 @@ export default function App() {
   const renamePlaylistById = useCallback((playlistId: number, name: string) => {
     void library.renamePlaylist(playlistId, name);
   }, [library.renamePlaylist]);
+  const requestRenamePlaylist = useCallback((playlistId: number) => {
+    const playlist = library.playlists.find((candidate) => candidate.id === playlistId);
+    const name = window.prompt(t("library.name"), playlist?.name ?? "")?.trim();
+    if (name) renamePlaylistById(playlistId, name);
+  }, [library.playlists, renamePlaylistById, t]);
   const refreshOutputs = useCallback(() => {
     void playback.run("refresh_output_devices");
   }, [playback.run]);
@@ -359,33 +357,16 @@ export default function App() {
     <main className="app-shell" data-layout={mainWindow.snapshot.layoutMode}>
       {compact ? (
         <>
-          <CompactNavigationRail
-            onExpand={() => setNavigationOpen(true)}
+          <CompactTopNavigation
+            activePlaylist={playback.activePlaylist}
+            onClearDefault={clearDefaultItems}
+            onCreatePlaylist={openCreatePlaylist}
+            onDeletePlaylist={deleteUserPlaylist}
+            onRenamePlaylist={requestRenamePlaylist}
             onSelect={selectNavigation}
+            playlists={library.playlists}
             selection={selection}
           />
-          <Drawer
-            className="navigation-drawer"
-            onClose={() => setNavigationOpen(false)}
-            opened={navigationOpen}
-            padding={0}
-            size="min(78vw, 280px)"
-            title={<BrandLockup />}
-          >
-            <MemoSidebar
-              activePlaylist={playback.activePlaylist}
-              dropTarget={dropTarget}
-              externalDragActive={externalDragActive}
-              hideBrand
-              onCreate={openCreatePlaylist}
-              onClearDefault={clearDefaultItems}
-              onDeletePlaylist={deleteUserPlaylist}
-              onRenamePlaylist={renamePlaylistById}
-              onSelect={selectNavigation}
-              playlists={library.playlists}
-              selection={selection}
-            />
-          </Drawer>
         </>
       ) : sidebar}
 
@@ -417,7 +398,7 @@ export default function App() {
               <MemoDefaultPlaylistView
                 busy={playback.busy}
                 currentPath={playback.selectedPath}
-                dropActive={dropTarget?.kind === "default"}
+                dropTarget={dropTarget}
                 items={playback.defaultPlaylist.items}
                 onAddFiles={playback.chooseAndAddDefaultFiles}
                 onAddFolders={playback.chooseAndAddDefaultFolders}
@@ -545,7 +526,6 @@ function Sidebar({
   activePlaylist,
   dropTarget,
   externalDragActive,
-  hideBrand = false,
   onCreate,
   onClearDefault,
   onDeletePlaylist,
@@ -557,7 +537,6 @@ function Sidebar({
   activePlaylist: ReturnType<typeof usePlaybackController>["activePlaylist"];
   dropTarget: DropTarget | null;
   externalDragActive: boolean;
-  hideBrand?: boolean;
   onCreate: () => void;
   onClearDefault: () => void;
   onDeletePlaylist: (playlistId: number) => void;
@@ -579,7 +558,7 @@ function Sidebar({
   }, []);
   return (
     <aside className="sidebar">
-      {!hideBrand && <BrandLockup />}
+      <BrandLockup />
 
       <nav className="sidebar-primary" aria-label={t("app.name")}>
         <NavButton
@@ -675,80 +654,6 @@ function BrandLockup() {
   );
 }
 
-function CompactNavigationRail({ onExpand, onSelect, selection }: {
-  onExpand: () => void;
-  onSelect: (selection: Selection) => void;
-  selection: Selection;
-}) {
-  const { t } = useTranslation();
-  return (
-    <aside className="compact-navigation-rail" aria-label={t("nav.navigation")}>
-      <Tooltip label={t("nav.navigation")} position="right" withArrow>
-        <ActionIcon
-          aria-label={t("nav.navigation")}
-          className="compact-rail-brand"
-          onClick={onExpand}
-          size={34}
-          variant="light"
-        >
-          <PanelLeftOpen size={18} strokeWidth={1.8} />
-        </ActionIcon>
-      </Tooltip>
-      <nav className="compact-rail-primary">
-        <CompactRailButton
-          active={selection.kind === "recent"}
-          icon={<History />}
-          label={t("nav.recent")}
-          onClick={() => onSelect({ kind: "recent" })}
-        />
-        <CompactRailButton
-          active={selection.kind === "default" || selection.kind === "user"}
-          icon={<ListMusic />}
-          label={t("nav.playlists")}
-          onClick={onExpand}
-        />
-      </nav>
-      <nav className="compact-rail-bottom">
-        <CompactRailButton
-          active={selection.kind === "tools"}
-          icon={<Wrench />}
-          label={t("nav.tools")}
-          onClick={() => onSelect({ kind: "tools" })}
-        />
-        <CompactRailButton
-          active={selection.kind === "settings"}
-          icon={<Settings />}
-          label={t("nav.settings")}
-          onClick={() => onSelect({ kind: "settings" })}
-        />
-      </nav>
-    </aside>
-  );
-}
-
-function CompactRailButton({ active, icon, label, onClick }: {
-  active: boolean;
-  icon: ReactNode;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <Tooltip label={label} position="right" withArrow>
-      <ActionIcon
-        aria-current={active ? "page" : undefined}
-        aria-label={label}
-        className="compact-rail-button"
-        color={active ? undefined : "gray"}
-        onClick={onClick}
-        size={34}
-        variant={active ? "light" : "subtle"}
-      >
-        {icon}
-      </ActionIcon>
-    </Tooltip>
-  );
-}
-
 function NavButton({ active, icon, label, onClick }: {
   active: boolean;
   icon: ReactNode;
@@ -816,7 +721,7 @@ function PlaylistGap({ active, position }: { active: boolean; position: number }
 function DefaultPlaylistView({
   busy,
   currentPath,
-  dropActive,
+  dropTarget,
   items,
   onAddFiles,
   onAddFolders,
@@ -828,7 +733,7 @@ function DefaultPlaylistView({
 }: {
   busy: boolean;
   currentPath: string | null;
-  dropActive: boolean;
+  dropTarget: DropTarget | null;
   items: DefaultPlaylistItem[];
   onAddFiles: () => Promise<void>;
   onAddFolders: () => Promise<void>;
@@ -864,21 +769,21 @@ function DefaultPlaylistView({
       {items.length === 0 ? (
         <div
           className="default-playlist-drop"
-          data-drop-active={dropActive || undefined}
+          data-drop-active={dropTarget?.kind === "default" || undefined}
           data-drop-kind="default"
         >
           <EmptyView icon={<Disc3 />} label={t("library.defaultEmpty")} />
         </div>
       ) : (
         <ScrollArea
-          className="track-scroll default-playlist-drop"
-          data-drop-active={dropActive || undefined}
-          data-drop-kind="default"
+          className="track-scroll"
+          data-drop-kind="default-track-list"
           type="auto"
         >
           <PlaylistTrackList
             busy={busy}
             currentPath={currentPath}
+            externalInsertionPosition={dropTarget?.kind === "default-track-gap" ? dropTarget.position : null}
             items={items}
             onAddFiles={() => void onAddFiles()}
             onAddFolders={() => void onAddFolders()}
@@ -965,11 +870,19 @@ function UserPlaylistView({
           <EmptyView icon={<ListMusic />} label={t("library.itemsEmptyDrop")} />
         </div>
       ) : (
-        <ScrollArea className="track-scroll" type="auto">
-          <div data-external-drag={externalDragActive || undefined} data-playlist-id={playlist.id}>
+        <ScrollArea
+          className="track-scroll"
+          data-drop-kind="track-list"
+          data-playlist-id={playlist.id}
+          type="auto"
+        >
+          <div>
             <PlaylistTrackList
               busy={busy}
               currentPath={currentPath}
+              externalInsertionPosition={externalDragActive && dropTarget?.kind === "track-gap" && dropTarget.playlistId === playlist.id
+                ? dropTarget.position
+                : null}
               items={items}
               onAddFiles={onAddFiles}
               onAddFolders={onAddFolders}
@@ -1191,7 +1104,7 @@ function SettingsView({ busy, desktopLyrics, layoutBusy, layoutMode, onRefresh, 
             value={fontDraft}
           />
         </SettingRow>
-        <SettingRow label={t("desktopLyrics.color")}>
+        <SettingRow className="color-setting" label={t("desktopLyrics.color")}>
           <ColorInput
             aria-label={t("desktopLyrics.color")}
             format="hex"
@@ -1398,8 +1311,8 @@ function PlaybackCoreControls({ busy, canControl, currentId, onRun, snapshot }: 
   return (
     <Group className="player-controls" gap="xs" justify="center" wrap="nowrap">
       <Tooltip label={t("playback.previous")}>
-        <ActionIcon aria-label={t("playback.previous")} disabled={!canControl || busy} onClick={() => void onRun("previous_playback")} size="lg" variant="default">
-          <SkipBack fill="currentColor" size={16} />
+        <ActionIcon aria-label={t("playback.previous")} disabled={!canControl || busy} onClick={() => void onRun("previous_playback")} size="xl" variant="default">
+          <SkipBack fill="currentColor" size={18} />
         </ActionIcon>
       </Tooltip>
       <Tooltip label={toggleLabel}>
@@ -1411,20 +1324,15 @@ function PlaybackCoreControls({ busy, canControl, currentId, onRun, snapshot }: 
             else if (snapshot.status === "paused") void onRun("resume_playback");
             else if (currentId !== undefined) void onRun("play_queue_item", { id: currentId });
           }}
-          size="lg"
+          size="xl"
           variant="filled"
         >
-          {snapshot.status === "playing" ? <Pause fill="currentColor" size={17} /> : <Play fill="currentColor" size={17} />}
+          {snapshot.status === "playing" ? <Pause fill="currentColor" size={19} /> : <Play fill="currentColor" size={19} />}
         </ActionIcon>
       </Tooltip>
       <Tooltip label={t("playback.next")}>
-        <ActionIcon aria-label={t("playback.next")} disabled={!canControl || busy} onClick={() => void onRun("next_playback")} size="lg" variant="default">
-          <SkipForward fill="currentColor" size={16} />
-        </ActionIcon>
-      </Tooltip>
-      <Tooltip label={t("playback.stop")}>
-        <ActionIcon aria-label={t("playback.stop")} disabled={!canControl || busy} onClick={() => void onRun("stop_playback")} size="lg" variant="subtle">
-          <Square fill="currentColor" size={14} />
+        <ActionIcon aria-label={t("playback.next")} disabled={!canControl || busy} onClick={() => void onRun("next_playback")} size="xl" variant="default">
+          <SkipForward fill="currentColor" size={18} />
         </ActionIcon>
       </Tooltip>
     </Group>
@@ -1449,7 +1357,6 @@ function CompactPlayerControls({ busy, canControl, currentId, desktopLyrics, det
     <div className="compact-player-controls">
       <div className="compact-player-side compact-player-side-left">
         <AudioQualityBadge quality={details?.quality ?? null} />
-        <PlaybackModeButton busy={busy} mode={mode} onRun={onRun} />
       </div>
       <PlaybackCoreControls
         busy={busy}
@@ -1459,6 +1366,7 @@ function CompactPlayerControls({ busy, canControl, currentId, desktopLyrics, det
         snapshot={snapshot}
       />
       <div className="compact-player-side compact-player-side-right">
+        <PlaybackModeButton busy={busy} mode={mode} onRun={onRun} />
         <DesktopLyricsButton busy={busy} controller={desktopLyrics} hasCurrentTrack={hasCurrentTrack} />
         <VolumeButton
           busy={busy}
@@ -1483,8 +1391,8 @@ function VolumeButton({ busy, onChange, onChangeEnd, volume }: {
     <Popover onChange={setOpen} opened={open} position="top" shadow="md" width={190} withArrow>
       <Popover.Target>
         <Tooltip label={t("playback.volume")}>
-          <ActionIcon aria-label={t("playback.volume")} disabled={busy} onClick={() => setOpen((value) => !value)} variant="subtle">
-            <Volume2 size={17} />
+          <ActionIcon aria-label={t("playback.volume")} disabled={busy} onClick={() => setOpen((value) => !value)} size="xl" variant="subtle">
+            <Volume2 size={19} />
           </ActionIcon>
         </Tooltip>
       </Popover.Target>
@@ -1527,9 +1435,10 @@ function DesktopLyricsButton({ busy, controller, hasCurrentTrack }: {
             if (success) setDesktopLyrics({ enabled: true });
           });
         }}
+        size="xl"
         variant={controller.snapshot.visible ? "light" : "subtle"}
       >
-        <Captions size={17} />
+        <Captions size={19} />
       </ActionIcon>
     </Tooltip>
   );
@@ -1559,10 +1468,10 @@ function PlaybackModeButton({ busy, mode, onRun }: {
 }) {
   const { t } = useTranslation();
   const modes: { icon: ReactNode; value: PlaybackSnapshot["playbackMode"] }[] = [
-    { icon: <ArrowRight size={16} />, value: "sequential" },
-    { icon: <Repeat size={16} />, value: "repeat_all" },
-    { icon: <Repeat1 size={16} />, value: "repeat_one" },
-    { icon: <Shuffle size={16} />, value: "shuffle" },
+    { icon: <ArrowRight size={19} />, value: "sequential" },
+    { icon: <Repeat size={19} />, value: "repeat_all" },
+    { icon: <Repeat1 size={19} />, value: "repeat_one" },
+    { icon: <Shuffle size={19} />, value: "shuffle" },
   ];
   const active = modes.find((item) => item.value === mode) ?? modes[0];
   return (
@@ -1572,6 +1481,7 @@ function PlaybackModeButton({ busy, mode, onRun }: {
           aria-label={t(`playback.modes.${mode}`)}
           color={mode === "sequential" ? "gray" : undefined}
           disabled={busy}
+          size="xl"
           title={t(`playback.modes.${mode}`)}
           variant={mode === "sequential" ? "subtle" : "light"}
         >
@@ -1763,10 +1673,13 @@ function localizeFailure(
 function dropTargetAtPosition(clientX: number, clientY: number): DropTarget | null {
   const hit = document.elementFromPoint(clientX, clientY);
   const element = hit?.closest<HTMLElement>("[data-drop-kind]");
-  const trackList = hit?.closest<HTMLElement>(".saved-track-list[data-playlist-id]");
+  const trackList = hit?.closest<HTMLElement>(".track-scroll[data-drop-kind]");
   if (trackList) {
-    const playlistId = Number(trackList.dataset.playlistId);
     const position = listInsertionPositionAtY(trackList, clientY);
+    if (trackList.dataset.dropKind === "default-track-list") {
+      return { kind: "default-track-gap", position };
+    }
+    const playlistId = Number(trackList.dataset.playlistId);
     if (Number.isFinite(playlistId)) return { kind: "track-gap", playlistId, position };
   }
   if (!element) return null;
@@ -1786,6 +1699,9 @@ function dropTargetsEqual(left: DropTarget | null, right: DropTarget | null) {
   if (left?.kind !== right?.kind) return false;
   if (!left || !right) return left === right;
   if (left.kind === "default" && right.kind === "default") return true;
+  if (left.kind === "default-track-gap" && right.kind === "default-track-gap") {
+    return left.position === right.position;
+  }
   if (left.kind === "playlist" && right.kind === "playlist") {
     return left.playlistId === right.playlistId;
   }

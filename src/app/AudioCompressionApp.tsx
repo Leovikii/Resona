@@ -40,12 +40,13 @@ import type {
   CompressionScanNode,
 } from "../shared/model/compression";
 import { AddMediaMenu } from "../shared/ui/AddMediaMenu";
+import { usePreferences } from "./preferences";
 
 export default function AudioCompressionApp() {
   const { t } = useTranslation();
   const compression = useAudioCompression();
-  const [preset, setPreset] = useState<CompressionPreset>("balanced");
-  const [deleteSource, setDeleteSource] = useState(true);
+  const { compression: preferences, setCompression } = usePreferences();
+  const { deleteSource, preset } = preferences;
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -174,7 +175,7 @@ export default function AudioCompressionApp() {
             { label: t("compression.smallest"), value: "smallest" },
           ]}
           disabled={taskBusy}
-          onChange={(value) => setPreset(value as CompressionPreset)}
+          onChange={(value) => setCompression({ preset: value as CompressionPreset })}
           size="xs"
           value={preset}
         />
@@ -183,7 +184,7 @@ export default function AudioCompressionApp() {
             checked={deleteSource}
             disabled={taskBusy}
             label={t("compression.deleteSource")}
-            onChange={(event) => setDeleteSource(event.currentTarget.checked)}
+            onChange={(event) => setCompression({ deleteSource: event.currentTarget.checked })}
             size="xs"
           />
           {taskBusy ? (

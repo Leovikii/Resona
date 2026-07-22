@@ -130,12 +130,12 @@ impl MediaImportService {
     pub fn add_paths(
         &self,
         paths: Vec<PathBuf>,
+        position: Option<usize>,
     ) -> Result<DefaultPlaylistMutationResult, PlaybackFailure> {
         let resolved = filesystem::resolve_audio_paths(paths);
         let mut state = self.state.lock().map_err(|_| state_poisoned())?;
         let previous = state.clone();
-        let result = append_resolved_paths(&mut state, resolved);
-        let added = state.paths[previous.paths.len()..].to_vec();
+        let (result, added, insertion) = insert_resolved_paths(&mut state, resolved, position);
         if !added.is_empty()
             && state.active_playlist == Some(ActivePlaylistSnapshot::default_playlist())
         {
@@ -144,7 +144,7 @@ impl MediaImportService {
                 *state = previous;
                 return Err(sequence_mismatch());
             }
-            if let Err(error) = self.engine.append_queue(added) {
+            if let Err(error) = self.engine.insert_queue(added, insertion) {
                 *state = previous;
                 return Err(error.failure());
             }
@@ -152,13 +152,15 @@ impl MediaImportService {
         Ok(result)
     }
 
-    pub fn play_item(&self, selected_index: usize) -> Result<OpenMediaResult, PlaybackFailure> {
+    pub fn play_item(&self, item_id: u64) -> Result<OpenMediaResult, PlaybackFailure> {
         let mut state = self.state.lock().map_err(|_| state_poisoned())?;
-        if selected_index >= state.paths.len() {
-            return Err(PlaybackFailure::task_failed(
-                "default playlist target is unavailable".to_owned(),
-            ));
-        }
+        let selected_index = state
+            .item_ids
+            .iter()
+            .position(|candidate| *candidate == item_id)
+            .ok_or_else(|| {
+                PlaybackFailure::task_failed("default playlist target is unavailable".to_owned())
+            })?;
         let playback = self.play_paths(&state.paths, &state.paths, selected_index)?;
         state.selected_index = Some(selected_index);
         state.active_playlist = Some(ActivePlaylistSnapshot::default_playlist());
@@ -489,18 +491,17 @@ fn commit_context(state: &mut DefaultPlaylistState, context: AudioFileContext) {
     state.selected_index = Some(context.selected_index);
 }
 
-fn append_resolved_paths(
+fn insert_resolved_paths(
     state: &mut DefaultPlaylistState,
     resolved: ResolvedAudioPaths,
-) -> DefaultPlaylistMutationResult {
+    position: Option<usize>,
+) -> (DefaultPlaylistMutationResult, Vec<PathBuf>, usize) {
     let mut rejected = resolved.rejected;
     let mut known = state.paths.iter().cloned().collect::<HashSet<_>>();
-    let previous_len = state.paths.len();
+    let mut accepted = Vec::new();
     for path in resolved.paths {
         if known.insert(path.clone()) {
-            state.paths.push(path);
-            let item_id = next_default_item_id(state);
-            state.item_ids.push(item_id);
+            accepted.push(path);
         } else {
             rejected.push(RejectedPath {
                 path: path.to_string_lossy().into_owned(),
@@ -508,14 +509,31 @@ fn append_resolved_paths(
             });
         }
     }
-    if state.paths.len() != previous_len {
+    let insertion = position.unwrap_or(state.paths.len()).min(state.paths.len());
+    if !accepted.is_empty() {
+        let item_ids = (0..accepted.len())
+            .map(|_| next_default_item_id(state))
+            .collect::<Vec<_>>();
+        state
+            .paths
+            .splice(insertion..insertion, accepted.iter().cloned());
+        state.item_ids.splice(insertion..insertion, item_ids);
+        if let Some(selected) = state.selected_index.as_mut() {
+            if *selected >= insertion {
+                *selected += accepted.len();
+            }
+        }
         state.revision = state.revision.wrapping_add(1).max(1);
         state.source_directory = common_parent(&state.paths);
     }
-    DefaultPlaylistMutationResult {
-        default_playlist: snapshot_from_state(state),
-        rejected,
-    }
+    (
+        DefaultPlaylistMutationResult {
+            default_playlist: snapshot_from_state(state),
+            rejected,
+        },
+        accepted,
+        insertion,
+    )
 }
 
 fn common_parent(paths: &[PathBuf]) -> Option<PathBuf> {
@@ -712,16 +730,20 @@ mod tests {
         File::create(&second).expect("create second audio");
 
         let mut state = DefaultPlaylistState::default();
-        let first_result = append_resolved_paths(
+        let (first_result, _, _) = insert_resolved_paths(
             &mut state,
             filesystem::resolve_audio_paths(vec![root.clone()]),
+            None,
         );
         assert_eq!(first_result.default_playlist.items.len(), 2);
         assert_eq!(first_result.default_playlist.revision, 1);
         assert_eq!(state.source_directory.as_deref(), Some(root.as_path()));
 
-        let duplicate_result =
-            append_resolved_paths(&mut state, filesystem::resolve_audio_paths(vec![first]));
+        let (duplicate_result, _, _) = insert_resolved_paths(
+            &mut state,
+            filesystem::resolve_audio_paths(vec![first]),
+            None,
+        );
         assert_eq!(duplicate_result.default_playlist.revision, 1);
         assert_eq!(duplicate_result.rejected.len(), 1);
         assert_eq!(
@@ -732,14 +754,94 @@ mod tests {
         let other_root = test_directory();
         let other = other_root.join("3.mp3");
         File::create(&other).expect("create other audio");
-        let mixed_result =
-            append_resolved_paths(&mut state, filesystem::resolve_audio_paths(vec![other]));
+        let (mixed_result, _, _) = insert_resolved_paths(
+            &mut state,
+            filesystem::resolve_audio_paths(vec![other]),
+            None,
+        );
         assert_eq!(mixed_result.default_playlist.items.len(), 3);
         assert_eq!(mixed_result.default_playlist.revision, 2);
         assert_eq!(mixed_result.default_playlist.source_directory, None);
 
         let _ = fs::remove_dir_all(root);
         let _ = fs::remove_dir_all(other_root);
+    }
+
+    #[test]
+    fn inserts_resolved_paths_at_the_requested_default_playlist_gap() {
+        let root = test_directory();
+        let first = root.join("1.wav");
+        let second = root.join("2.flac");
+        let inserted = root.join("3.mp3");
+        for path in [&first, &second, &inserted] {
+            File::create(path).expect("create audio");
+        }
+
+        let mut state = DefaultPlaylistState::default();
+        let _ = insert_resolved_paths(
+            &mut state,
+            filesystem::resolve_audio_paths(vec![first.clone(), second.clone()]),
+            None,
+        );
+        state.selected_index = Some(1);
+        let (_, added, position) = insert_resolved_paths(
+            &mut state,
+            filesystem::resolve_audio_paths(vec![inserted.clone()]),
+            Some(1),
+        );
+
+        assert_eq!(position, 1);
+        assert_eq!(added, std::slice::from_ref(&inserted));
+        assert_eq!(state.paths, [first, inserted, second]);
+        assert_eq!(state.selected_index, Some(2));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn inserting_into_the_active_default_playlist_updates_the_runtime_sequence() {
+        let root = test_directory();
+        let first = root.join("1.wav");
+        let second = root.join("2.flac");
+        let inserted = root.join("3.mp3");
+        for path in [&first, &second, &inserted] {
+            File::create(path).expect("create audio");
+        }
+        let engine = Arc::new(RodioPlaybackEngine::new());
+        engine
+            .restore_session(crate::playback::RestoredPlaybackSession {
+                paths: vec![first.clone(), second.clone()],
+                current_path: None,
+                position_ms: 0,
+                volume: 1.0,
+                playback_mode: crate::playback::PlaybackMode::Sequential,
+            })
+            .expect("restore sequence");
+        let service = MediaImportService::new(Arc::clone(&engine));
+        {
+            let mut state = service.state.lock().expect("lock playlist state");
+            let _ = insert_resolved_paths(
+                &mut state,
+                filesystem::resolve_audio_paths(vec![first.clone(), second.clone()]),
+                None,
+            );
+            state.active_playlist = Some(ActivePlaylistSnapshot::default_playlist());
+        }
+
+        service
+            .add_paths(vec![inserted.clone()], Some(1))
+            .expect("insert active default item");
+
+        assert_eq!(
+            engine
+                .snapshot()
+                .expect("sequence snapshot")
+                .queue
+                .iter()
+                .map(|item| PathBuf::from(&item.path))
+                .collect::<Vec<_>>(),
+            [first, inserted, second]
+        );
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

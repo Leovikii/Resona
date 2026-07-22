@@ -6,6 +6,7 @@ import "@mantine/core/styles.css";
 
 import i18n, { resolveLocale } from "../shared/i18n";
 import type { LocalePreference } from "../shared/i18n";
+import type { CompressionPreset } from "../shared/model/compression";
 
 export const accentColors = ["cyan", "blue", "teal", "green", "orange", "pink"] as const;
 export type AccentColor = (typeof accentColors)[number];
@@ -17,6 +18,8 @@ interface PreferencesContextValue {
   setLocale: (value: LocalePreference) => void;
   desktopLyrics: DesktopLyricsPreferences;
   setDesktopLyrics: (value: Partial<DesktopLyricsPreferences>) => void;
+  compression: CompressionPreferences;
+  setCompression: (value: Partial<CompressionPreferences>) => void;
 }
 
 export interface DesktopLyricsPreferences {
@@ -27,12 +30,22 @@ export interface DesktopLyricsPreferences {
   backgroundOpacity: number;
 }
 
+export interface CompressionPreferences {
+  preset: CompressionPreset;
+  deleteSource: boolean;
+}
+
 export const defaultDesktopLyricsPreferences: DesktopLyricsPreferences = {
   enabled: false,
   fontSize: 28,
   color: "#ffffff",
   textOpacity: 100,
   backgroundOpacity: 0,
+};
+
+const defaultCompressionPreferences: CompressionPreferences = {
+  preset: "balanced",
+  deleteSource: true,
 };
 
 const PreferencesContext = createContext<PreferencesContextValue | null>(null);
@@ -47,6 +60,9 @@ export function AppProvider({ children }: PropsWithChildren) {
   );
   const [desktopLyrics, setDesktopLyricsState] = useState<DesktopLyricsPreferences>(() =>
     readDesktopLyricsPreferences(),
+  );
+  const [compression, setCompressionState] = useState<CompressionPreferences>(() =>
+    readCompressionPreferences(),
   );
 
   const theme = useMemo(
@@ -77,6 +93,9 @@ export function AppProvider({ children }: PropsWithChildren) {
       if (event.key?.startsWith("resona-desktop-lyrics-")) {
         setDesktopLyricsState(readDesktopLyricsPreferences());
       }
+      if (event.key?.startsWith("resona-compression-")) {
+        setCompressionState(readCompressionPreferences());
+      }
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
@@ -104,8 +123,15 @@ export function AppProvider({ children }: PropsWithChildren) {
         writePreference("resona-desktop-lyrics-background-opacity", String(value.backgroundOpacity));
         setDesktopLyricsState(value);
       },
+      compression,
+      setCompression: (next) => {
+        const value = { ...compression, ...next };
+        writePreference("resona-compression-preset", value.preset);
+        writePreference("resona-compression-delete-source", String(value.deleteSource));
+        setCompressionState(value);
+      },
     }),
-    [accentColor, desktopLyrics, locale],
+    [accentColor, compression, desktopLyrics, locale],
   );
 
   return (
@@ -163,6 +189,20 @@ function readDesktopLyricsPreferences(): DesktopLyricsPreferences {
       defaultDesktopLyricsPreferences.backgroundOpacity,
     ),
   });
+}
+
+function readCompressionPreferences(): CompressionPreferences {
+  return {
+    preset: readPreference(
+      "resona-compression-preset",
+      ["fast", "balanced", "smallest"] as const,
+      defaultCompressionPreferences.preset,
+    ),
+    deleteSource: readBooleanPreference(
+      "resona-compression-delete-source",
+      defaultCompressionPreferences.deleteSource,
+    ),
+  };
 }
 
 function normalizeDesktopLyricsPreferences(value: DesktopLyricsPreferences): DesktopLyricsPreferences {

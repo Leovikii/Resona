@@ -35,7 +35,7 @@ use commands::{
     scan_audio_compression_inputs, seek_playback, select_output_device,
     set_main_window_layout_mode, set_playback_mode, set_playback_volume,
     show_audio_compression_window, show_desktop_lyrics_window, start_audio_compression,
-    start_desktop_lyrics_drag, stop_playback, unlock_desktop_lyrics_window,
+    start_desktop_lyrics_drag, unlock_desktop_lyrics_window,
 };
 use compression::CompressionService;
 use lyrics::LyricsService;
@@ -140,7 +140,6 @@ pub fn run() {
             select_output_device,
             pause_playback,
             resume_playback,
-            stop_playback,
             seek_playback,
             set_playback_volume,
             get_playback_state,

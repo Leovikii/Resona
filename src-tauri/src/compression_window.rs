@@ -10,10 +10,12 @@ use crate::compression::CompressionFailure;
 
 pub const LABEL: &str = "audio-compression";
 const GEOMETRY_FILE: &str = "audio-compression-window.json";
-const DEFAULT_WIDTH: f64 = 800.0;
-const DEFAULT_HEIGHT: f64 = 560.0;
-const MIN_WIDTH: u32 = 700;
-const MIN_HEIGHT: u32 = 500;
+const DEFAULT_WIDTH: f64 = 720.0;
+const DEFAULT_HEIGHT: f64 = 500.0;
+const MIN_WIDTH: u32 = 640;
+const MIN_HEIGHT: u32 = 440;
+const MAX_WIDTH: u32 = 960;
+const MAX_HEIGHT: u32 = 720;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 struct WindowGeometry {
@@ -69,8 +71,8 @@ pub fn persist_geometry<R: Runtime>(app: &AppHandle<R>) {
     let geometry = WindowGeometry {
         x: position.x,
         y: position.y,
-        width: size.width.max(MIN_WIDTH),
-        height: size.height.max(MIN_HEIGHT),
+        width: size.width.clamp(MIN_WIDTH, MAX_WIDTH),
+        height: size.height.clamp(MIN_HEIGHT, MAX_HEIGHT),
     };
     let Ok(data_dir) = app.path().app_data_dir() else {
         return;
@@ -132,8 +134,11 @@ fn constrain_geometry(
         })
         .copied()
         .or_else(|| work_areas.first().copied())?;
-    let width = saved.width.clamp(MIN_WIDTH, area.size.width);
-    let height = saved.height.clamp(MIN_HEIGHT, area.size.height);
+    let width = saved.width.clamp(MIN_WIDTH, MAX_WIDTH).min(area.size.width);
+    let height = saved
+        .height
+        .clamp(MIN_HEIGHT, MAX_HEIGHT)
+        .min(area.size.height);
     let x = saved.x.clamp(
         area.position.x,
         area.position.x + area.size.width as i32 - width as i32,
@@ -177,9 +182,31 @@ mod tests {
             &[&area],
         )
         .expect("constrain geometry");
-        assert_eq!(restored.width, 1600);
+        assert_eq!(restored.width, MAX_WIDTH);
         assert_eq!(restored.height, MIN_HEIGHT);
-        assert_eq!(restored.x, 100);
+        assert_eq!(restored.x, 740);
         assert_eq!(restored.y, 80);
+    }
+
+    #[test]
+    fn restored_geometry_caps_historical_large_dimensions() {
+        let area = tauri::PhysicalRect {
+            position: PhysicalPosition::new(0, 0),
+            size: PhysicalSize::new(2560, 1440),
+        };
+        let restored = constrain_geometry(
+            WindowGeometry {
+                x: 100,
+                y: 120,
+                width: 1710,
+                height: 1860,
+            },
+            &[&area],
+        )
+        .expect("constrain oversized geometry");
+        assert_eq!(restored.width, MAX_WIDTH);
+        assert_eq!(restored.height, MAX_HEIGHT);
+        assert_eq!(restored.x, 100);
+        assert_eq!(restored.y, 120);
     }
 }

@@ -34,8 +34,7 @@ type PlaybackCommand =
   | "seek_playback"
   | "select_output_device"
   | "set_playback_mode"
-  | "set_playback_volume"
-  | "stop_playback";
+  | "set_playback_volume";
 
 const emptyDefaultPlaylist: DefaultPlaylistSnapshot = {
   revision: 0,
@@ -208,13 +207,13 @@ export function usePlaybackController() {
     }
   }, [acceptOpenResult, preview]);
 
-  const addDefaultItems = useCallback(async (paths: string[]) => {
+  const addDefaultItems = useCallback(async (paths: string[], position: number | null = null) => {
     if (paths.length === 0) return null;
     setPending(true);
     try {
       const result = preview
-        ? appendPreviewDefault(defaultPlaylistRef.current, paths)
-        : await invokeTauri<DefaultPlaylistMutationResult>("add_default_playlist_items", { paths });
+        ? insertPreviewDefault(defaultPlaylistRef.current, paths, position)
+        : await invokeTauri<DefaultPlaylistMutationResult>("add_default_playlist_items", { paths, position });
       acceptDefaultPlaylist(result.defaultPlaylist);
       await refresh();
       setDefaultRejectedCount(result.rejected.length);
@@ -460,7 +459,6 @@ function applyPreviewCommand(
 ): PlaybackSnapshot {
   if (command === "pause_playback") return { ...snapshot, status: "paused", error: null };
   if (command === "resume_playback") return { ...snapshot, status: "playing", error: null };
-  if (command === "stop_playback") return { ...snapshot, status: "stopped", positionMs: 0 };
   if (command === "seek_playback") {
     return { ...snapshot, positionMs: Number(args?.positionMs ?? 0) };
   }
@@ -554,9 +552,10 @@ function defaultFromPlayback(snapshot: PlaybackSnapshot): DefaultPlaylistSnapsho
   };
 }
 
-function appendPreviewDefault(
+function insertPreviewDefault(
   current: DefaultPlaylistSnapshot,
   paths: string[],
+  position: number | null,
 ): DefaultPlaylistMutationResult {
   const known = new Set(current.items.map((item) => item.path));
   const accepted: string[] = [];
@@ -569,14 +568,13 @@ function appendPreviewDefault(
       accepted.push(path);
     }
   }
-  const items = [
-    ...current.items,
-    ...accepted.map((path, offset) => ({
+  const insertion = clamp(position ?? current.items.length, 0, current.items.length);
+  const items = [...current.items];
+  items.splice(insertion, 0, ...accepted.map((path, offset) => ({
       id: Math.max(0, ...current.items.map((item) => item.id)) + offset + 1,
       path,
       displayName: path.split(/[\\/]/).pop() ?? path,
-    })),
-  ];
+    })));
   const directories = new Set(items.map((item) => item.path.replace(/[\\/][^\\/]+$/, "")));
   return {
     defaultPlaylist: {
