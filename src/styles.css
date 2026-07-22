@@ -4,14 +4,14 @@
   --resona-window-background: var(--mantine-color-body);
   --resona-content-surface: var(--mantine-color-body);
   --resona-chrome-surface: light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-8));
-  --resona-subtle-surface: light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-7));
+  --resona-subtle-surface: light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6));
   --resona-hairline: var(--mantine-color-default-border);
 }
 
 html[data-window-material="mica"] {
   --resona-window-background: transparent;
   --resona-content-surface: transparent;
-  --resona-chrome-surface: transparent;
+  --resona-chrome-surface: light-dark(rgb(255 255 255 / 38%), rgb(8 12 16 / 28%));
   --resona-subtle-surface: light-dark(rgb(255 255 255 / 58%), rgb(255 255 255 / 5.5%));
   --resona-hairline: light-dark(rgb(20 30 40 / 13%), rgb(255 255 255 / 11%));
 }
@@ -94,7 +94,6 @@ html[data-window="audio-compression"] #root {
   align-items: center;
   justify-content: flex-start;
   gap: 18px;
-  border-bottom: 1px solid var(--resona-hairline);
   background: var(--resona-chrome-surface);
 }
 
@@ -116,8 +115,7 @@ html[data-window="audio-compression"] #root {
   grid-template-columns: auto minmax(230px, 320px) minmax(250px, auto);
   align-items: center;
   gap: 14px;
-  border-bottom: 1px solid var(--resona-hairline);
-  background: var(--resona-content-surface);
+  background: var(--resona-chrome-surface);
 }
 
 .compression-scan-progress {
@@ -141,12 +139,13 @@ html[data-window="audio-compression"] #root {
 
 .compression-status-band {
   min-width: 0;
+  margin: 8px 12px 12px;
   padding: 10px 20px;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   align-items: start;
   gap: 14px;
-  border-bottom: 1px solid var(--resona-hairline);
+  border-radius: var(--mantine-radius-md);
   background: var(--resona-subtle-surface);
 }
 
@@ -174,7 +173,6 @@ html[data-window="audio-compression"] #root {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border-bottom: 1px solid var(--resona-hairline);
 }
 
 .compression-tree-scroll {
@@ -593,7 +591,6 @@ input {
   padding: 18px 14px 14px;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--resona-hairline);
   background: var(--resona-chrome-surface);
 }
 
@@ -644,10 +641,6 @@ input {
   gap: 4px;
 }
 
-.nav-divider {
-  margin: 8px 6px;
-}
-
 .nav-button {
   width: 100%;
   min-height: 40px;
@@ -681,6 +674,7 @@ input {
 
 .playlist-nav-heading {
   min-height: 30px;
+  margin-top: 14px;
   padding: 2px 6px 2px 10px;
   display: flex;
   align-items: center;
@@ -1361,9 +1355,14 @@ h2.page-heading {
   display: flex;
   align-items: center;
   gap: 12px;
-  border-color: var(--resona-hairline);
+  border: 0;
+  border-radius: var(--mantine-radius-md);
   background: var(--resona-subtle-surface);
   box-shadow: none;
+}
+
+.tool-row[data-deferred] {
+  color: var(--mantine-color-dimmed);
 }
 
 .tool-entry {
@@ -1380,6 +1379,7 @@ h2.page-heading {
   max-width: 920px;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   align-items: start;
+  gap: 14px;
 }
 
 .tools-page > .page-heading {
@@ -1397,7 +1397,7 @@ h2.page-heading {
 }
 
 .settings-section {
-  padding: 12px 2px 16px;
+  padding: 12px 2px 20px;
   display: grid;
   gap: 0;
   border: 0;
@@ -1407,8 +1407,8 @@ h2.page-heading {
 }
 
 .settings-section + .settings-section {
-  padding-top: 18px;
-  border-top: 1px solid var(--resona-hairline);
+  margin-top: 6px;
+  padding-top: 20px;
 }
 
 .settings-section-title {
@@ -1479,13 +1479,8 @@ h2.page-heading {
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 16px;
-  border-top: 1px solid var(--resona-hairline);
-  background: var(--resona-content-surface);
-  transition: border-color 160ms ease, background-color 160ms ease;
-}
-
-.player-bar[data-expanded] {
-  border-top-color: transparent;
+  background: var(--resona-chrome-surface);
+  transition: background-color 160ms ease;
 }
 
 .player-progress {
@@ -1675,7 +1670,6 @@ h2.page-heading {
   grid-column: 1;
   grid-row: 1;
   grid-template-rows: 40px 36px;
-  border-bottom: 1px solid var(--resona-hairline);
   background: var(--resona-chrome-surface);
 }
 
@@ -1708,7 +1702,6 @@ h2.page-heading {
   grid-template-columns: minmax(0, 1fr) 30px;
   align-items: center;
   gap: 4px;
-  border-top: 1px solid color-mix(in srgb, var(--resona-hairline) 72%, transparent);
 }
 
 .compact-playlist-scroll,

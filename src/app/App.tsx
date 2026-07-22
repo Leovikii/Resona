@@ -8,7 +8,6 @@ import {
   Badge,
   Button,
   ColorInput,
-  Divider,
   Group,
   Loader,
   Menu,
@@ -567,7 +566,6 @@ function Sidebar({
           label={t("nav.recent")}
           onClick={() => onSelect({ kind: "recent" })}
         />
-        <Divider className="nav-divider" />
         <div className="playlist-nav-heading">
           <Text c="dimmed" fw={650} size="xs">{t("nav.playlists")}</Text>
           <Tooltip label={t("library.create")}>
@@ -951,7 +949,7 @@ function ToolsView() {
     <div className="page-content tools-page">
       <Title className="page-heading" order={2}>{t("tools.title")}</Title>
       <div className="tool-list">
-        <Paper className="tool-row tool-entry" withBorder>
+        <Paper className="tool-row tool-entry">
           <ThemeIcon size={38} variant="light"><Wrench size={19} /></ThemeIcon>
           <div className="tool-entry-copy">
             <Text fw={600}>{t("tools.compression")}</Text>
@@ -967,7 +965,7 @@ function ToolsView() {
           >{t("common.launch")}</Button>
         </Paper>
         {openError && <div className="error-banner" role="alert">{openError}</div>}
-        <Paper className="tool-row" withBorder>
+        <Paper className="tool-row" data-deferred>
           <ThemeIcon color="gray" size={38} variant="light"><Tags size={19} /></ThemeIcon>
           <Text fw={600}>{t("tools.tagEditor")}</Text>
           <Badge color="gray" ml="auto" variant="light">{t("common.later")}</Badge>

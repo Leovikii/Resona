@@ -45,9 +45,9 @@ Windows 交付版本只能通过 `npm run release:windows` 生成。不得在 Ta
 - 普通窗口材质只通过 `src-tauri/src/platform/window_material.rs` 接入。Windows 11 主窗口和音频压缩窗口使用 Tauri 内置 Mica；不得再加入 window-vibrancy 插件、全局 CSS `backdrop-filter`、Acrylic 全窗口模糊或自绘标题栏。
 - Windows 主窗口透明创建配置只写入 `tauri.windows.conf.json`；通用配置保持实色默认。新增普通辅助窗口必须通过同一 adapter 决定透明背景、Mica 和查询参数，不能在 React 中判断操作系统。
 - 页面使用 `--resona-window-background`、`--resona-chrome-surface`、`--resona-content-surface`、`--resona-subtle-surface` 与 `--resona-hairline`。不得在 feature 中复制带 alpha 的平台色值。
-- Mica 页面遵循单层材质模型：根窗口承载唯一的大面积材质，侧栏、导航、主内容、完整播放器、底栏和压缩工作区不得再覆盖连续半透明遮罩；区域分隔优先使用 `--resona-hairline`。每个区域最多增加一层有明确交互或状态用途的 `subtle surface`，不得用嵌套半透明背景制造卡片层级。
+- Mica 页面遵循单层材质模型：根窗口承载唯一的大面积材质，主内容和完整播放器保持透明；侧栏、窄屏导航、底栏和普通辅助窗口命令区可以使用一层低对比 `--resona-chrome-surface` tonal tint。应用壳的大区域不得叠加连续遮罩，也不得使用整高/整宽 `hairline` 切割页面；`hairline` 只用于输入、菜单、表格或其他确需精确边界的控件。每个区域最多增加一层有明确交互或状态用途的 `subtle surface`，不得用嵌套半透明背景制造卡片层级。
 - Mantine 全局 `body` 背景不消费 Resona 的窗口材质 token。Mica 路径必须通过 `html[data-window-material="mica"]` 同时覆盖 `html`、`body` 和 `#root` 为透明；不要把 `--mantine-color-body` 改为透明，否则组件实体表面会一起丢失。调整 CSS import 顺序或 Provider 时必须复测该覆盖优先级。
-- 设置页分组默认透明、无阴影、无外框，通过标题、间距和相邻分组细线建立层级。只有独立重复项目、菜单、弹层、错误/选中状态等确需边界的内容才使用实体表面；不为模仿 WinUI 引入第二套组件库或自绘控件体系。
+- 设置页分组默认透明、无阴影、无外框，通过标题和节间距建立层级，不使用贯穿内容区的相邻分组细线。工具入口等独立工作单元使用无描边 `subtle surface` 与项目间空隙；只有菜单、弹层、错误/选中状态和确需精确边界的内容才使用描边实体表面。不为模仿 WinUI 引入第二套组件库或自绘控件体系。
 - Mica 初始化和保存的原生窗口主题必须在窗口首次可见前就绪；失败日志必须可诊断并回退 `solid`。主题偏好必须以 `auto`/`light`/`dark` 传到原生边界，`auto` 使用 `set_theme(None)`，不得用受当前窗口覆盖影响的 `prefers-color-scheme` 结果代替。浅色、深色和跟随系统都要检查 WebView 表面与原生标题栏是否一致。
 - 桌面歌词是例外：保持透明、置顶、穿透和 helper 架构，不启用 Mica。设计语言只同步字体、圆角、按钮状态、边界和动效，歌词正文透明度仍由独立偏好控制。
 
@@ -125,7 +125,7 @@ Tauri 原生拖放处理器与 WebView2 HTML5 drag-and-drop 在 Windows 上存�
 - 滚动容器：主窗口所有可见滚动轨道使用 Mantine `ScrollArea`；验证滚轮、触控板、滚块拖动、键盘滚动和活动歌词居中，不允许父子双滚动
 - 主窗口布局：宽屏验证 `1080×700`/`760×520`，窄屏验证 `420×720`/`360×600`；两种模式均覆盖中英文、明暗主题、长文本和完整功能可达性
 - 主窗口几何：Windows 原生验证两种布局各自的位置/尺寸/最大化恢复、多显示器可见区域修正和 100%/125%/150% DPI；浏览器截图不能替代该项
-- 原生材质：浏览器以 `material=mica` 检查根材质、大区域透明、局部表面不嵌套、hairline、设置分组、明暗对比度和溢出；至少覆盖宽屏主界面、窄屏设置/工具、完整播放器和压缩窗口。Windows 11 Release 还必须截图或采样主内容空白区，确认没有继续输出 `solid` 回退色，再检查主窗口/压缩窗口 Mica、主题切换、冷启动、最大化/还原和阴影；Windows 10/Linux 检查完整实色回退
+- 原生材质：浏览器以 `material=mica` 检查根材质、透明主内容、导航/底栏 tonal tint、无描边独立工作单元、设置节间距、明暗对比度和溢出；至少覆盖宽屏主界面、窄屏设置/工具、完整播放器和压缩窗口。Windows 11 Release 还必须截图或采样主内容空白区，确认没有继续输出 `solid` 回退色，再检查主窗口/压缩窗口 Mica、主题切换、冷启动、最大化/还原和阴影；Windows 10/Linux 检查完整实色回退
 - 启动首帧：冷/暖启动、浅色/深色/跟随系统下不得出现明显白色空窗；隐藏到首帧的窗口必须有 Release 启动失败检测
 - Windows SMTC：系统回调必须通过 typed command 进入播放服务，并在实机验证媒体键与系统显示状态
 - Windows 桌面歌词：透明、置顶、焦点、跨进程点击/滚轮/拖动穿透和原生解锁辅助窗口必须实机验证；浏览器预览不能替代

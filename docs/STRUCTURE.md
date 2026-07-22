@@ -78,7 +78,7 @@ Mantine 直接导入仍限制在 `src/app` 与 `src/shared/ui`；`AddMediaMenu` 
 
 ADR 0020 已由 `main_window.rs` 与 `features/window` 实现：Rust 保存模式和原生几何，React 只消费布局快照。当前 ScrollArea 组合没有形成重复默认值或复杂行为，因此继续在 `src/app` 直接组合 Mantine，不增加无收益包装层。
 
-ADR 0022 由 `platform/window_material.rs`、`shared/bridge/windowAppearance.ts` 和 `styles.css` 的语义表面 token 实现。Windows 版本判断与 Tauri Window Effects 在 Rust 边界终止；React 不出现 Windows 条件分支。桌面歌词继续使用独立透明平台边界，不经过普通窗口材质 adapter。
+ADR 0022 由 `platform/window_material.rs`、`shared/bridge/windowAppearance.ts` 和 `styles.css` 的语义表面 token 实现。Windows 版本判断与 Tauri Window Effects 在 Rust 边界终止；React 不出现 Windows 条件分支。主内容使用 content surface，导航/播放器使用单层 chrome tonal surface，独立工作单元使用 subtle surface，不为各页面复制平台色值。桌面歌词继续使用独立透明平台边界，不经过普通窗口材质 adapter。
 
 ## 目标结构
 

@@ -2,11 +2,18 @@
 
 最后更新：2026-07-22
 
+### 2026-07-22 WinUI tonal surface 与区域分隔收口
+
+- 修订 [ADR 0022](decisions/0022-native-window-materials-and-surface-hierarchy.md)：Mica 继续作为唯一根材质，主内容与完整播放器保持透明；宽屏侧栏/底栏、窄屏顶部导航/底栏和音频压缩顶部命令区使用同一个低对比 `chrome surface` tonal tint。删除侧栏整高竖线、主内容与播放器整宽横线、窄屏导航横线及压缩窗口的大区域分隔线；`hairline` 只保留给输入、表格、菜单和弹层等确需精确边界的内容。
+- 侧栏“最近播放/播放列表”改用 `14px` 分组间距与标题层级，不再渲染贯穿侧栏的 Divider。工具页两个入口移除 Mantine `withBorder`，改为有间距的无描边 `subtle surface`；延后功能使用降级文字状态。设置分组移除相邻横线，通过标题和节间距表达层级，不增加阴影卡片。
+- 音频压缩窗口同步同一设计语言：标题区和控制区合并为连续 tonal command surface，状态信息按需显示为独立圆角 subtle surface，文件树标题不再使用整宽横线。桌面歌词的透明、置顶和穿透边界未改动。
+- 浏览器回归覆盖 `1080×700` 深色宽屏、`360×600` 深色/浅色窄屏设置与工具页、`720×500` 浅色/深色音频压缩窗口，以及暗色 solid 回退。所有视口横向/纵向页面溢出均为 0；Mica 预览中主内容为透明，chrome tint 无描边，solid 回退的 content/chrome 均为不透明表面，控制台无 warning/error。TypeScript/Vite build、许可证清单、Rust format 和 `git diff --check` 通过；本轮没有修改 Rust 或播放路径，未重复运行真实音频设备测试。Windows Release 已通过主窗口可见性门禁，产物为 `src-tauri/target/release/resona.exe`，18,006,528 bytes，SHA-256 `4D3D0D6820C0736969CF4E0DD9E4F774EF59388B56730F4E241E652499AFDC50`。
+
 ### 2026-07-22 Mica 可见性与系统主题同步修复
 
-- 确认 Windows 11 原生 Mica adapter 正常工作；主窗口材质不明显的根因是连续 content/chrome 表面叠加了深色遮罩。现改为 ADR 0022 的单层材质模型：Mica 只由根窗口承载，侧栏、窄屏导航、主内容、完整播放器、底栏及音频压缩工作区的大面积表面透明，以 hairline 分区；工具入口等独立工作单元保留一层轻量实体表面。桌面歌词透明/穿透边界不变。
+- 确认 Windows 11 原生 Mica adapter 正常工作；主窗口材质不明显的根因是连续 content/chrome 表面叠加了深色遮罩。该阶段先恢复单层根材质与透明大区域，后续区域分隔策略已由同日的“WinUI tonal surface 与区域分隔收口”继续修订，当前以 ADR 0022 最新内容为准。桌面歌词透明/穿透边界不变。
 - 项目所有者的 Release 截图揭示第一次修订仍显示完全一致的 `#101113`。原生调试确认 Windows 构建和主题同步均返回 `Mica`，实际覆盖源是 Mantine 全局 `body { background-color: var(--mantine-color-body) }`；应用壳透明后仍会露出该实色。现以窗口材质选择器明确清除 `html`、`body` 和 `#root` 背景，同时保留 `--mantine-color-body` 供组件实体表面使用。用于定位的红色探针和动态主窗口实验均已撤销，原有隐藏到首帧及 Windows 10/Linux solid 回退保持不变。
-- 设置页移除卡片背景、外框、圆角和阴影，改用标题、间距与相邻分组细线建立 WinUI 式层级；工具入口统一为无阴影轻量表面。播放进度 Slider 收敛为细轨道，thumb 只在 hover/focus 时出现，避免与内容滚动条混淆。
+- 设置页移除卡片背景、外框、圆角和阴影；其后相邻分组细线也已在同日 tonal surface 收口中删除，当前只用标题与节间距。工具入口统一为无阴影轻量表面。播放进度 Slider 收敛为细轨道，thumb 只在 hover/focus 时出现，避免与内容滚动条混淆。
 - 修复“手动浅色后无法恢复跟随系统”及原生标题栏不同步：前端不再把 `auto` 提前解析成受当前窗口覆盖影响的亮/暗值，`auto`/`light`/`dark` 原样传入 Rust；`auto` 清除 Tauri 原生主题覆盖并使用自适应 Mica，手动模式才固定标题栏和 Mica 变体。
 - 浏览器回归覆盖 `1080×700` 宽屏完整播放器、`360×600` 窄屏设置/工具页和 `720×500` 音频压缩窗口；验证深色/浅色/跟随系统、Mica/窗口标识、大区域透明、局部表面无嵌套、设置分组和零横向溢出。TypeScript/Vite build、许可证、Rust format、Clippy `-D warnings` 和差异检查通过；67 个普通 Rust 测试通过，8 个真实音频设备测试按约定忽略。Windows Release 主窗口可见性门禁通过；额外原生像素门禁确认原 `#101113` 已被 Mica 采样色替代。产物为 `src-tauri/target/release/resona.exe`，18,006,528 bytes，SHA-256 `543A40ADD51A413E8C6C1E97BD3AA2647E51D32F31C9AA17B9CF334AE6B8A5A5`。
 
