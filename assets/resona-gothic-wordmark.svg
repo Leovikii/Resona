@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 260" role="img" aria-labelledby="title desc">
+  <title id="title">Resona gothic wordmark</title>
+  <desc id="desc">An angular blackletter wordmark spelling Resona in black with a violet offset shadow.</desc>
+  <defs>
+    <g id="resona-letterforms">
+      <path d="M28 208V58l24-20 24 18v152l-24 18z"/>
+      <path d="M52 38l98 68v42l-30 24 56 44-28 16-72-54v-46l36-26-36-24V56z"/>
+      <path fill-rule="evenodd" d="M204 108l42-36 58 36v36l-56 32 32 22 36-28v36l-38 26-74-48zm28 11 16-16 29 17-32 20z"/>
+      <path d="M340 104l42-32 56 26-18 30-36-18-18 12 68 36v36l-44 36-56-26 18-30 36 20 18-14-66-36z"/>
+      <path fill-rule="evenodd" d="M470 106l40-34 48 28v98l-40 34-48-28zm30 12 14-12 14 10v70l-12 12-16-10z"/>
+      <path d="M594 230V104l32-28 24 18v26l38-48 42 32v126l-32-22v-90l-48 40v72l-32-22v-96l-24 20z"/>
+      <path fill-rule="evenodd" d="M760 108l40-34 48 28v82l18 18-24 26-20-20-18 24-44-26zm30 12 14-12 16 10v70l-14 12-16-10z"/>
+    </g>
+  </defs>
+  <use href="#resona-letterforms" fill="#845ef7" transform="translate(-7 8)"/>
+  <use href="#resona-letterforms" fill="#17151c"/>
+  <path d="M74 80l56 33-56 38z" fill="#845ef7"/>
+</svg>
