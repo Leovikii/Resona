@@ -14,7 +14,7 @@ import type { LocalePreference } from "../shared/i18n";
 import type { CompressionPreset } from "../shared/model/compression";
 import { syncCurrentWindowTheme } from "../shared/bridge/windowAppearance";
 
-export const accentColors = ["cyan", "blue", "teal", "green", "orange", "pink"] as const;
+export const accentColors = ["violet", "blue", "green", "pink", "yellow"] as const;
 export type AccentColor = (typeof accentColors)[number];
 
 interface PreferencesContextValue {
@@ -59,7 +59,7 @@ const colorSchemeManager = localStorageColorSchemeManager({ key: "resona-color-s
 
 export function AppProvider({ children }: PropsWithChildren) {
   const [accentColor, setAccentColorState] = useState<AccentColor>(() =>
-    readPreference("resona-accent", accentColors, "cyan"),
+    readPreference("resona-accent", accentColors, "violet"),
   );
   const [locale, setLocaleState] = useState<LocalePreference>(() =>
     readPreference("resona-locale", ["system", "zh-CN", "en"] as const, "system"),
@@ -75,6 +75,9 @@ export function AppProvider({ children }: PropsWithChildren) {
     () =>
       createTheme({
         primaryColor: accentColor as MantineColor,
+        primaryShade: { light: 7, dark: 5 },
+        autoContrast: true,
+        luminanceThreshold: 0.3,
         defaultRadius: "sm",
         fontFamily: "Segoe UI, system-ui, sans-serif",
         headings: { fontFamily: "Segoe UI, system-ui, sans-serif" },

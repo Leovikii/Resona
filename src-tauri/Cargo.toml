@@ -1,6 +1,6 @@
 [package]
 name = "resona"
-version = "0.0.17"
+version = "0.0.18"
 description = "A local desktop audio player"
 authors = ["Viki"]
 edition = "2021"

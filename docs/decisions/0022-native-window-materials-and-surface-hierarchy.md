@@ -22,10 +22,11 @@ Resona 的功能布局和主要交互已经收口，但普通 WebView 使用完�
 
 ### 表面层级
 
-- 共享 CSS 只暴露 `window background`、`chrome surface`、`content surface`、`subtle surface` 和 `hairline` 等语义 token。普通组件继续消费 Mantine token，不感知 Mica。
-- 普通窗口采用单层材质模型：Mica 是根窗口唯一的大面积背景。Mica 模式下主内容和完整播放器的 `content surface` 保持透明；侧栏、窄屏顶部导航、底栏、压缩窗口标题区和命令区使用一层低对比 `chrome surface` tonal tint 表达稳定应用区域。不得再用连续多层半透明黑色或白色表面覆盖根材质，也不得使用整高/整宽 `hairline` 切割应用壳。
+- 共享 CSS 只暴露 `window background`、`chrome surface`、`content surface`、`player surface`、`subtle surface` 和 `hairline` 等语义 token。普通组件继续消费 Mantine token，不感知 Mica。
+- 普通窗口采用“纯 Mica 外壳 + 单一内容层”模型：标题栏、宽屏侧栏、窄屏顶部导航和稳定底栏直接透出同一根 Mica；右侧主内容覆盖唯一一层低 alpha `content surface`，形成 WinUI `NavigationView` 式内容面。完整播放器在主内容内部保持透明，不能再叠加第二层 content fill。不得用连续多层半透明表面覆盖根材质，也不得使用整高/整宽 `hairline` 切割应用壳。
+- Mica 下 `chrome surface` 与 `player surface` 解析为透明，深色 content/subtle 分别使用 `18%` 黑和 `6%` 白，浅色分别使用 `72%` 白和 `52%` 白。`solid` 回退仍把 chrome/player/content 解析为不透明主题表面。这些值是窗口级语义 token，不得复制到 feature；调整时必须在原生 Mica 上验证可感知层级，不能只比较浏览器计算样式。
 - Mantine 的全局样式会为 `body` 写入 `--mantine-color-body`。Mica 模式必须以明确高于该全局规则的窗口材质选择器同时清除 `html`、`body` 和 `#root` 背景；只把应用壳或语义 token 设为透明不足以透出原生材质。不得把 `--mantine-color-body` 本身改成透明，因为 Paper、输入框和弹层仍需要实体主题表面。
-- 每个区域最多增加一层有明确语义的局部实体表面。工具入口、状态带及需要从背景中抬起的紧凑工作单元可使用无描边 `subtle surface`，以项目间空隙而不是相邻边线分隔；菜单、Modal、Popover、选中态、错误提示和文字密集交互区继续保持有界实体表面与足够对比度。
+- 每个区域最多增加一层有明确语义的局部实体表面。工具入口、状态带及需要从背景中抬起的紧凑工作单元可使用无描边 `subtle surface`；播放列表标题和普通曲目行保持透明、无卡片描边，只在 hover、选中、播放中或拖放反馈时上色。菜单、Modal、Popover、错误提示和文字密集交互区继续保持有界实体表面与足够对比度。
 - 设置页不是卡片集合。设置分组使用标题和节间距建立层级，分组本身保持透明、无阴影、无外框、无额外圆角，也不使用贯穿内容区的相邻分组 `hairline`；只有真正独立、可操作的重复项目才使用局部表面。
 - `hairline` 只用于表格、输入控件、菜单、弹层或其他必须表达精确边界的内容，不作为侧栏、顶部导航、主内容和底栏之间的通用区域分隔方式。
 - `solid` 回退仍将 `window`、`chrome` 和 `content` token 解析为完整不透明背景，保证 Windows 10/Linux 不依赖透明窗口或桌面采样也能完整阅读。组件不得为 Mica 和 solid 维护两套布局。
@@ -41,10 +42,11 @@ Resona 的功能布局和主要交互已经收口，但普通 WebView 使用完�
 - Tauri 内置 Window Effects 避免新增第三方材质插件；Mica 采样桌面背景且比实时 Acrylic 模糊稳定、节制。
 - 保留系统窗口装饰避免承担命中测试、系统菜单、最大化、DPI、无障碍和多显示器窗口按钮的长期维护成本。
 - 平台 adapter 与语义 token 将 Windows 能力限制在窗口边界，未来 Wayland 只需使用 solid 实现，不需要改页面组件。
-- 单层根材质、稳定 tonal chrome 和少量局部实体表面不会为每行曲目创建合成层，也不会进入播放高频更新路径；相较连续遮罩或贯穿页面的描边，更容易保持 Mica 可见并形成清晰的 WinUI 式表面层级。
+- 纯 Mica 外壳、单层 content fill 和按状态上色的列表行不会为每行曲目创建常驻合成层，也不会进入播放高频更新路径；相较多块 tonal chrome、连续遮罩或逐行描边，更接近 WinUI 3 的 NavigationView 层级并保持整体感。
 
 ## 验收
 
-- 浏览器使用 `material=mica` 预览验证宽屏 `1080×700`、窄屏 `360×600`、压缩窗口 `720×500` 和桌面歌词；覆盖浅色/深色、透明主内容、导航/播放器 tonal tint、无描边工具表面、设置节间距、零横向溢出、固定底栏/导航几何和控制可达性。浏览器计算样式不能证明 Windows WebView 已透出 Mica，Release 还必须对主内容空白区做原生截图/像素检查，禁止再次出现 solid 回退色。
+- 浏览器使用 `material=mica` 预览验证宽屏 `1080×700`、窄屏 `360×600`/`420×720`、压缩窗口 `720×500` 和桌面歌词；覆盖浅色/深色、透明 Mica 外壳、单一 content layer、无描边列表行、设置节间距、零横向溢出、固定底栏/导航几何和控制可达性。浏览器计算样式不能证明 Windows WebView 已透出 Mica，也不能证明 alpha 表面在真实桌面采样后肉眼可分。
+- Windows 11 Release 必须使用 DPI-aware 的原生窗口截图复核侧栏、主内容、命令区和底栏；至少记录同一截图中的区域采样值或等价对比证据。仅有 HWND、浏览器截图或不同的计算样式不构成材质验收通过。
 - Windows Release 验证主窗口与压缩窗口冷/暖启动、主题切换、最大化/还原、阴影和首帧；不支持 Mica 的平台必须完整实色回退。
 - 桌面歌词继续执行 ADR 0012/0019 的透明、锁定穿透和 helper 实机门禁，普通窗口材质不能改变该生命周期。

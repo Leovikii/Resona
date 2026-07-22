@@ -32,7 +32,7 @@ cargo test --manifest-path src-tauri/Cargo.toml opens_default_output_and_accepts
 
 开发运行使用 `npm run tauri dev`。单独执行 `npm run dev` 只预览 Web 前端，没有 Tauri 文件对话框或 Rust 播放能力。
 
-Windows 交付版本只能通过 `npm run release:windows` 生成。不得在 Tauri 构建后用 `cargo build --release` 重建或覆盖 `src-tauri/target/release/resona.exe`：普通 Cargo 构建不会注入 Tauri 生产协议，生成的 WebView 会错误访问 `devUrl`。`release:windows` 在构建后先确认 Vite 开发服务器未运行，再启动可执行文件检查主窗口存活，并自动关闭测试实例；交付前仍需浏览器或人工确认窗口内容。
+Windows 交付版本只能通过 `npm run release:windows` 生成。不得在 Tauri 构建后用 `cargo build --release` 重建或覆盖 `src-tauri/target/release/resona.exe`：普通 Cargo 构建不会注入 Tauri 生产协议，生成的 WebView 会错误访问 `devUrl`。`release:windows` 在构建后先确认 Vite 开发服务器未运行，再启动可执行文件，等待可见主窗口达到有效尺寸并经过 UI settling interval，随后自动关闭测试实例。需要原生视觉证据时可直接运行 `scripts/verify-release-webview.ps1 -CapturePath <png>`；脚本会按进程枚举真实有标题主窗口，并在 Per-Monitor v2 DPI 坐标系抓取窗口。
 
 `scripts/prepare-ffmpeg-sidecars.ps1` 固定下载 FFmpeg 8.1.2 essentials archive，并分别校验归档、ffmpeg 和 ffprobe 的 SHA-256。下载文件只写入已忽略的 `src-tauri/binaries/*.exe`；修改版本、来源或任一哈希前必须重新审查许可证、构建选项和转换回归。自动化构建应调用 `npm run tauri -- build` 使用同一准备路径，不依赖仓库内二进制。
 
@@ -44,8 +44,9 @@ Windows 交付版本只能通过 `npm run release:windows` 生成。不得在 Ta
 
 - 普通窗口材质只通过 `src-tauri/src/platform/window_material.rs` 接入。Windows 11 主窗口和音频压缩窗口使用 Tauri 内置 Mica；不得再加入 window-vibrancy 插件、全局 CSS `backdrop-filter`、Acrylic 全窗口模糊或自绘标题栏。
 - Windows 主窗口透明创建配置只写入 `tauri.windows.conf.json`；通用配置保持实色默认。新增普通辅助窗口必须通过同一 adapter 决定透明背景、Mica 和查询参数，不能在 React 中判断操作系统。
-- 页面使用 `--resona-window-background`、`--resona-chrome-surface`、`--resona-content-surface`、`--resona-subtle-surface` 与 `--resona-hairline`。不得在 feature 中复制带 alpha 的平台色值。
-- Mica 页面遵循单层材质模型：根窗口承载唯一的大面积材质，主内容和完整播放器保持透明；侧栏、窄屏导航、底栏和普通辅助窗口命令区可以使用一层低对比 `--resona-chrome-surface` tonal tint。应用壳的大区域不得叠加连续遮罩，也不得使用整高/整宽 `hairline` 切割页面；`hairline` 只用于输入、菜单、表格或其他确需精确边界的控件。每个区域最多增加一层有明确交互或状态用途的 `subtle surface`，不得用嵌套半透明背景制造卡片层级。
+- 页面使用 `--resona-window-background`、`--resona-chrome-surface`、`--resona-content-surface`、`--resona-player-surface`、`--resona-subtle-surface` 与 `--resona-hairline`。不得在 feature 中复制带 alpha 的平台色值。
+- 主题色预设只使用 Mantine 原生 `violet`、`blue`、`green`、`pink`、`yellow`，默认 `violet`；不要新增任意色值或把语义警告/错误色绑定到主题色。Mantine provider 必须保持浅色 `primaryShade: 7`、暗色 `primaryShade: 5`、`autoContrast: true`、`luminanceThreshold: 0.3`，并在五种颜色的浅色/深色设置页和主要 filled 控件中验证可读性。
+- Mica 页面遵循“纯 Mica 外壳 + 单一内容层”：标题栏、侧栏、窄屏导航和底栏的 chrome/player token 均保持透明，主内容只覆盖一层低 alpha `content surface`，完整播放器在该区域内部保持透明。播放列表标题和普通曲目行不得使用常驻卡片背景或描边；只有 hover、选中、播放中和拖放反馈才上色。应用壳不得叠加连续遮罩，也不得使用整高/整宽 `hairline` 切割页面；`hairline` 只用于输入、菜单、表格或其他确需精确边界的控件。
 - Mantine 全局 `body` 背景不消费 Resona 的窗口材质 token。Mica 路径必须通过 `html[data-window-material="mica"]` 同时覆盖 `html`、`body` 和 `#root` 为透明；不要把 `--mantine-color-body` 改为透明，否则组件实体表面会一起丢失。调整 CSS import 顺序或 Provider 时必须复测该覆盖优先级。
 - 设置页分组默认透明、无阴影、无外框，通过标题和节间距建立层级，不使用贯穿内容区的相邻分组细线。工具入口等独立工作单元使用无描边 `subtle surface` 与项目间空隙；只有菜单、弹层、错误/选中状态和确需精确边界的内容才使用描边实体表面。不为模仿 WinUI 引入第二套组件库或自绘控件体系。
 - Mica 初始化和保存的原生窗口主题必须在窗口首次可见前就绪；失败日志必须可诊断并回退 `solid`。主题偏好必须以 `auto`/`light`/`dark` 传到原生边界，`auto` 使用 `set_theme(None)`，不得用受当前窗口覆盖影响的 `prefers-color-scheme` 结果代替。浅色、深色和跟随系统都要检查 WebView 表面与原生标题栏是否一致。
@@ -125,7 +126,7 @@ Tauri 原生拖放处理器与 WebView2 HTML5 drag-and-drop 在 Windows 上存�
 - 滚动容器：主窗口所有可见滚动轨道使用 Mantine `ScrollArea`；验证滚轮、触控板、滚块拖动、键盘滚动和活动歌词居中，不允许父子双滚动
 - 主窗口布局：宽屏验证 `1080×700`/`760×520`，窄屏验证 `420×720`/`360×600`；两种模式均覆盖中英文、明暗主题、长文本和完整功能可达性
 - 主窗口几何：Windows 原生验证两种布局各自的位置/尺寸/最大化恢复、多显示器可见区域修正和 100%/125%/150% DPI；浏览器截图不能替代该项
-- 原生材质：浏览器以 `material=mica` 检查根材质、透明主内容、导航/底栏 tonal tint、无描边独立工作单元、设置节间距、明暗对比度和溢出；至少覆盖宽屏主界面、窄屏设置/工具、完整播放器和压缩窗口。Windows 11 Release 还必须截图或采样主内容空白区，确认没有继续输出 `solid` 回退色，再检查主窗口/压缩窗口 Mica、主题切换、冷启动、最大化/还原和阴影；Windows 10/Linux 检查完整实色回退
+- 原生材质：浏览器以 `material=mica` 检查透明 Mica 外壳、单一 content layer、无描边列表行、独立工作单元、设置节间距、明暗对比度和溢出；至少覆盖宽屏主界面、窄屏设置/工具、完整播放器和压缩窗口。Windows 11 Release 还必须用 `verify-release-webview.ps1 -CapturePath <png>` 或等价 DPI-aware 方法抓取原生窗口，确认侧栏与底栏属于同一根材质、主内容是唯一上色大区域且没有退回整块 solid 遮罩。浏览器计算样式差异、普通屏幕截图或单独 HWND 存活都不能代替该门禁；Windows 10/Linux 检查完整实色回退
 - 启动首帧：冷/暖启动、浅色/深色/跟随系统下不得出现明显白色空窗；隐藏到首帧的窗口必须有 Release 启动失败检测
 - Windows SMTC：系统回调必须通过 typed command 进入播放服务，并在实机验证媒体键与系统显示状态
 - Windows 桌面歌词：透明、置顶、焦点、跨进程点击/滚轮/拖动穿透和原生解锁辅助窗口必须实机验证；浏览器预览不能替代

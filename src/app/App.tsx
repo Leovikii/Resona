@@ -1036,7 +1036,7 @@ function SettingsView({ busy, desktopLyrics, layoutBusy, layoutMode, onRefresh, 
           <Group gap="xs">
             {accentColors.map((color) => (
               <button
-                aria-label={color}
+                aria-label={t(`settings.accentColors.${color}`)}
                 className="color-swatch"
                 data-active={accentColor === color || undefined}
                 key={color}
@@ -1210,7 +1210,12 @@ function PlayerBar({ busy, compact, desktopLyrics, details, expanded, hasCurrent
   const canControl = snapshot.status === "playing" || snapshot.status === "paused";
   const currentId = snapshot.currentItemId ?? snapshot.queue[0]?.id;
   return (
-    <footer className="player-bar" data-expanded={expanded || undefined} data-layout={compact ? "compact" : "wide"}>
+    <footer
+      className="player-bar"
+      data-empty={!hasCurrentTrack || undefined}
+      data-expanded={expanded || undefined}
+      data-layout={compact ? "compact" : "wide"}
+    >
       <Slider
         aria-label={t("playback.progress")}
         className="player-progress"
@@ -1647,7 +1652,7 @@ function formatSampleRate(sampleRate: number) {
 function EmptyView({ icon, label }: { icon: ReactNode; label: string }) {
   return (
     <div className="empty-state">
-      <ThemeIcon color="gray" size={48} variant="light">{icon}</ThemeIcon>
+      <ThemeIcon className="empty-state-icon" color="gray" size={48} variant="light">{icon}</ThemeIcon>
       <Text c="dimmed" size="sm">{label}</Text>
     </div>
   );

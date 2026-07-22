@@ -185,7 +185,6 @@ export function PlaylistTrackList({
             onPointerUp={reorder.onPointerUp}
             role="option"
             tabIndex={0}
-            withBorder
           >
             <span className="track-index">
               {current ? (
