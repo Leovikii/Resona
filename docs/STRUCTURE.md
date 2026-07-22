@@ -2,11 +2,20 @@
 
 该结构在初始化应用时逐步创建；当前不为尚未存在的模块添加空目录。
 
-## 当前实际结构（截至 0.0.18）
+## 当前实际结构（截至 0.0.19 资源预备）
 
 应用已按实际变化边界拆分前端与 Rust 模块：
 
 ```text
+assets/
+├─ resona-icon.svg             # 透明单 R 应用图标源
+├─ resona-r-mark.svg           # 紧裁画布的标准单 R 设计源
+├─ resona-gothic-wordmark.svg  # 主界面横向字标
+├─ resona-file-flac.svg        # FLAC 文件关联图标源（待注册）
+├─ resona-file-wav.svg         # WAV 文件关联图标源（待注册）
+├─ resona-file-mp3.svg         # MP3 文件关联图标源（待注册）
+└─ FILE_ICONS.md               # 格式图标映射和栅格化约定
+
 src/
 ├─ App.tsx                     # 应用入口兼容转发，不承载页面逻辑
 ├─ main.tsx                    # React 启动、provider 和 i18n 初始化
