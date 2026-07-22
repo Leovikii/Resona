@@ -108,6 +108,7 @@ export default function App() {
   const playback = usePlaybackController();
   const library = useLibrary();
   const desktopLyrics = useDesktopLyricsWindow();
+  const { desktopLyrics: lyricsPreferences, setDesktopLyrics } = usePreferences();
   const mainWindow = useMainWindowLayout();
   const [selection, setSelection] = useState<Selection>({ kind: "recent" });
   const [createPlaylistOpen, setCreatePlaylistOpen] = useState(false);
@@ -117,6 +118,7 @@ export default function App() {
   const [playerExpanded, setPlayerExpanded] = useState(false);
   const [navigationOpen, setNavigationOpen] = useState(false);
   const dropActionsRef = useRef({ library, playback, t });
+  const autoLyricsPathRef = useRef<string | null>(null);
   dropActionsRef.current = { library, playback, t };
 
   const hasCurrentTrack = playback.snapshot.currentItemId !== null
@@ -136,6 +138,17 @@ export default function App() {
   useEffect(() => {
     if (!hasCurrentTrack) setPlayerExpanded(false);
   }, [hasCurrentTrack]);
+
+  useEffect(() => {
+    const path = playback.selectedPath;
+    if (!isTauriRuntime() || !lyricsPreferences.enabled || !hasCurrentTrack || !path) {
+      if (!path) autoLyricsPathRef.current = null;
+      return;
+    }
+    if (autoLyricsPathRef.current === path || desktopLyrics.snapshot.visible) return;
+    autoLyricsPathRef.current = path;
+    void desktopLyrics.run("show_desktop_lyrics_window", { fontSize: lyricsPreferences.fontSize });
+  }, [desktopLyrics, hasCurrentTrack, lyricsPreferences.enabled, lyricsPreferences.fontSize, playback.selectedPath]);
 
   useEffect(() => {
     if (playback.openSequence > 0) setSelection({ kind: "default" });
@@ -357,7 +370,7 @@ export default function App() {
             opened={navigationOpen}
             padding={0}
             size="min(78vw, 280px)"
-            title={t("nav.navigation")}
+            title={<BrandLockup />}
           >
             <MemoSidebar
               activePlaylist={playback.activePlaylist}
@@ -566,14 +579,7 @@ function Sidebar({
   }, []);
   return (
     <aside className="sidebar">
-      {!hideBrand && <div className="brand-lockup">
-        <ThemeIcon radius="sm" size={34} variant="light">
-          <Music2 size={20} strokeWidth={1.8} />
-        </ThemeIcon>
-        <div className="brand-copy">
-          <Text fw={700}>{t("app.name")}</Text>
-        </div>
-      </div>}
+      {!hideBrand && <BrandLockup />}
 
       <nav className="sidebar-primary" aria-label={t("app.name")}>
         <NavButton
@@ -652,6 +658,20 @@ function Sidebar({
         />
       </nav>
     </aside>
+  );
+}
+
+function BrandLockup() {
+  const { t } = useTranslation();
+  return (
+    <div className="brand-lockup">
+      <ThemeIcon radius="sm" size={34} variant="light">
+        <Music2 size={20} strokeWidth={1.8} />
+      </ThemeIcon>
+      <div className="brand-copy">
+        <Text fw={700}>{t("app.name")}</Text>
+      </div>
+    </div>
   );
 }
 
@@ -824,11 +844,13 @@ function DefaultPlaylistView({
       <div className="playlist-detail-heading">
         <div className="path-heading">
           <Title order={2}>{t("library.default")}</Title>
-          <Text c="dimmed" lineClamp={1} size="sm">
-            {sourceDirectory ?? (items.length > 0
+          <OverflowMarquee
+            className="path-heading-copy"
+            observe={false}
+            text={sourceDirectory ?? (items.length > 0
               ? t("library.multipleSources")
               : t("library.defaultEmptyHint"))}
-          </Text>
+          />
         </div>
         <AddMediaMenu
           buttonLabel={t("common.add")}
@@ -1064,7 +1086,23 @@ function SettingsView({ busy, desktopLyrics, layoutBusy, layoutMode, onRefresh, 
     setLocale,
   } = usePreferences();
   const [backgroundOpacity, setBackgroundOpacity] = useState(lyricsPreferences.backgroundOpacity);
+  const [fontDraft, setFontDraft] = useState(String(lyricsPreferences.fontSize));
   useEffect(() => setBackgroundOpacity(lyricsPreferences.backgroundOpacity), [lyricsPreferences.backgroundOpacity]);
+  useEffect(() => setFontDraft(String(lyricsPreferences.fontSize)), [lyricsPreferences.fontSize]);
+  const commitFontSize = useCallback(async (raw: string) => {
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) {
+      setFontDraft(String(lyricsPreferences.fontSize));
+      return;
+    }
+    const value = Math.round(Math.min(64, Math.max(16, parsed)));
+    setFontDraft(String(value));
+    if (desktopLyrics.snapshot.visible) {
+      const fitted = await desktopLyrics.run("fit_desktop_lyrics_window", { fontSize: value });
+      if (!fitted) return;
+    }
+    setDesktopLyrics({ fontSize: value });
+  }, [desktopLyrics, lyricsPreferences.fontSize, setDesktopLyrics]);
   return (
     <ScrollArea className="settings-scroll" type="auto">
     <div className="page-content settings-page">
@@ -1126,18 +1164,31 @@ function SettingsView({ busy, desktopLyrics, layoutBusy, layoutMode, onRefresh, 
 
       <section className="settings-section">
         <Text className="settings-section-title" fw={650}>{t("desktopLyrics.title")}</Text>
-        <SettingRow label={t("desktopLyrics.fontSize")}>
+        <SettingRow className="font-size-setting" label={t("desktopLyrics.fontSize")}>
           <NumberInput
+            allowDecimal={false}
+            allowNegative={false}
             aria-label={t("desktopLyrics.fontSize")}
-            clampBehavior="strict"
+            clampBehavior="blur"
+            className="desktop-lyrics-font-input"
+            hideControls
+            inputMode="numeric"
             max={64}
             min={16}
-            onChange={(value) => {
-              if (typeof value === "number") setDesktopLyrics({ fontSize: value });
+            onBlur={() => void commitFontSize(fontDraft)}
+            onChange={(value) => setFontDraft(String(value))}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void commitFontSize(fontDraft);
+              } else if (event.key === "Escape") {
+                setFontDraft(String(lyricsPreferences.fontSize));
+                event.currentTarget.blur();
+              }
             }}
+            onWheel={(event) => event.currentTarget.blur()}
             suffix=" px"
-            value={lyricsPreferences.fontSize}
-            w={130}
+            value={fontDraft}
           />
         </SettingRow>
         <SettingRow label={t("desktopLyrics.color")}>
@@ -1216,9 +1267,9 @@ function SettingsView({ busy, desktopLyrics, layoutBusy, layoutMode, onRefresh, 
   );
 }
 
-function SettingRow({ children, label }: { children: ReactNode; label: string }) {
+function SettingRow({ children, className, label }: { children: ReactNode; className?: string; label: string }) {
   return (
-    <div className="setting-row">
+    <div className={`setting-row${className ? ` ${className}` : ""}`}>
       <Text c="dimmed" size="sm">{label}</Text>
       <div className="setting-control">{children}</div>
     </div>
@@ -1274,7 +1325,7 @@ function PlayerBar({ busy, compact, desktopLyrics, details, expanded, hasCurrent
           </span>
         </UnstyledButton>
         <div className="player-track-copy">
-          <OverflowMarquee auto className="player-track-title" text={title} />
+          <OverflowMarquee className="player-track-title" text={title} />
           <Text c="dimmed" size="xs">
             {formatDuration(seek.displayPositionMs)} / {formatDuration(snapshot.durationMs)}
           </Text>
@@ -1459,17 +1510,23 @@ function DesktopLyricsButton({ busy, controller, hasCurrentTrack }: {
   hasCurrentTrack: boolean;
 }) {
   const { t } = useTranslation();
+  const { desktopLyrics: preferences, setDesktopLyrics } = usePreferences();
   return (
     <Tooltip label={controller.snapshot.visible ? t("desktopLyrics.hide") : t("desktopLyrics.show")}>
       <ActionIcon
         aria-label={controller.snapshot.visible ? t("desktopLyrics.hide") : t("desktopLyrics.show")}
         color={controller.snapshot.visible ? undefined : "gray"}
         disabled={busy || controller.busy || !hasCurrentTrack || !controller.snapshot.supported}
-        onClick={() => void controller.run(
-          controller.snapshot.visible
-            ? "hide_desktop_lyrics_window"
-            : "show_desktop_lyrics_window",
-        )}
+        onClick={() => {
+          if (controller.snapshot.visible) {
+            setDesktopLyrics({ enabled: false });
+            void controller.run("hide_desktop_lyrics_window");
+            return;
+          }
+          void controller.run("show_desktop_lyrics_window", { fontSize: preferences.fontSize }).then((success) => {
+            if (success) setDesktopLyrics({ enabled: true });
+          });
+        }}
         variant={controller.snapshot.visible ? "light" : "subtle"}
       >
         <Captions size={17} />

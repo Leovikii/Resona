@@ -44,6 +44,7 @@ impl DesktopLyricsWindowService {
     pub fn show(
         self: &std::sync::Arc<Self>,
         _app: &tauri::AppHandle,
+        _font_size: Option<u32>,
     ) -> Result<DesktopLyricsWindowSnapshot, DesktopLyricsWindowFailure> {
         Err(DesktopLyricsWindowFailure::new(
             "desktop_lyrics_unsupported",
@@ -76,6 +77,16 @@ impl DesktopLyricsWindowService {
     }
 
     pub fn start_dragging(&self) -> Result<(), DesktopLyricsWindowFailure> {
+        Err(DesktopLyricsWindowFailure::new(
+            "desktop_lyrics_unsupported",
+            "desktop lyrics are not available on this platform",
+        ))
+    }
+
+    pub fn fit_height(
+        &self,
+        _font_size: u32,
+    ) -> Result<DesktopLyricsWindowSnapshot, DesktopLyricsWindowFailure> {
         Err(DesktopLyricsWindowFailure::new(
             "desktop_lyrics_unsupported",
             "desktop lyrics are not available on this platform",

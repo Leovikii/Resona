@@ -23,19 +23,19 @@ use commands::{
     add_default_playlist_items, add_playlist_items, cancel_audio_compression,
     cancel_audio_compression_scan, clear_audio_compression_inputs, clear_default_playlist,
     clear_playlist_items, create_playlist, delete_playlist, desktop_lyrics_window_ready,
-    get_audio_compression_scan_state, get_audio_compression_state, get_default_playlist,
-    get_desktop_lyrics_window_state, get_main_window_state, get_now_playing_state,
-    get_playback_state, get_track_details, hide_desktop_lyrics_window, list_playlist_items,
-    list_playlists, list_recent_play, lock_desktop_lyrics_window, main_window_ready,
-    move_default_playlist_item, move_playlist, move_playlist_item, next_playback,
-    open_main_settings, open_media_context, pause_playback, play_default_playlist_item,
-    play_queue_item, play_user_playlist_item, previous_playback, refresh_output_devices,
-    remove_audio_compression_inputs, remove_default_playlist_items, remove_playlist_item,
-    remove_playlist_items, rename_playlist, resume_playback, scan_audio_compression_inputs,
-    seek_playback, select_output_device, set_main_window_layout_mode, set_playback_mode,
-    set_playback_volume, show_audio_compression_window, show_desktop_lyrics_window,
-    start_audio_compression, start_desktop_lyrics_drag, stop_playback,
-    unlock_desktop_lyrics_window,
+    fit_desktop_lyrics_window, get_audio_compression_scan_state, get_audio_compression_state,
+    get_default_playlist, get_desktop_lyrics_window_state, get_main_window_state,
+    get_now_playing_state, get_playback_state, get_track_details, hide_desktop_lyrics_window,
+    list_playlist_items, list_playlists, list_recent_play, lock_desktop_lyrics_window,
+    main_window_ready, move_default_playlist_item, move_playlist, move_playlist_item,
+    next_playback, open_main_settings, open_media_context, pause_playback,
+    play_default_playlist_item, play_queue_item, play_user_playlist_item, previous_playback,
+    refresh_output_devices, remove_audio_compression_inputs, remove_default_playlist_items,
+    remove_playlist_item, remove_playlist_items, rename_playlist, resume_playback,
+    scan_audio_compression_inputs, seek_playback, select_output_device,
+    set_main_window_layout_mode, set_playback_mode, set_playback_volume,
+    show_audio_compression_window, show_desktop_lyrics_window, start_audio_compression,
+    start_desktop_lyrics_drag, stop_playback, unlock_desktop_lyrics_window,
 };
 use compression::CompressionService;
 use lyrics::LyricsService;
@@ -165,6 +165,7 @@ pub fn run() {
             lock_desktop_lyrics_window,
             unlock_desktop_lyrics_window,
             start_desktop_lyrics_drag,
+            fit_desktop_lyrics_window,
             open_main_settings,
             list_playlists,
             create_playlist,
@@ -217,6 +218,18 @@ pub fn run() {
                 app_handle
                     .state::<Arc<main_window::MainWindowService>>()
                     .observe(app_handle);
+            }
+            if matches!(
+                &event,
+                tauri::RunEvent::WindowEvent {
+                    label,
+                    event: WindowEvent::Resized(_),
+                    ..
+                } if label == "desktop-lyrics"
+            ) {
+                app_handle
+                    .state::<Arc<DesktopLyricsWindowService>>()
+                    .enforce_height();
             }
             #[cfg(target_os = "windows")]
             let should_start = matches!(

@@ -3,15 +3,30 @@ import type { CSSProperties, PointerEvent, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useDesktopLyricsNowPlaying } from "../features/lyrics/useDesktopLyricsNowPlaying";
+import { useDesktopLyricsLayout } from "../features/lyrics/useDesktopLyricsLayout";
 import { useDesktopLyricsWindow } from "../features/lyrics/useDesktopLyricsWindow";
 import { usePreferences } from "../app/preferences";
-import { invokeTauri, isTauriRuntime } from "../shared/bridge/tauri";
+import {
+  invokeTauri,
+  isTauriRuntime,
+  startCurrentWindowResize,
+} from "../shared/bridge/tauri";
 import { fileNameFromPath } from "../shared/utils/format";
-import { Lock, Pause, Play, Settings, SkipBack, SkipForward, Unlock, X } from "lucide-react";
+import {
+  GripVertical,
+  Lock,
+  Pause,
+  Play,
+  Settings,
+  SkipBack,
+  SkipForward,
+  Unlock,
+  X,
+} from "lucide-react";
 
 export default function DesktopLyricsWindow() {
   const { t } = useTranslation();
-  const { desktopLyrics: preferences } = usePreferences();
+  const { desktopLyrics: preferences, setDesktopLyrics } = usePreferences();
   const { error, initialized, lyrics, playback, runPlayback } = useDesktopLyricsNowPlaying();
   const desktopLyrics = useDesktopLyricsWindow();
 
@@ -63,6 +78,17 @@ export default function DesktopLyricsWindow() {
     };
   }, [error, lyrics, playback.path, t]);
 
+  const preview = !isTauriRuntime();
+  const previewParameters = preview ? new URLSearchParams(window.location.search) : null;
+  const previewFontSize = previewParameters
+    ? normalizedPreviewNumber(previewParameters.get("fontSize"), 16, 64)
+    : null;
+  const previewWidth = previewParameters
+    ? normalizedPreviewNumber(previewParameters.get("lyricsWidth"), 320, 1600)
+    : null;
+  const fontSize = previewFontSize ?? preferences.fontSize;
+  const layout = useDesktopLyricsLayout(display.current, fontSize);
+
   const startDragging = (event: PointerEvent<HTMLElement>) => {
     if (event.button !== 0 || !isTauriRuntime()) return;
     event.preventDefault();
@@ -81,11 +107,23 @@ export default function DesktopLyricsWindow() {
     if (isTauriRuntime()) void invokeTauri("open_main_settings");
   };
   const stopControlDrag = (event: PointerEvent<HTMLDivElement>) => event.stopPropagation();
+  const startResizing = (direction: "East" | "West") => (event: PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (isTauriRuntime() && !desktopLyrics.snapshot.locked) {
+      void startCurrentWindowResize(direction).catch((resizeError) => {
+        console.error("Unable to resize the desktop lyrics window", resizeError);
+      });
+    }
+  };
   const style = {
-    "--desktop-lyrics-font-size": `${preferences.fontSize}px`,
+    "--desktop-lyrics-font-size": `${fontSize}px`,
     "--desktop-lyrics-color": preferences.color,
     "--desktop-lyrics-text-opacity": preferences.textOpacity / 100,
     "--desktop-lyrics-background-opacity": preferences.backgroundOpacity / 100,
+    "--desktop-lyrics-marquee-distance": `${layout.marqueeDistance}px`,
+    "--desktop-lyrics-marquee-duration": `${layout.marqueeDurationSeconds}s`,
+    ...(previewWidth ? { width: `${previewWidth}px` } : {}),
   } as CSSProperties;
 
   return (
@@ -99,6 +137,24 @@ export default function DesktopLyricsWindow() {
       style={style}
     >
       <div aria-hidden="true" className="desktop-lyrics-background" />
+      <button
+        aria-label={t("desktopLyrics.resizeLeft")}
+        className="desktop-lyrics-resize-handle desktop-lyrics-resize-left"
+        onPointerDown={startResizing("West")}
+        title={t("desktopLyrics.resizeLeft")}
+        type="button"
+      >
+        <GripVertical aria-hidden="true" size={14} />
+      </button>
+      <button
+        aria-label={t("desktopLyrics.resizeRight")}
+        className="desktop-lyrics-resize-handle desktop-lyrics-resize-right"
+        onPointerDown={startResizing("East")}
+        title={t("desktopLyrics.resizeRight")}
+        type="button"
+      >
+        <GripVertical aria-hidden="true" size={14} />
+      </button>
       <div className="desktop-lyrics-toolbar" onPointerDown={stopControlDrag}>
         <div className="desktop-lyrics-toolbar-title" title={fileNameFromPath(playback.path)}>
           {fileNameFromPath(playback.path) || t("playback.noTrack")}
@@ -151,19 +207,58 @@ export default function DesktopLyricsWindow() {
           </DesktopLyricsButton>
           <DesktopLyricsButton
             ariaLabel={t("desktopLyrics.close")}
-            onClick={() => void desktopLyrics.run("hide_desktop_lyrics_window")}
+            onClick={() => {
+              setDesktopLyrics({ enabled: false });
+              void desktopLyrics.run("hide_desktop_lyrics_window");
+            }}
             title={t("desktopLyrics.close")}
           >
             <X size={15} />
           </DesktopLyricsButton>
         </div>
       </div>
-      <div className="desktop-lyrics-copy" key={`${lyrics.revision}-${lyrics.activeLineIndex}`}>
-        <div aria-live="polite" className="desktop-lyrics-current">{display.current}</div>
-        <div className="desktop-lyrics-next">{display.next || "\u00a0"}</div>
+      <div
+        className="desktop-lyrics-copy"
+        data-layout-mode={layout.mode}
+        key={`${lyrics.revision}-${lyrics.activeLineIndex}`}
+        ref={layout.containerRef}
+      >
+        <div aria-hidden="true" className="desktop-lyrics-measure-clip">
+          <div className="desktop-lyrics-measure-wrapped" ref={layout.wrappedMeasureRef}>
+            {display.current}
+          </div>
+          <span className="desktop-lyrics-measure-nowrap" ref={layout.nowrapMeasureRef}>
+            {display.current}
+          </span>
+        </div>
+        <div className="desktop-lyrics-current-slot">
+          <div
+            aria-live="polite"
+            className="desktop-lyrics-current"
+            title={display.current.trim() || undefined}
+          >
+            {display.current}
+          </div>
+        </div>
+        <div
+          aria-hidden={layout.mode !== "single" || undefined}
+          className="desktop-lyrics-next"
+        >
+          {display.next || "\u00a0"}
+        </div>
       </div>
     </main>
   );
+}
+
+function normalizedPreviewNumber(
+  value: string | null,
+  min: number,
+  max: number,
+): number | null {
+  if (value === null) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : null;
 }
 
 function DesktopLyricsButton({

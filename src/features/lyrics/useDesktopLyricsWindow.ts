@@ -8,6 +8,7 @@ import {
 } from "../../shared/model/desktopLyrics";
 
 type DesktopLyricsCommand =
+  | "fit_desktop_lyrics_window"
   | "hide_desktop_lyrics_window"
   | "lock_desktop_lyrics_window"
   | "show_desktop_lyrics_window"
@@ -41,20 +42,25 @@ export function useDesktopLyricsWindow() {
     return () => window.clearInterval(timer);
   }, [preview, refresh]);
 
-  const run = useCallback(async (command: DesktopLyricsCommand) => {
+  const run = useCallback(async (
+    command: DesktopLyricsCommand,
+    args?: Record<string, unknown>,
+  ): Promise<boolean> => {
     setBusy(true);
     try {
       if (preview) {
         setSnapshot((current) => previewCommand(current, command));
         setError(null);
-        return;
+        return true;
       }
-      const next = await invokeTauri<DesktopLyricsWindowSnapshot>(command);
+      const next = await invokeTauri<DesktopLyricsWindowSnapshot>(command, args);
       setSnapshot(next);
       setError(null);
+      return true;
     } catch (nextError) {
       setError(toDesktopLyricsFailure(nextError));
       await refresh();
+      return false;
     } finally {
       setBusy(false);
     }
@@ -78,6 +84,7 @@ function sameSnapshot(
 function previewCommand(
   snapshot: DesktopLyricsWindowSnapshot,
   command: DesktopLyricsCommand,
+  _args?: Record<string, unknown>,
 ): DesktopLyricsWindowSnapshot {
   if (command === "show_desktop_lyrics_window") {
     return { ...snapshot, visible: true, locked: false };
@@ -87,6 +94,9 @@ function previewCommand(
   }
   if (command === "lock_desktop_lyrics_window") {
     return snapshot.visible ? { ...snapshot, locked: true } : snapshot;
+  }
+  if (command === "unlock_desktop_lyrics_window") {
+    return { ...snapshot, locked: false };
   }
   return { ...snapshot, locked: false };
 }

@@ -5,6 +5,7 @@ import {
   emptyLyricsSnapshot,
   mergeLyricsSnapshot,
   previewLyricsSnapshot,
+  type PreviewLyricsFixture,
   type LyricsSnapshot,
 } from "../../shared/model/lyrics";
 import {
@@ -30,11 +31,12 @@ export function useDesktopLyricsNowPlaying() {
   const preview = !isTauriRuntime();
   const previewEmpty = preview
     && new URLSearchParams(window.location.search).get("preview") === "empty";
+  const previewFixture = preview ? readPreviewFixture() : "short";
   const [playback, setPlayback] = useState(() => preview && !previewEmpty
     ? previewSnapshot()
     : emptySnapshot);
   const [lyrics, setLyrics] = useState(() => preview && !previewEmpty
-    ? previewLyricsSnapshot()
+    ? previewLyricsSnapshot(previewFixture)
     : emptyLyricsSnapshot);
   const [error, setError] = useState<PlaybackFailure | null>(null);
   const [initialized, setInitialized] = useState(preview);
@@ -93,6 +95,13 @@ export function useDesktopLyricsNowPlaying() {
   }, [preview, refresh]);
 
   return { error, initialized, lyrics, playback, runPlayback };
+}
+
+function readPreviewFixture(): PreviewLyricsFixture {
+  const value = new URLSearchParams(window.location.search).get("lyricsFixture");
+  return value === "empty" || value === "long-latin" || value === "long-zh" || value === "two-lines"
+    ? value
+    : "short";
 }
 
 function applyPreviewPlayback(

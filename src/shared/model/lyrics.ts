@@ -52,12 +52,38 @@ export function mergeLyricsSnapshot(
   };
 }
 
-export function previewLyricsSnapshot(): LyricsSnapshot {
+export type PreviewLyricsFixture = "empty" | "long-latin" | "long-zh" | "short" | "two-lines";
+
+export function previewLyricsSnapshot(fixture: PreviewLyricsFixture = "short"): LyricsSnapshot {
+  const fixtureLines: Record<Exclude<PreviewLyricsFixture, "empty">, [string, string]> = {
+    short: ["Hold the midnight signal", "Let the silence turn to sound"],
+    "two-lines": [
+      "让这一段歌词在常见桌面歌词宽度下自然换行并稳定占用两行",
+      "下一行不应在当前歌词换行时出现",
+    ],
+    "long-zh": [
+      "这是一条用于验证桌面歌词稳定性的超长中文歌词，它会超过两行并进入水平滚动模式，但渲染模式和窗口几何绝对不能来回切换或者发生任何抖动",
+      "下一行预览必须保持隐藏",
+    ],
+    "long-latin": [
+      "SUPERCALIFRAGILISTICEXPIALIDOCIOUS_RES0NA_DESKTOP_LYRICS_STABILITY_WITHOUT_ANY_BREAKING_SPACES_0123456789",
+      "The next line stays hidden while the current line scrolls",
+    ],
+  };
+  if (fixture === "empty") {
+    return {
+      ...emptyLyricsSnapshot,
+      revision: 1,
+      audioPath: "C:\\Music\\Resona Demo\\Midnight Signal.flac",
+      status: "empty",
+    };
+  }
+  const [current, next] = fixtureLines[fixture];
   return {
     revision: 1,
     audioPath: "C:\\Music\\Resona Demo\\Midnight Signal.flac",
     status: "ready",
-    activeLineIndex: 3,
+    activeLineIndex: 0,
     error: null,
     document: {
       sourcePath: "C:\\Music\\Resona Demo\\Midnight Signal.lrc",
@@ -67,12 +93,8 @@ export function previewLyricsSnapshot(): LyricsSnapshot {
       album: null,
       warningCount: 0,
       lines: [
-        { startMs: 60_000, endMs: 68_000, text: "Streetlights fade into the rain" },
-        { startMs: 68_000, endMs: 75_000, text: "A quiet pulse beneath the city" },
-        { startMs: 75_000, endMs: 81_000, text: "Every frequency aligns" },
-        { startMs: 81_000, endMs: 89_000, text: "Hold the midnight signal" },
-        { startMs: 89_000, endMs: 96_000, text: "Let the silence turn to sound" },
-        { startMs: 96_000, endMs: null, text: "We are listening now" },
+        { startMs: 0, endMs: 8_000, text: current },
+        { startMs: 8_000, endMs: null, text: next },
       ],
     },
   };

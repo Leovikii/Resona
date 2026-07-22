@@ -4,6 +4,7 @@ import { Play, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { usePointerReorder } from "./usePointerReorder";
+import { OverflowMarquee } from "./OverflowMarquee";
 
 export interface PlaylistTrackListItem {
   id: number;
@@ -174,8 +175,8 @@ export function PlaylistTrackList({
           >
             <span className="track-index">{index + 1}</span>
             <div className="track-copy">
-              <Text fw={600} lineClamp={1} size="sm">{item.displayName}</Text>
-              <Text c="dimmed" lineClamp={1} size="xs">{item.path}</Text>
+              <OverflowMarquee className="track-title" observe={false} text={item.displayName} />
+              <OverflowMarquee className="track-path" observe={false} text={item.path} />
             </div>
           </Paper>
         </div>)}

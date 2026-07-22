@@ -3,5 +3,5 @@
   "identifier": "desktop-lyrics",
   "description": "Minimal permissions for the Resona desktop lyrics WebView",
   "windows": ["desktop-lyrics"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "core:window:allow-start-resize-dragging"]
 }

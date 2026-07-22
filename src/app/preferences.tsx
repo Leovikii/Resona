@@ -20,6 +20,7 @@ interface PreferencesContextValue {
 }
 
 export interface DesktopLyricsPreferences {
+  enabled: boolean;
   fontSize: number;
   color: string;
   textOpacity: number;
@@ -27,6 +28,7 @@ export interface DesktopLyricsPreferences {
 }
 
 export const defaultDesktopLyricsPreferences: DesktopLyricsPreferences = {
+  enabled: false,
   fontSize: 28,
   color: "#ffffff",
   textOpacity: 100,
@@ -96,6 +98,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       setDesktopLyrics: (next) => {
         const value = normalizeDesktopLyricsPreferences({ ...desktopLyrics, ...next });
         writePreference("resona-desktop-lyrics-font-size", String(value.fontSize));
+        writePreference("resona-desktop-lyrics-enabled", String(value.enabled));
         writePreference("resona-desktop-lyrics-color", value.color);
         writePreference("resona-desktop-lyrics-text-opacity", String(value.textOpacity));
         writePreference("resona-desktop-lyrics-background-opacity", String(value.backgroundOpacity));
@@ -142,6 +145,7 @@ function writePreference(key: string, value: string) {
 
 function readDesktopLyricsPreferences(): DesktopLyricsPreferences {
   return normalizeDesktopLyricsPreferences({
+    enabled: readBooleanPreference("resona-desktop-lyrics-enabled", defaultDesktopLyricsPreferences.enabled),
     fontSize: readNumberPreference(
       "resona-desktop-lyrics-font-size",
       defaultDesktopLyricsPreferences.fontSize,
@@ -163,11 +167,22 @@ function readDesktopLyricsPreferences(): DesktopLyricsPreferences {
 
 function normalizeDesktopLyricsPreferences(value: DesktopLyricsPreferences): DesktopLyricsPreferences {
   return {
+    enabled: Boolean(value.enabled),
     fontSize: Math.round(Math.min(64, Math.max(16, value.fontSize))),
     color: /^#[0-9a-f]{6}$/i.test(value.color) ? value.color : defaultDesktopLyricsPreferences.color,
     textOpacity: Math.round(Math.min(100, Math.max(10, value.textOpacity))),
     backgroundOpacity: Math.round(Math.min(100, Math.max(0, value.backgroundOpacity))),
   };
+}
+
+function readBooleanPreference(key: string, fallback: boolean) {
+  try {
+    const value = localStorage.getItem(key);
+    return value === null ? fallback : value === "true";
+  } catch (error) {
+    console.warn(`Unable to read UI preference ${key}`, error);
+    return fallback;
+  }
 }
 
 function readNumberPreference(key: string, fallback: number) {

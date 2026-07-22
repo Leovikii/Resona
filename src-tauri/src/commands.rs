@@ -441,9 +441,10 @@ pub async fn get_desktop_lyrics_window_state(
 #[tauri::command]
 pub async fn show_desktop_lyrics_window(
     app: AppHandle,
+    font_size: Option<u32>,
     service: State<'_, ManagedDesktopLyricsWindowService>,
 ) -> Result<DesktopLyricsWindowSnapshot, DesktopLyricsWindowFailure> {
-    Arc::clone(service.inner()).show(&app)
+    Arc::clone(service.inner()).show(&app, font_size)
 }
 
 #[tauri::command]
@@ -480,6 +481,14 @@ pub async fn start_desktop_lyrics_drag(
     service: State<'_, ManagedDesktopLyricsWindowService>,
 ) -> Result<(), DesktopLyricsWindowFailure> {
     service.start_dragging()
+}
+
+#[tauri::command]
+pub async fn fit_desktop_lyrics_window(
+    font_size: u32,
+    service: State<'_, ManagedDesktopLyricsWindowService>,
+) -> Result<DesktopLyricsWindowSnapshot, DesktopLyricsWindowFailure> {
+    service.fit_height(font_size)
 }
 
 #[tauri::command]

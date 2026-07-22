@@ -4,10 +4,11 @@ use std::ffi::c_void;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tauri::{
-    AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
+    AppHandle, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder,
 };
 use windows::core::{Error as WindowsError, PCWSTR};
@@ -34,9 +35,9 @@ use super::{DesktopLyricsWindowFailure, DesktopLyricsWindowSnapshot};
 
 const LYRICS_WINDOW_LABEL: &str = "desktop-lyrics";
 const LYRICS_WIDTH: f64 = 760.0;
-const LYRICS_HEIGHT: f64 = 188.0;
 const MIN_LYRICS_WIDTH: u32 = 480;
 const MIN_LYRICS_HEIGHT: u32 = 130;
+const MAX_LYRICS_WIDTH: u32 = 16_384;
 const GEOMETRY_FILE: &str = "desktop-lyrics-window.json";
 const HELPER_LOGICAL_SIZE: f64 = 38.0;
 const HELPER_LOGICAL_INSET: f64 = 8.0;
@@ -109,6 +110,8 @@ struct WindowGeometry {
 struct ServiceState {
     lifecycle: Lifecycle,
     resources: Option<WindowResources>,
+    font_size: u32,
+    window_ready: bool,
 }
 
 #[derive(Default)]
@@ -124,36 +127,86 @@ impl DesktopLyricsWindowService {
     pub fn show(
         self: &Arc<Self>,
         app: &AppHandle,
+        font_size: Option<u32>,
     ) -> Result<DesktopLyricsWindowSnapshot, DesktopLyricsWindowFailure> {
-        let mut state = self.lock_state();
-        if state.resources.is_none() {
-            state.resources = Some(create_windows(app, Arc::downgrade(self))?);
+        let (needs_create, requested_font_size) = {
+            let mut state = self.lock_state();
+            let requested_font_size = font_size.map(|value| value.clamp(16, 64));
+            if let Some(value) = requested_font_size {
+                state.font_size = value;
+            } else if state.resources.is_none() {
+                state.font_size = 28;
+            }
+            if state.resources.is_none() {
+                state.window_ready = false;
+            }
+            (state.resources.is_none(), state.font_size)
+        };
+
+        // Window construction can synchronously emit resize/page events. Do not
+        // hold the service mutex while Tauri creates the native window, otherwise
+        // the event handler can re-enter this service and deadlock the UI thread.
+        if needs_create {
+            let resources = match create_windows(app, Arc::downgrade(self), requested_font_size) {
+                Ok(resources) => resources,
+                Err(error) => {
+                    self.lock_state().window_ready = false;
+                    return Err(error);
+                }
+            };
+            let mut state = self.lock_state();
+            if state.resources.is_none() {
+                state.resources = Some(resources);
+            } else {
+                // A concurrent show won the race. Close the redundant WebView
+                // before dropping its native helper worker.
+                drop(state);
+                let _ = resources.lyrics_window.close();
+            }
         }
+
+        let mut state = self.lock_state();
         let resources = state.resources.as_ref().expect("desktop lyrics resources");
+        let window = resources.lyrics_window.clone();
         resources
             .lyrics_window
             .set_ignore_cursor_events(false)
             .map_err(|error| window_failure("desktop_lyrics_unlock_failed", error))?;
         resources.native_helper.hide();
         state.lifecycle.mark_visible();
-        Ok(state.lifecycle.snapshot())
+        let should_show = state.window_ready;
+        let snapshot = state.lifecycle.snapshot();
+        drop(state);
+        if should_show {
+            window
+                .show()
+                .map_err(|error| window_failure("desktop_lyrics_show_failed", error))?;
+        }
+        Ok(snapshot)
     }
 
     pub fn window_ready(&self) -> Result<DesktopLyricsWindowSnapshot, DesktopLyricsWindowFailure> {
-        let state = self.lock_state();
-        if state.lifecycle.visible {
-            let resources = state.resources.as_ref().ok_or_else(|| {
+        let (window, visible) = {
+            let mut state = self.lock_state();
+            state.window_ready = true;
+            let window = state
+                .resources
+                .as_ref()
+                .map(|resources| resources.lyrics_window.clone());
+            (window, state.lifecycle.visible)
+        };
+        if visible {
+            let window = window.ok_or_else(|| {
                 DesktopLyricsWindowFailure::new(
                     "desktop_lyrics_unavailable",
                     "desktop lyrics windows are not initialized",
                 )
             })?;
-            resources
-                .lyrics_window
+            window
                 .show()
                 .map_err(|error| window_failure("desktop_lyrics_show_failed", error))?;
         }
-        Ok(state.lifecycle.snapshot())
+        Ok(self.snapshot())
     }
 
     pub fn hide(
@@ -164,6 +217,7 @@ impl DesktopLyricsWindowService {
         let resources = {
             let mut state = self.lock_state();
             state.lifecycle.mark_hidden();
+            state.window_ready = false;
             state.resources.take()
         };
         if let Some(resources) = resources {
@@ -257,6 +311,58 @@ impl DesktopLyricsWindowService {
             .map_err(|error| window_failure("desktop_lyrics_drag_failed", error))
     }
 
+    pub fn fit_height(
+        &self,
+        font_size: u32,
+    ) -> Result<DesktopLyricsWindowSnapshot, DesktopLyricsWindowFailure> {
+        let (window, locked) = {
+            let mut state = self.lock_state();
+            let window = state
+                .resources
+                .as_ref()
+                .map(|resources| resources.lyrics_window.clone())
+                .ok_or_else(|| {
+                    DesktopLyricsWindowFailure::new(
+                        "desktop_lyrics_unavailable",
+                        "desktop lyrics window is not initialized",
+                    )
+                })?;
+            state.font_size = font_size.clamp(16, 64);
+            (window, state.lifecycle.locked)
+        };
+        resize_height(&window, font_size.clamp(16, 64))?;
+        if locked {
+            let state = self.lock_state();
+            if let Some(resources) = state.resources.as_ref() {
+                position_helper(resources)?;
+            }
+        }
+        Ok(self.snapshot())
+    }
+
+    pub fn enforce_height(&self) {
+        let (window, font_size) = {
+            let state = self.lock_state();
+            let Some(resources) = state.resources.as_ref() else {
+                return;
+            };
+            (resources.lyrics_window.clone(), state.font_size)
+        };
+        let Ok(size) = window.inner_size() else {
+            return;
+        };
+        let Ok(scale) = window.scale_factor() else {
+            return;
+        };
+        let expected = lyrics_height(font_size);
+        let actual = f64::from(size.height) / scale;
+        if (actual - expected).abs() > 0.5 {
+            if let Err(error) = resize_height(&window, font_size) {
+                eprintln!("desktop lyrics height correction failed: {}", error.message);
+            }
+        }
+    }
+
     fn unlock_internal(&self) -> Result<DesktopLyricsWindowSnapshot, DesktopLyricsWindowFailure> {
         let mut state = self.lock_state();
         if let Some(resources) = state.resources.as_ref() {
@@ -280,15 +386,18 @@ impl DesktopLyricsWindowService {
 fn create_windows(
     app: &AppHandle,
     service: Weak<DesktopLyricsWindowService>,
+    font_size: u32,
 ) -> Result<WindowResources, DesktopLyricsWindowFailure> {
+    let height = lyrics_height(font_size);
     let lyrics_window = WebviewWindowBuilder::new(
         app,
         LYRICS_WINDOW_LABEL,
         WebviewUrl::App("index.html?window=desktop-lyrics".into()),
     )
     .title("Resona Desktop Lyrics")
-    .inner_size(LYRICS_WIDTH, LYRICS_HEIGHT)
+    .inner_size(LYRICS_WIDTH, height)
     .min_inner_size(MIN_LYRICS_WIDTH as f64, MIN_LYRICS_HEIGHT as f64)
+    .max_inner_size(MAX_LYRICS_WIDTH as f64, 240.0)
     .resizable(true)
     .closable(false)
     .decorations(false)
@@ -303,7 +412,7 @@ fn create_windows(
     .build()
     .map_err(|error| window_failure("desktop_lyrics_create_failed", error))?;
 
-    restore_geometry(app, &lyrics_window);
+    restore_geometry(app, &lyrics_window, height);
 
     let lyrics_hwnd = lyrics_window
         .hwnd()
@@ -323,7 +432,7 @@ fn create_windows(
     })
 }
 
-fn restore_geometry(app: &AppHandle, window: &WebviewWindow) {
+fn restore_geometry(app: &AppHandle, window: &WebviewWindow, height: f64) {
     let Ok(data_dir) = app.path().app_data_dir() else {
         return;
     };
@@ -337,37 +446,56 @@ fn restore_geometry(app: &AppHandle, window: &WebviewWindow) {
     let Ok(monitors) = app.available_monitors() else {
         return;
     };
-    let work_areas = monitors
-        .iter()
-        .map(|monitor| monitor.work_area())
-        .collect::<Vec<_>>();
-    let Some(restored) = constrain_geometry(saved, &work_areas) else {
+    let Some(monitor) = select_restore_monitor(&saved, &monitors) else {
         return;
     };
+    let restored = constrain_geometry(saved, monitor.work_area(), monitor.scale_factor(), height);
+
+    // Move the hidden window to the target monitor before applying its physical
+    // size so mixed-DPI restoration does not use the primary monitor's scale.
+    if let Err(error) = window.set_position(PhysicalPosition::new(restored.x, restored.y)) {
+        eprintln!("desktop lyrics position restore failed: {error}");
+    }
     if let Err(error) = window.set_size(PhysicalSize::new(restored.width, restored.height)) {
         eprintln!("desktop lyrics size restore failed: {error}");
     }
+    // A cross-monitor DPI transition can apply a suggested native rectangle.
+    // Reassert the saved physical origin after the final size is known.
     if let Err(error) = window.set_position(PhysicalPosition::new(restored.x, restored.y)) {
         eprintln!("desktop lyrics position restore failed: {error}");
     }
 }
 
+fn lyrics_height(font_size: u32) -> f64 {
+    (56.0 + 2.24 * f64::from(font_size)).clamp(MIN_LYRICS_HEIGHT as f64, 240.0)
+}
+
+fn resize_height(window: &WebviewWindow, font_size: u32) -> Result<(), DesktopLyricsWindowFailure> {
+    let size = window
+        .inner_size()
+        .map_err(|error| window_failure("desktop_lyrics_size_failed", error))?;
+    let scale = window
+        .scale_factor()
+        .map_err(|error| window_failure("desktop_lyrics_scale_failed", error))?;
+    let width = f64::from(size.width) / scale;
+    window
+        .set_size(LogicalSize::new(width, lyrics_height(font_size)))
+        .map_err(|error| window_failure("desktop_lyrics_resize_failed", error))
+}
+
 fn constrain_geometry(
     saved: WindowGeometry,
-    work_areas: &[&tauri::PhysicalRect<i32, u32>],
-) -> Option<WindowGeometry> {
-    let area = work_areas
-        .iter()
-        .find(|area| {
-            saved.x < area.position.x + area.size.width as i32
-                && saved.x + saved.width as i32 > area.position.x
-                && saved.y < area.position.y + area.size.height as i32
-                && saved.y + saved.height as i32 > area.position.y
-        })
-        .copied()
-        .or_else(|| work_areas.first().copied())?;
-    let width = saved.width.clamp(MIN_LYRICS_WIDTH, area.size.width);
-    let height = saved.height.clamp(MIN_LYRICS_HEIGHT, area.size.height);
+    area: &tauri::PhysicalRect<i32, u32>,
+    scale_factor: f64,
+    logical_height: f64,
+) -> WindowGeometry {
+    let minimum_width = physical_dimension(MIN_LYRICS_WIDTH as f64, scale_factor)
+        .min(area.size.width)
+        .max(1);
+    let width = saved.width.clamp(minimum_width, area.size.width);
+    let height = physical_dimension(logical_height, scale_factor)
+        .min(area.size.height)
+        .max(1);
     let x = saved.x.clamp(
         area.position.x,
         area.position.x + area.size.width as i32 - width as i32,
@@ -376,12 +504,71 @@ fn constrain_geometry(
         area.position.y,
         area.position.y + area.size.height as i32 - height as i32,
     );
-    Some(WindowGeometry {
+    WindowGeometry {
         x,
         y,
         width,
         height,
-    })
+    }
+}
+
+fn physical_dimension(logical: f64, scale_factor: f64) -> u32 {
+    (logical * scale_factor).round().clamp(1.0, u32::MAX as f64) as u32
+}
+
+fn select_restore_monitor<'a>(
+    saved: &WindowGeometry,
+    monitors: &'a [tauri::Monitor],
+) -> Option<&'a tauri::Monitor> {
+    let work_areas = monitors
+        .iter()
+        .map(tauri::Monitor::work_area)
+        .collect::<Vec<_>>();
+    select_restore_area_index(saved, &work_areas).and_then(|index| monitors.get(index))
+}
+
+fn select_restore_area_index(
+    saved: &WindowGeometry,
+    work_areas: &[&tauri::PhysicalRect<i32, u32>],
+) -> Option<usize> {
+    work_areas
+        .iter()
+        .enumerate()
+        .filter_map(|(index, area)| {
+            let overlap = intersection_area(saved, area);
+            (overlap > 0).then_some((index, overlap))
+        })
+        .max_by_key(|(_, overlap)| *overlap)
+        .map(|(index, _)| index)
+        .or_else(|| {
+            work_areas
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, area)| squared_center_distance(saved, area))
+                .map(|(index, _)| index)
+        })
+}
+
+fn intersection_area(saved: &WindowGeometry, area: &tauri::PhysicalRect<i32, u32>) -> u64 {
+    let left = i64::from(saved.x).max(i64::from(area.position.x));
+    let top = i64::from(saved.y).max(i64::from(area.position.y));
+    let right = (i64::from(saved.x) + i64::from(saved.width))
+        .min(i64::from(area.position.x) + i64::from(area.size.width));
+    let bottom = (i64::from(saved.y) + i64::from(saved.height))
+        .min(i64::from(area.position.y) + i64::from(area.size.height));
+    let width = (right - left).max(0) as u64;
+    let height = (bottom - top).max(0) as u64;
+    width.saturating_mul(height)
+}
+
+fn squared_center_distance(saved: &WindowGeometry, area: &tauri::PhysicalRect<i32, u32>) -> i128 {
+    let saved_x = i128::from(saved.x) * 2 + i128::from(saved.width);
+    let saved_y = i128::from(saved.y) * 2 + i128::from(saved.height);
+    let area_x = i128::from(area.position.x) * 2 + i128::from(area.size.width);
+    let area_y = i128::from(area.position.y) * 2 + i128::from(area.size.height);
+    let dx = saved_x - area_x;
+    let dy = saved_y - area_y;
+    dx * dx + dy * dy
 }
 
 fn position_helper(resources: &WindowResources) -> Result<(), DesktopLyricsWindowFailure> {
@@ -500,7 +687,7 @@ impl NativeUnlockHelper {
             ));
         }
 
-        let hwnd = match result_receiver.recv() {
+        let hwnd = match result_receiver.recv_timeout(Duration::from_secs(5)) {
             Ok(Ok(hwnd)) => HWND(hwnd),
             Ok(Err(error)) => {
                 let _ = commands.send(NativeHelperCommand::Shutdown);
@@ -512,7 +699,9 @@ impl NativeUnlockHelper {
                 let _ = worker.join();
                 return Err(DesktopLyricsWindowFailure::new(
                     "desktop_lyrics_helper_dispatch_failed",
-                    format!("desktop lyrics helper creation did not respond: {error}"),
+                    format!(
+                        "desktop lyrics helper creation did not respond within 5 seconds: {error}"
+                    ),
                 ));
             }
         };
@@ -832,7 +1021,7 @@ mod tests {
     }
 
     #[test]
-    fn restored_geometry_is_constrained_to_a_visible_work_area() {
+    fn restored_geometry_is_constrained_to_a_visible_work_area_and_target_dpi() {
         let work_area = tauri::PhysicalRect {
             position: PhysicalPosition::new(-1920, 0),
             size: PhysicalSize::new(1920, 1040),
@@ -844,11 +1033,12 @@ mod tests {
                 width: 320,
                 height: 80,
             },
-            &[&work_area],
-        )
-        .expect("constrain geometry");
-        assert_eq!(restored.width, MIN_LYRICS_WIDTH);
-        assert_eq!(restored.height, MIN_LYRICS_HEIGHT);
+            &work_area,
+            1.5,
+            lyrics_height(28),
+        );
+        assert_eq!(restored.width, MIN_LYRICS_WIDTH * 3 / 2);
+        assert_eq!(restored.height, 195);
         assert!(restored.x >= work_area.position.x);
         assert!(
             restored.x + restored.width as i32
@@ -859,6 +1049,60 @@ mod tests {
             restored.y + restored.height as i32
                 <= work_area.position.y + work_area.size.height as i32
         );
+    }
+
+    #[test]
+    fn restore_monitor_selection_uses_largest_visible_area() {
+        let primary = tauri::PhysicalRect {
+            position: PhysicalPosition::new(0, 0),
+            size: PhysicalSize::new(2560, 1440),
+        };
+        let secondary = tauri::PhysicalRect {
+            position: PhysicalPosition::new(-960, 0),
+            size: PhysicalSize::new(960, 1707),
+        };
+        let saved = WindowGeometry {
+            x: -850,
+            y: 120,
+            width: 1443,
+            height: 218,
+        };
+
+        assert_eq!(
+            select_restore_area_index(&saved, &[&primary, &secondary]),
+            Some(1)
+        );
+        let restored = constrain_geometry(saved, &secondary, 1.5, lyrics_height(28));
+        assert_eq!(restored.x, secondary.position.x);
+        assert_eq!(restored.width, secondary.size.width);
+        assert!(restored.x < 0);
+    }
+
+    #[test]
+    fn monitor_distance_handles_windows_outside_all_work_areas() {
+        let primary = tauri::PhysicalRect {
+            position: PhysicalPosition::new(0, 0),
+            size: PhysicalSize::new(2560, 1440),
+        };
+        let secondary = tauri::PhysicalRect {
+            position: PhysicalPosition::new(-960, 0),
+            size: PhysicalSize::new(960, 1707),
+        };
+        let saved = WindowGeometry {
+            x: -1200,
+            y: 2200,
+            width: 760,
+            height: 150,
+        };
+
+        assert!(
+            squared_center_distance(&saved, &secondary) < squared_center_distance(&saved, &primary)
+        );
+        assert_eq!(
+            select_restore_area_index(&saved, &[&primary, &secondary]),
+            Some(1)
+        );
+        assert_eq!(select_restore_area_index(&saved, &[]), None);
     }
 
     #[test]

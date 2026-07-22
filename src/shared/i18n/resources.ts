@@ -82,6 +82,8 @@ export const resources = {
         color: "歌词颜色",
         textOpacity: "字体透明度",
         backgroundOpacity: "背景透明度",
+        resizeLeft: "从左侧调整桌面歌词宽度",
+        resizeRight: "从右侧调整桌面歌词宽度",
         loading: "正在读取歌词",
         unavailable: "桌面歌词暂时不可用",
         errors: {
@@ -296,6 +298,8 @@ export const resources = {
         color: "Lyrics color",
         textOpacity: "Text opacity",
         backgroundOpacity: "Background opacity",
+        resizeLeft: "Resize desktop lyrics from the left edge",
+        resizeRight: "Resize desktop lyrics from the right edge",
         loading: "Loading lyrics",
         unavailable: "Desktop lyrics are unavailable",
         errors: {
