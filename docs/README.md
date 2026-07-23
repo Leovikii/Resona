@@ -13,10 +13,11 @@
 | [ROADMAP.md](ROADMAP.md) | 阶段、验收条件和顺序 | 计划调整时 |
 | [STATUS.md](STATUS.md) | 已完成、进行中、下一步和阻塞项 | 每次有效开发后 |
 | [KNOWN_ISSUES.md](KNOWN_ISSUES.md) | 已知缺陷、暂缓理由和重新调查条件 | 发现问题或状态变化时 |
+| [AGENT_GUIDE.md](AGENT_GUIDE.md) | AI Agent 与自动化开发约束 | 工程规则变化时 |
+| [performance/](performance/) | 版本性能、资源与音频审计证据 | 发布候选或性能改动后 |
 | [releases/](releases/) | 各版本范围、验收证据和已知限制 | 每次版本验收时 |
 | [plans/](plans/README.md) | 待确认版本计划及其状态 | 进入新版本前或范围变化时 |
 | [decisions/](decisions/README.md) | 架构决策记录（ADR） | 形成难以从代码看出的长期决定时 |
-| [vendor/](vendor/README.md) | 外部开发参考快照及来源 | 更新外部参考时 |
 | [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) | 当前 Cargo/npm 依赖许可证清单 | 依赖变化时 |
 
 ## 权威性

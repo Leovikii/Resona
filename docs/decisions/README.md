@@ -27,7 +27,8 @@ ADR 记录会长期影响代码、依赖或产品边界且无法仅从实现看�
 - [0020 - 主窗口宽屏/窄屏模式与几何恢复](0020-main-window-layout-modes-and-geometry.md)
 - [0021 - 窄屏顶部导航、播放列表标签与单行底栏](0021-compact-top-navigation-and-playlist-tabs.md)
 - [0022 - 原生窗口材质与表面层级](0022-native-window-materials-and-surface-hierarchy.md)
-- [0023 - Windows Shell 媒体与任务栏集成（提案）](0023-windows-shell-media-integration.md)
+- [0023 - Windows Shell 媒体与任务栏集成](0023-windows-shell-media-integration.md)
 - [0024 - Windows 托盘生命周期、分发与更新基线](0024-windows-tray-distribution-and-update.md)
+- [0025 - 公开仓库首页与 Agent 规范归位](0025-public-repository-surface-and-agent-guidance.md)
 
 新 ADR 不修改历史决定的原文；如果决定被替代，新增 ADR 并将旧记录标记为 `Superseded`。

@@ -72,6 +72,7 @@ import { usePlaybackController } from "../features/playback/usePlaybackControlle
 import { useSeekTransaction } from "../features/playback/useSeekTransaction";
 import { useMainWindowLayout } from "../features/window/useMainWindowLayout";
 import { useApplicationLifetime } from "../features/window/useApplicationLifetime";
+import { useApplicationUpdate } from "../features/update/useApplicationUpdate";
 import { invokeTauri, isTauriRuntime } from "../shared/bridge/tauri";
 import type {
   DefaultPlaylistItem,
@@ -1109,6 +1110,7 @@ function SettingsView({ applicationLifetime, busy, desktopLyrics, layoutBusy, la
   output: PlaybackSnapshot["output"];
 }) {
   const { t } = useTranslation();
+  const applicationUpdate = useApplicationUpdate();
   const { colorScheme, setColorScheme } = useMantineColorScheme({ keepTransitions: true });
   const {
     accentColor,
@@ -1122,6 +1124,7 @@ function SettingsView({ applicationLifetime, busy, desktopLyrics, layoutBusy, la
   const [fontDraft, setFontDraft] = useState(String(lyricsPreferences.fontSize));
   const [appVersion, setAppVersion] = useState(t("app.version"));
   const [aboutError, setAboutError] = useState<string | null>(null);
+  const [updateConfirmationOpen, setUpdateConfirmationOpen] = useState(false);
   useEffect(() => setBackgroundOpacity(lyricsPreferences.backgroundOpacity), [lyricsPreferences.backgroundOpacity]);
   useEffect(() => setFontDraft(String(lyricsPreferences.fontSize)), [lyricsPreferences.fontSize]);
   useEffect(() => {
@@ -1351,11 +1354,23 @@ function SettingsView({ applicationLifetime, busy, desktopLyrics, layoutBusy, la
         <SettingRow label={t("settings.version")}>
           <Text fw={600} size="sm">{appVersion}</Text>
         </SettingRow>
+        <SettingRow label={t("settings.prereleaseUpdates")}>
+          <Switch
+            aria-label={t("settings.prereleaseUpdates")}
+            checked={applicationUpdate.snapshot.receivePrereleaseUpdates}
+            disabled={applicationUpdate.status !== "idle"}
+            onChange={(event) => {
+              void applicationUpdate.setReceivePrereleaseUpdates(event.currentTarget.checked);
+            }}
+            size="sm"
+          />
+        </SettingRow>
         <SettingRow label={t("settings.project")}>
           <Group gap="xs">
             <Button
               leftSection={<RefreshCw size={14} />}
-              onClick={() => void openProjectPage("releases")}
+              loading={applicationUpdate.status === "checking"}
+              onClick={() => void applicationUpdate.check()}
               size="xs"
               variant="light"
             >
@@ -1372,11 +1387,127 @@ function SettingsView({ applicationLifetime, busy, desktopLyrics, layoutBusy, la
             </Button>
           </Group>
         </SettingRow>
+        {applicationUpdate.checked && !applicationUpdate.available && (
+          <Text c="dimmed" size="xs">{t("settings.noUpdates")}</Text>
+        )}
+        {applicationUpdate.available && (
+          <Paper className="application-update-card" p="sm" withBorder>
+            <Group align="flex-start" justify="space-between" wrap="nowrap">
+              <div className="application-update-summary">
+                <Group gap={6}>
+                  <Text fw={650} size="sm">
+                    {t("settings.updateAvailable", {
+                      version: applicationUpdate.available.version,
+                    })}
+                  </Text>
+                  {applicationUpdate.available.prerelease && (
+                    <Badge color="orange" size="xs" variant="light">
+                      {t("settings.prerelease")}
+                    </Badge>
+                  )}
+                </Group>
+                {applicationUpdate.available.installerSize !== null && (
+                  <Text c="dimmed" size="xs">
+                    {formatBytes(applicationUpdate.available.installerSize)}
+                  </Text>
+                )}
+              </div>
+              <Button
+                disabled={
+                  applicationUpdate.status !== "idle"
+                  || !applicationUpdate.snapshot.updaterConfigured
+                }
+                onClick={() => setUpdateConfirmationOpen(true)}
+                size="xs"
+              >
+                {t("settings.installUpdate")}
+              </Button>
+            </Group>
+            {applicationUpdate.available.notes && (
+              <Text c="dimmed" className="application-update-notes" size="xs">
+                {applicationUpdate.available.notes}
+              </Text>
+            )}
+            {!applicationUpdate.snapshot.updaterConfigured && (
+              <Text c="orange" size="xs">{t("settings.updaterNotConfigured")}</Text>
+            )}
+            {applicationUpdate.status !== "idle" && applicationUpdate.status !== "checking" && (
+              <Stack gap={6}>
+                <Progress
+                  animated
+                  value={
+                    applicationUpdate.progress.totalBytes
+                      ? Math.min(
+                          100,
+                          (applicationUpdate.progress.downloadedBytes
+                            / applicationUpdate.progress.totalBytes) * 100,
+                        )
+                      : 100
+                  }
+                />
+                <Group justify="space-between">
+                  <Text c="dimmed" size="xs">
+                    {applicationUpdate.progress.totalBytes
+                      ? t("settings.updateProgress", {
+                          downloaded: formatBytes(applicationUpdate.progress.downloadedBytes),
+                          total: formatBytes(applicationUpdate.progress.totalBytes),
+                        })
+                      : t("settings.preparingUpdate")}
+                  </Text>
+                  <Button
+                    disabled={applicationUpdate.status === "cancelling"}
+                    onClick={() => void applicationUpdate.cancel()}
+                    size="compact-xs"
+                    variant="subtle"
+                  >
+                    {applicationUpdate.status === "cancelling"
+                      ? t("common.cancelling")
+                      : t("common.cancel")}
+                  </Button>
+                </Group>
+              </Stack>
+            )}
+          </Paper>
+        )}
         <Text c="dimmed" className="about-copyright" size="xs">
           {t("settings.copyright")}
         </Text>
         {aboutError && <Text c="red" role="alert" size="xs">{aboutError}</Text>}
+        {applicationUpdate.error && (
+          <Text c="red" role="alert" size="xs">
+            {t(`settings.updateErrors.${applicationUpdate.error.code}`, {
+              defaultValue: applicationUpdate.error.message,
+            })}
+          </Text>
+        )}
       </section>
+      <Modal
+        centered
+        onClose={() => setUpdateConfirmationOpen(false)}
+        opened={updateConfirmationOpen}
+        title={t("settings.confirmUpdateTitle")}
+      >
+        <Stack gap="md">
+          <Text size="sm">
+            {t("settings.confirmUpdateBody", {
+              version: applicationUpdate.available?.version ?? "",
+            })}
+          </Text>
+          <Group justify="flex-end">
+            <Button onClick={() => setUpdateConfirmationOpen(false)} variant="default">
+              {t("common.cancel")}
+            </Button>
+            <Button
+              onClick={() => {
+                setUpdateConfirmationOpen(false);
+                void applicationUpdate.install();
+              }}
+            >
+              {t("settings.downloadAndInstall")}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </div>
     </ScrollArea>
   );

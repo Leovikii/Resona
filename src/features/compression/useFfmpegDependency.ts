@@ -5,8 +5,10 @@ import {
   checkingFfmpegDependency,
   type FfmpegDependencySnapshot,
 } from "../../shared/model/compression";
+import { useDocumentVisibility } from "../../shared/ui/useDocumentVisibility";
 
 export function useFfmpegDependency() {
+  const documentVisible = useDocumentVisibility();
   const preview = import.meta.env.DEV && !isTauriRuntime();
   const previewTimer = useRef<number | null>(null);
   const [snapshot, setSnapshot] = useState<FfmpegDependencySnapshot>(() => {
@@ -32,16 +34,16 @@ export function useFfmpegDependency() {
   }, []);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    if (!["checking", "downloading", "installing", "cancelling"].includes(snapshot.status)) {
+    if (
+      !documentVisible
+      || !["checking", "downloading", "installing", "cancelling"].includes(snapshot.status)
+    ) {
       return;
     }
+    void refresh();
     const timer = window.setInterval(() => void refresh(), 300);
     return () => window.clearInterval(timer);
-  }, [refresh, snapshot.status]);
+  }, [documentVisible, refresh, snapshot.status]);
 
   useEffect(() => () => {
     if (previewTimer.current !== null) window.clearInterval(previewTimer.current);

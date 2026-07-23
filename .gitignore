@@ -12,6 +12,7 @@ src-tauri/binaries/*.zip
 
 # Local tooling
 .agents/
+.local-docs/
 .codex/
 .idea/
 .vscode/

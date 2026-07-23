@@ -10,6 +10,10 @@ use crate::application_lifetime::{
     ApplicationLifetimeFailure, ApplicationLifetimeService, ApplicationLifetimeSnapshot,
     CloseBehavior, CloseDecision, CloseDisposition,
 };
+use crate::application_update::{
+    ApplicationUpdateCheckResult, ApplicationUpdateFailure, ApplicationUpdateService,
+    ApplicationUpdateSnapshot,
+};
 use crate::compression::{
     CompressionFailure, CompressionPreset, CompressionScanSnapshot, CompressionService,
     CompressionSnapshot,
@@ -41,6 +45,7 @@ use crate::playlists::PlaylistMutationResult;
 
 type ManagedPlaybackEngine = Arc<RodioPlaybackEngine>;
 type ManagedApplicationLifetimeService = Arc<ApplicationLifetimeService>;
+type ManagedApplicationUpdateService = Arc<ApplicationUpdateService>;
 type ManagedPersistence = Arc<PersistenceService>;
 type ManagedMediaImportService = Arc<MediaImportService>;
 type ManagedLyricsService = Arc<LyricsService>;
@@ -100,6 +105,63 @@ pub async fn resolve_main_window_close(
 #[tauri::command]
 pub async fn confirm_application_exit(app: AppHandle) {
     crate::perform_application_exit(&app);
+}
+
+#[tauri::command]
+pub async fn get_application_update_state(
+    service: State<'_, ManagedApplicationUpdateService>,
+) -> Result<ApplicationUpdateSnapshot, ApplicationUpdateFailure> {
+    service.snapshot()
+}
+
+#[tauri::command]
+pub async fn set_receive_prerelease_updates(
+    enabled: bool,
+    service: State<'_, ManagedApplicationUpdateService>,
+) -> Result<ApplicationUpdateSnapshot, ApplicationUpdateFailure> {
+    service.set_receive_prerelease_updates(enabled)
+}
+
+#[tauri::command]
+pub async fn check_application_update(
+    service: State<'_, ManagedApplicationUpdateService>,
+) -> Result<ApplicationUpdateCheckResult, ApplicationUpdateFailure> {
+    log::info!("application update check started");
+    let result = Arc::clone(service.inner()).check().await;
+    match &result {
+        Ok(snapshot) => log::info!(
+            "application update check completed: update_available={}",
+            snapshot.update.is_some()
+        ),
+        Err(error) => log::warn!("application update check failed: code={}", error.code),
+    }
+    result
+}
+
+#[tauri::command]
+pub async fn install_application_update(
+    version: String,
+    app: AppHandle,
+    service: State<'_, ManagedApplicationUpdateService>,
+) -> Result<(), ApplicationUpdateFailure> {
+    log::info!("application update installation started");
+    let result = Arc::clone(service.inner()).install(app, version).await;
+    match &result {
+        Ok(()) => log::info!("application update installer launched"),
+        Err(error) => log::warn!(
+            "application update installation failed: code={}",
+            error.code
+        ),
+    }
+    result
+}
+
+#[tauri::command]
+pub async fn cancel_application_update(
+    service: State<'_, ManagedApplicationUpdateService>,
+) -> Result<(), ApplicationUpdateFailure> {
+    log::info!("application update cancellation requested");
+    service.cancel_install()
 }
 
 #[tauri::command]

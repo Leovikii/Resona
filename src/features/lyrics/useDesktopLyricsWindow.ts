@@ -6,6 +6,7 @@ import {
   type DesktopLyricsWindowFailure,
   type DesktopLyricsWindowSnapshot,
 } from "../../shared/model/desktopLyrics";
+import { useDocumentVisibility } from "../../shared/ui/useDocumentVisibility";
 
 type DesktopLyricsCommand =
   | "fit_desktop_lyrics_window"
@@ -15,6 +16,7 @@ type DesktopLyricsCommand =
   | "unlock_desktop_lyrics_window";
 
 export function useDesktopLyricsWindow() {
+  const documentVisible = useDocumentVisibility();
   const preview = !isTauriRuntime();
   const [snapshot, setSnapshot] = useState<DesktopLyricsWindowSnapshot>(
     initialDesktopLyricsWindowSnapshot,
@@ -36,11 +38,11 @@ export function useDesktopLyricsWindow() {
   }, [preview]);
 
   useEffect(() => {
+    if (preview || !documentVisible) return;
     void refresh();
-    if (preview) return;
     const timer = window.setInterval(() => void refresh(), 1_500);
     return () => window.clearInterval(timer);
-  }, [preview, refresh]);
+  }, [documentVisible, preview, refresh]);
 
   const run = useCallback(async (
     command: DesktopLyricsCommand,

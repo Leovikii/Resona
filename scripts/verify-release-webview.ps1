@@ -160,6 +160,7 @@ if ($null -ne $devServer) {
 
 $process = $null
 $windowHandle = [IntPtr]::Zero
+$startupWatch = [System.Diagnostics.Stopwatch]::StartNew()
 try {
     $process = Start-Process -FilePath $resolvedExecutable -PassThru
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
@@ -180,6 +181,12 @@ try {
     if (-not (Test-MainWindowReady -Handle $windowHandle)) {
         throw "Timed out waiting for the visible Resona main window to reach a usable size."
     }
+    $startupWatch.Stop()
+    $startupMilliseconds = $startupWatch.Elapsed.TotalMilliseconds.ToString(
+        "F1",
+        [System.Globalization.CultureInfo]::InvariantCulture
+    )
+    Write-Output "Release main window ready in $startupMilliseconds ms"
     Start-Sleep -Milliseconds $SettlingMilliseconds
     $windowHandle = [ResonaWindowProbe]::FindLargestVisibleWindow($process.Id)
     if ($process.HasExited -or -not (Test-MainWindowReady -Handle $windowHandle)) {

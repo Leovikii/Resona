@@ -75,11 +75,19 @@ $resolvedBundle = [System.IO.Path]::GetFullPath($BundleDirectory)
 $expectedBase = "Resona_$($package.version)_windows_x64-setup"
 $installer = Join-Path $resolvedBundle "$expectedBase.exe"
 $metadataPath = Join-Path $resolvedBundle "$expectedBase.json"
+$signaturePath = Join-Path $resolvedBundle "$expectedBase.exe.sig"
+$manifestPath = Join-Path $resolvedBundle "latest.json"
 if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) {
     throw "Platform-qualified installer is missing: $installer"
 }
 if (-not (Test-Path -LiteralPath $metadataPath -PathType Leaf)) {
     throw "Installer metadata is missing: $metadataPath"
+}
+if (-not (Test-Path -LiteralPath $signaturePath -PathType Leaf)) {
+    throw "Updater signature is missing: $signaturePath"
+}
+if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+    throw "Updater manifest is missing: $manifestPath"
 }
 $installerInfo = Get-Item -LiteralPath $installer
 if ($installerInfo.Length -gt 32MB) {
@@ -89,6 +97,20 @@ $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
 $actualHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash
 if ($metadata.sha256 -ne $actualHash -or $metadata.file -ne $installerInfo.Name) {
     throw "Installer metadata does not match the finalized artifact"
+}
+if (-not $metadata.signed) {
+    throw "Installer metadata does not report an updater signature"
+}
+$manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+if ($manifest.version -ne $package.version) {
+    throw "Updater manifest version does not match the package version"
+}
+$updaterTarget = $manifest.platforms."windows-x86_64-nsis"
+if ($null -eq $updaterTarget -or [string]::IsNullOrWhiteSpace($updaterTarget.signature)) {
+    throw "Updater manifest is missing the Windows x64 NSIS signature"
+}
+if (-not $updaterTarget.url.EndsWith("/$($installerInfo.Name)")) {
+    throw "Updater manifest URL does not reference the finalized installer"
 }
 
 Write-Output "Windows distribution verified"

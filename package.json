@@ -1,7 +1,7 @@
 {
   "name": "resona",
   "private": true,
-  "version": "0.0.19",
+  "version": "0.1.0-rc.1",
   "type": "module",
   "scripts": {
     "dev": "vite --port 1420",
@@ -9,8 +9,9 @@
     "licenses": "node scripts/generate-license-report.mjs",
     "icons:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-windows-shell-icons.ps1",
     "preview": "vite preview --port 1421",
+    "test:release": "node --test scripts/release-channel.test.mjs",
     "prepare:test-tools": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-ffmpeg-test-tools.ps1",
-    "release:windows": "tauri build --bundles nsis && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/finalize-windows-artifacts.ps1 && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-windows-distribution.ps1 && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release-webview.ps1",
+    "release:windows": "node scripts/prepare-updater-config.mjs && tauri build --bundles nsis --config src-tauri/target/updater.config.json && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/finalize-windows-artifacts.ps1 -RequireUpdaterSignature && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-windows-distribution.ps1 && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release-webview.ps1",
     "verify:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release-webview.ps1",
     "tauri": "tauri"
   },

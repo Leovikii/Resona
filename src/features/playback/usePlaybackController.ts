@@ -23,6 +23,7 @@ import {
   type PlaybackFailure,
   type PlaybackSnapshot,
 } from "../../shared/model/playback";
+import { useDocumentVisibility } from "../../shared/ui/useDocumentVisibility";
 
 type PlaybackCommand =
   | "next_playback"
@@ -44,6 +45,7 @@ const emptyDefaultPlaylist: DefaultPlaylistSnapshot = {
 };
 
 export function usePlaybackController() {
+  const documentVisible = useDocumentVisibility();
   const preview = import.meta.env.DEV && !isTauriRuntime();
   const previewPlayback = useMemo(() => previewSnapshot(), []);
   const [snapshot, setSnapshot] = useState<PlaybackSnapshot>(() =>
@@ -135,13 +137,17 @@ export function usePlaybackController() {
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
-    void Promise.all([
-      refresh(),
-      invokeTauri<DefaultPlaylistSnapshot>("get_default_playlist").then(acceptDefaultPlaylist),
-    ]).catch((error) => setRefreshError(toPlaybackFailure(error)));
+    void invokeTauri<DefaultPlaylistSnapshot>("get_default_playlist")
+      .then(acceptDefaultPlaylist)
+      .catch((error) => setRefreshError(toPlaybackFailure(error)));
+  }, [acceptDefaultPlaylist, refresh]);
+
+  useEffect(() => {
+    if (!isTauriRuntime() || !documentVisible) return;
+    void refresh();
     const timer = window.setInterval(() => void refresh(), 750);
     return () => window.clearInterval(timer);
-  }, [acceptDefaultPlaylist, refresh]);
+  }, [documentVisible, refresh]);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;

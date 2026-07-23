@@ -1507,6 +1507,23 @@ h2.page-heading {
   margin-top: 4px;
 }
 
+.application-update-card {
+  width: min(100%, 660px);
+  margin: 6px 0 8px;
+  display: grid;
+  gap: 10px;
+}
+
+.application-update-summary {
+  min-width: 0;
+}
+
+.application-update-notes {
+  max-height: 96px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
 .desktop-lyrics-font-input {
   width: 112px;
 }

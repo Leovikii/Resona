@@ -33,9 +33,21 @@ ADR 0013 当前规定关闭主窗口即退出，防止桌面歌词和播放核�
 ### 更新
 
 - 首版更新由用户主动检查，不启动即联网、不强制更新、不静默下载。
-- 0.1.0-rc.1 使用 Tauri 官方 updater，推荐 GitHub Releases + 静态 `latest.json`，更新对象为已安装 NSIS 渠道。
+- 0.1.0-rc.1 使用 Tauri 官方 updater 与 GitHub Releases 静态清单，更新对象为已安装 NSIS 渠道。Tauri bundle 开启 `createUpdaterArtifacts`，继续只有一个 NSIS 安装渠道；`.sig` 和更新 JSON 是该安装包的更新元数据，不是第二个替换程序。
+- 设置“关于”提供“接收预览版更新”开关。更新通道以 Rust 类型化偏好保存，默认由当前 SemVer 决定：包含 prerelease 段的版本首次进入预览通道，普通稳定版本首次进入稳定通道，之后尊重用户显式选择。
+- 稳定与预览检查都调用 GitHub 原生 Releases REST API，不维护 `update-preview`、通道指针或自建更新服务。Rust 跳过 draft 和标记不一致的 Release；稳定设置排除所有 prerelease，预览设置同时接受 prerelease 与稳定版，再按完整 SemVer 选择最高且高于本地的版本。每个不可变版本 Release 自带该版本的 `latest.json`、安装包和 `.sig`；选定 Release 后才把它的清单交给 Tauri updater 验签安装。
+- GitHub Release 是否为 prerelease 只由三个版本文件一致的 SemVer prerelease 段决定。`alpha`、`beta`、`rc` 以及其他合法 prerelease 标识统一进入预览发布，普通版本进入稳定发布；不能用 PR 标签、分支名或手工勾选覆盖版本事实。完整 SemVer 顺序确保 `0.1.0-alpha < 0.1.0-beta < 0.1.0-rc < 0.1.0`，预览用户也能发现更高的正式版。
 - Updater 签名密钥与 Windows Authenticode 证书分离。Updater 私钥不进入仓库、安装包或日志；公钥进入应用，私钥保管、备份、轮换和发布注入在 0.1.0-rc.1 记录。
 - 网络、清单、下载或签名失败只影响更新操作，不影响本地播放器。
+
+### CI/CD
+
+- GitHub Actions 只响应目标为 `main` 的 `pull_request` `closed` 事件，并在 `github.event.pull_request.merged == true` 时运行；不增加 `push`、tag push 或 `workflow_dispatch` 发布入口。仓库规则必须禁止直接推送 `main`，使版本 PR 的合并成为唯一发布意图。
+- 该工作流发生在合并之后，不能同时充当阻止合并的 required check。按照项目所有者的“只在合并后触发”约束，PR 合并前继续依赖本地完整检查与代码审查；若未来需要 GitHub 托管的合并前门禁，必须另行接受 PR 事件工作流，不能声称当前 CD 已提供该能力。
+- 工作流检出该 PR 的合并提交，先以只读权限执行版本一致性、构建、测试、许可证和分发审计。只有版本合法、三个版本文件完全一致且 `v<version>` 尚不存在时，发布 job 才取得 `contents: write`，创建版本 tag 和 GitHub Release。
+- 合并未改变版本时仍运行 CI，但跳过 tag 与 Release；版本回退、重复 tag、签名缺失、清单不完整或产物校验失败时不得发布部分产物。
+- 所有第三方 Action 固定完整 commit SHA；同一仓库使用串行 release concurrency。updater 私钥和未来 Authenticode 凭据只通过受保护的 GitHub Environment/Secrets 注入。
+- prerelease 版本创建 GitHub 原生 prerelease，稳定版本创建普通 Release；不刷新额外通道清单。发布产物、版本说明、许可证通知、SHA-256、更新 URL 和签名必须来自同一次构建。
 
 ## 理由
 
@@ -44,6 +56,8 @@ ADR 0013 当前规定关闭主窗口即退出，防止桌面歌词和播放核�
 - 单一 NSIS 渠道减少安装、升级、关联、签名和更新回归矩阵。
 - 用户主动更新符合本地离线播放器范围，并把联网行为保持为明确动作。
 - 提前分离两种签名可以避免把 updater 完整性签名误当成 Windows 发布者身份。
+- 按 SemVer 自动分流让版本号成为单一发布事实；稳定通道不会因 GitHub prerelease 更新而意外收到候选版，预览用户仍能自然升级到更高的正式版。
+- 只在 PR 合并后运行发布链避免 direct push、手工 tag 和手工工作流形成旁路；版本不变时只做 CI，避免每次合并都产生无意义 Release。
 
 ## 后果
 
@@ -52,3 +66,10 @@ ADR 0013 当前规定关闭主窗口即退出，防止桌面歌词和播放核�
 - Tauri 启用 `tray-icon` feature 和 NSIS bundle；新增依赖或 feature 前继续执行许可证和体积审查。
 - 0.0.19 负责安装器和更新设计，0.1.0-rc.1 负责 updater 实现、托管和更新回归。
 - 关闭到托盘、活动转换确认、升级覆盖、卸载清理和无残留进程必须在真实安装版 Windows 环境验收。
+
+## 依据
+
+- [Tauri Updater：静态 JSON、签名和 `createUpdaterArtifacts`](https://v2.tauri.app/plugin/updater/)
+- [Tauri GitHub Actions 发布流程](https://v2.tauri.app/distribute/pipelines/github/)
+- [GitHub Actions：仅在 PR 合并后运行](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#running-your-pull_request-workflow-when-a-pull-request-merges)
+- [GitHub Releases REST API：列出版本与原生 `prerelease` 字段](https://docs.github.com/en/rest/releases/releases#list-releases)

@@ -1,0 +1,154 @@
+name: Main merge delivery
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - closed
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    if: github.event.pull_request.merged == true
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    outputs:
+      release: ${{ steps.release.outputs.release }}
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+    steps:
+      - name: Check out the merged commit
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3, Node 24
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0, Node 24
+        with:
+          cache: npm
+          node-version: 26
+          package-manager-cache: true
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Validate release channel rules
+        run: npm run test:release
+
+      - name: Build the frontend
+        run: npm run build
+
+      - name: Generate third-party license report
+        run: npm run licenses
+
+      - name: Check Rust formatting
+        working-directory: src-tauri
+        run: cargo fmt --all -- --check
+
+      - name: Run Rust tests
+        working-directory: src-tauri
+        run: cargo test --all-targets --locked
+
+      - name: Run Clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Inspect merged version
+        id: release
+        run: node scripts/release-channel.mjs --base "${{ github.event.pull_request.base.sha }}"
+
+  release:
+    needs:
+      - verify
+    if: needs.verify.outputs.release == 'true'
+    runs-on: windows-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the merged commit
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3, Node 24
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0, Node 24
+        with:
+          cache: npm
+          node-version: 26
+          package-manager-cache: true
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Require updater signing configuration
+        shell: pwsh
+        env:
+          RESONA_UPDATER_PUBLIC_KEY: ${{ vars.RESONA_UPDATER_PUBLIC_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:RESONA_UPDATER_PUBLIC_KEY)) {
+            throw "Repository environment variable RESONA_UPDATER_PUBLIC_KEY is missing"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
+            throw "Release secret TAURI_SIGNING_PRIVATE_KEY is missing"
+          }
+
+      - name: Build signed Windows release
+        env:
+          RESONA_UPDATER_PUBLIC_KEY: ${{ vars.RESONA_UPDATER_PUBLIC_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run release:windows
+
+      - name: Publish GitHub prerelease
+        if: needs.verify.outputs.prerelease == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.verify.outputs.version }}
+          TAG: ${{ needs.verify.outputs.tag }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          $bundle = "src-tauri/target/release/bundle/nsis"
+          gh release create $env:TAG `
+            "$bundle/Resona_$($env:VERSION)_windows_x64-setup.exe" `
+            "$bundle/Resona_$($env:VERSION)_windows_x64-setup.exe.sig" `
+            "$bundle/Resona_$($env:VERSION)_windows_x64-setup.json" `
+            "$bundle/latest.json" `
+            --prerelease `
+            --target $env:MERGE_SHA `
+            --title "Resona $($env:VERSION)" `
+            --notes-file "docs/releases/$($env:VERSION).md"
+
+      - name: Publish GitHub stable release
+        if: needs.verify.outputs.prerelease == 'false'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.verify.outputs.version }}
+          TAG: ${{ needs.verify.outputs.tag }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          $bundle = "src-tauri/target/release/bundle/nsis"
+          gh release create $env:TAG `
+            "$bundle/Resona_$($env:VERSION)_windows_x64-setup.exe" `
+            "$bundle/Resona_$($env:VERSION)_windows_x64-setup.exe.sig" `
+            "$bundle/Resona_$($env:VERSION)_windows_x64-setup.json" `
+            "$bundle/latest.json" `
+            --latest `
+            --target $env:MERGE_SHA `
+            --title "Resona $($env:VERSION)" `
+            --notes-file "docs/releases/$($env:VERSION).md"
+

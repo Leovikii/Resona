@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 mod application_lifetime;
+mod application_update;
 mod commands;
 mod compression;
 mod compression_window;
+mod diagnostics;
 mod ffmpeg_dependency;
 mod filesystem;
 mod lyrics;
@@ -22,25 +24,28 @@ use tauri::webview::PageLoadEvent;
 use tauri::{Emitter, Manager, WindowEvent};
 
 use application_lifetime::{ApplicationLifetimeService, CloseDisposition};
+use application_update::ApplicationUpdateService;
 use commands::{
-    add_default_playlist_items, add_playlist_items, cancel_audio_compression,
-    cancel_audio_compression_scan, cancel_ffmpeg_dependency_install,
-    clear_audio_compression_inputs, clear_default_playlist, clear_playlist_items,
-    confirm_application_exit, create_playlist, delete_playlist, desktop_lyrics_window_ready,
-    fit_desktop_lyrics_window, get_application_lifetime_state, get_audio_compression_scan_state,
-    get_audio_compression_state, get_default_playlist, get_desktop_lyrics_window_state,
-    get_ffmpeg_dependency_state, get_main_window_state, get_now_playing_state, get_playback_state,
-    get_track_details, hide_desktop_lyrics_window, install_ffmpeg_dependency, list_playlist_items,
-    list_playlists, list_recent_play, lock_desktop_lyrics_window, main_window_ready,
-    move_default_playlist_item, move_playlist, move_playlist_item, next_playback,
-    open_main_settings, open_media_context, open_project_page, pause_playback,
+    add_default_playlist_items, add_playlist_items, cancel_application_update,
+    cancel_audio_compression, cancel_audio_compression_scan, cancel_ffmpeg_dependency_install,
+    check_application_update, clear_audio_compression_inputs, clear_default_playlist,
+    clear_playlist_items, confirm_application_exit, create_playlist, delete_playlist,
+    desktop_lyrics_window_ready, fit_desktop_lyrics_window, get_application_lifetime_state,
+    get_application_update_state, get_audio_compression_scan_state, get_audio_compression_state,
+    get_default_playlist, get_desktop_lyrics_window_state, get_ffmpeg_dependency_state,
+    get_main_window_state, get_now_playing_state, get_playback_state, get_track_details,
+    hide_desktop_lyrics_window, install_application_update, install_ffmpeg_dependency,
+    list_playlist_items, list_playlists, list_recent_play, lock_desktop_lyrics_window,
+    main_window_ready, move_default_playlist_item, move_playlist, move_playlist_item,
+    next_playback, open_main_settings, open_media_context, open_project_page, pause_playback,
     play_default_playlist_item, play_queue_item, play_user_playlist_item, previous_playback,
     refresh_output_devices, remove_audio_compression_inputs, remove_default_playlist_items,
     remove_playlist_item, remove_playlist_items, rename_playlist, resolve_main_window_close,
     resume_playback, scan_audio_compression_inputs, seek_playback, select_output_device,
     set_close_behavior, set_main_window_layout_mode, set_playback_mode, set_playback_volume,
-    show_audio_compression_window, show_desktop_lyrics_window, start_audio_compression,
-    start_desktop_lyrics_drag, sync_window_theme, unlock_desktop_lyrics_window,
+    set_receive_prerelease_updates, show_audio_compression_window, show_desktop_lyrics_window,
+    start_audio_compression, start_desktop_lyrics_drag, sync_window_theme,
+    unlock_desktop_lyrics_window,
 };
 use compression::CompressionService;
 use ffmpeg_dependency::FfmpegDependencyService;
@@ -63,8 +68,14 @@ pub fn run() {
     #[cfg(target_os = "windows")]
     let smtc_attempted = Arc::new(AtomicBool::new(false));
     tauri::Builder::default()
+        .plugin(diagnostics::plugin())
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            log::info!("second instance activation received");
             if let Err(error) = application_lifetime::show_main_window(app) {
+                log::warn!(
+                    "second instance main window restore failed: code={}",
+                    error.code
+                );
                 eprintln!("second instance main window restore failed: {}", error.message);
             }
             if let Some(path) =
@@ -75,6 +86,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .on_page_load(|webview, payload| {
             if webview.label() == compression_window::LABEL
                 && payload.event() == PageLoadEvent::Finished {
@@ -105,6 +117,10 @@ pub fn run() {
         .manage(lyrics_service)
         .manage(desktop_lyrics_service)
         .setup(move |app| {
+            log::info!(
+                "application setup started: version={}",
+                env!("CARGO_PKG_VERSION")
+            );
             let legacy_data_dir = app
                 .path()
                 .app_data_dir()
@@ -120,6 +136,7 @@ pub fn run() {
             app.manage(Arc::new(CompressionService::with_binaries(ffmpeg, ffprobe)));
             app.manage(ffmpeg_dependency);
             app.manage(Arc::new(ApplicationLifetimeService::load(&data_dir)));
+            app.manage(Arc::new(ApplicationUpdateService::load(&data_dir)));
             let database = PersistenceService::open(&data_dir.join("resona.sqlite3"))
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
             restore_playback_preferences(&playback_for_restore, &database);
@@ -147,6 +164,7 @@ pub fn run() {
             .map_err(|error| std::io::Error::other(format!("无法创建系统托盘：{error}")))?;
             app.manage(native_projection);
             app.manage(tray);
+            log::info!("application services initialized");
             let arguments = std::env::args().collect::<Vec<_>>();
             let current_directory = std::env::current_dir().unwrap_or_default();
             if let Some(path) =
@@ -180,6 +198,11 @@ pub fn run() {
             set_close_behavior,
             resolve_main_window_close,
             confirm_application_exit,
+            get_application_update_state,
+            set_receive_prerelease_updates,
+            check_application_update,
+            install_application_update,
+            cancel_application_update,
             open_project_page,
             get_main_window_state,
             set_main_window_layout_mode,
@@ -311,9 +334,11 @@ pub fn run() {
                                 ) {
                                     Ok(adapter) => {
                                         app_handle.manage(adapter);
+                                        log::info!("Windows SMTC initialized");
                                         eprintln!("Windows SMTC initialized");
                                     }
                                     Err(error) => {
+                                        log::warn!("Windows SMTC unavailable");
                                         eprintln!("Windows SMTC unavailable; continuing without it: {error}");
                                     }
                                 }
@@ -330,9 +355,15 @@ pub fn run() {
                                         ) {
                                             Ok(adapter) => {
                                                 app_handle.manage(adapter);
+                                                log::info!(
+                                                    "Windows taskbar media controls initialized"
+                                                );
                                                 eprintln!("Windows taskbar media controls initialized");
                                             }
                                             Err(error) => {
+                                                log::warn!(
+                                                    "Windows taskbar media controls unavailable"
+                                                );
                                                 eprintln!(
                                                     "Windows taskbar media controls unavailable; continuing without them: {error}"
                                                 );
@@ -340,6 +371,7 @@ pub fn run() {
                                         }
                                     }
                                     Err(error) => {
+                                        log::warn!("Windows taskbar resources unavailable");
                                         eprintln!(
                                             "Windows taskbar resources unavailable; continuing without media controls: {error}"
                                         );
@@ -349,6 +381,7 @@ pub fn run() {
                             }
                             std::thread::sleep(std::time::Duration::from_millis(100));
                         }
+                        log::warn!("Windows media integration timed out waiting for main HWND");
                         eprintln!("Windows SMTC unavailable; main window HWND was not ready");
                     });
             }
@@ -357,6 +390,7 @@ pub fn run() {
 
 pub(crate) fn request_application_exit(app: &tauri::AppHandle) {
     if app.state::<Arc<CompressionService>>().has_active_work() {
+        log::info!("application exit deferred for active compression");
         if let Err(error) = application_lifetime::show_main_window(app) {
             eprintln!(
                 "main window restore for active compression confirmation failed: {}",
@@ -376,6 +410,7 @@ pub(crate) fn perform_application_exit(app: &tauri::AppHandle) {
     if !lifetime.begin_exit() {
         return;
     }
+    log::info!("application exit started");
     app.state::<Arc<main_window::MainWindowService>>()
         .capture(app);
     compression_window::persist_geometry(app);

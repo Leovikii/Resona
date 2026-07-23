@@ -2,6 +2,17 @@
 
 最后更新：2026-07-23
 
+### 2026-07-23 0.1.0-rc.1 自动开发完成，进入项目所有者原生验收
+
+- npm、Cargo、Tauri 和窗口标题统一为 `0.1.0-rc.1`。设置“关于”现使用 GitHub 原生 Releases API 主动检查更新，稳定通道排除所有 prerelease，预览通道按完整 SemVer 接受 alpha、beta、rc、其他合法 prerelease 及更高正式版；下载、签名验证、进度、取消和安装由 Tauri 官方 updater 完成。
+- `.github/workflows/main-merge-delivery.yml` 只响应已合并到 `main` 的 PR。工作流检出精确 merge commit，Action 固定到 Node 24 版本的完整 SHA，运行 Node 26、前后端门禁和签名 NSIS 构建，再由 SemVer 自动创建 GitHub prerelease 或 stable Release；不提供 push、tag 或手工发布旁路。
+- 隐藏 WebView 现暂停播放、桌面歌词、压缩和 FFmpeg 依赖状态轮询，重新可见时立即同步 Rust 权威状态；详见[性能与音频审计](performance/0.1.0-rc.1.md)。Rodio/CPAL/Symphonia、`150ms` actor tick 和 `500ms` 原生播放投影保持不变，没有加入 DSP、额外增益或未经证据的重采样。
+- 新增 Rust 本地诊断日志：只接受 `resona`/`resona_lib` 自身模块 target，Info 及以上，`256 KiB` + `KeepOne` 轮转，位于系统规范的应用日志目录；不上传、不转发 WebView 控制台、不记录媒体完整路径。普通卸载沿既有钩子清理日志，更新安装保留。
+- 英文根 README、中文 README、精简根 `AGENTS.md` 和 `docs/AGENT_GUIDE.md` 已完成。过期根 `CHANGELOG.md` 与 Git 跟踪的 Mantine 快照被移除；完整 `llms-full.txt` 已保留在本机 `.local-docs/` 并由 Git 忽略，Agent 指南明确其检索入口。
+- 签名 NSIS 测试产物、`.sig`、版本元数据、`latest.json`、分发审计和原生主窗口门禁已通过。当前测试安装包为 `Resona_0.1.0-rc.1_windows_x64-setup.exe`，6,007,296 bytes，SHA-256 `6D6922330989F977D32BA78F133FF87958B7E57E839FF3A89C08C5FA82DB6E94`；它只使用一次性本地 updater 密钥，不得作为正式 Release。浏览器视觉回归覆盖深浅色、`1080×700`、`800×600`、更新卡片和安装确认弹窗，控制台无 warning/error。
+- 自动门禁结果：前端 production build、许可证清单、Rust format、Clippy `-D warnings`、82 个普通 Rust 测试、9 个真实音频设备/FFmpeg 测试和 3 个发行通道测试全部通过。10 次 release 主窗口就绪中位数 `259.0ms`；60 秒空闲父进程 CPU `0.016s`，Working Set 平均/峰值 `30.26/30.27 MiB`。
+- 剩余工作只依赖项目所有者环境：生成并离线备份正式 updater 私钥，配置 GitHub `release` Environment 的公钥变量和私钥 secret；随后完成一次 GitHub Release 托管的真实覆盖更新，以及播放/托盘/桌面歌词资源采样和多显示器/DPI 原生矩阵。当前本地测试密钥不会进入仓库或正式发布。
+
 ### 2026-07-23 0.0.19 Windows 验收完成与阶段切换
 
 - 项目所有者确认 SMTC 曲名与品牌身份、任务栏控件、托盘/退出、设置“关于”、FFmpeg GitHub 下载、安装分发和其他 0.0.19 功能正常；最终浅色/深色任务栏图标修订也已通过，0.0.19 正式完成。
@@ -9,7 +20,7 @@
 - 项目所有者实机确认 Windows 会为任务栏缩略图控件绘制灰色交互表面，因此移除图标内重复的灰色底板。上一曲、播放/暂停、下一曲现使用透明背景、最大化白色符号和细深灰外轮廓，在黑白背景下保持可读且不会出现双层底板。
 - SMTC 媒体标题改读 Rust 权威队列项显示名；封面元数据提交失败时自动降级重试无封面元数据，只有成功提交才缓存，避免错误显示 AppUserModelID 或因封面失败而不再刷新曲名。
 - 托盘原生菜单移除检查更新、缩短入口文字，并把过长曲名按 Unicode 安全截断到 10 个字符。Windows 原生菜单宽度由最长菜单项决定，不能设置固定像素宽度；严格限制标题长度可使菜单保持稳定窄宽。独立媒体浮窗仍是后续可选平台窗口。
-- 设置新增“关于”分区，显示运行时应用版本、检查更新、GitHub 仓库和版权；两个外链经窄 Rust command 使用官方 Tauri opener 打开。检查更新当前打开 GitHub Releases，自动下载与签名安装仍属于 0.0.20。
+- 设置新增“关于”分区，显示运行时应用版本、检查更新、GitHub 仓库和版权；两个外链经窄 Rust command 使用官方 Tauri opener 打开。检查更新当前打开 GitHub Releases，自动下载与签名安装归入 0.1.0-rc.1。
 - MP3/WAV/FLAC 文件图标彻底移除小尺寸不可读的格式文字和底部标签，只用蓝/金/紫三种主体色区分类型，并重生成 ICO；工具页依赖提示保持“需下载 FFmpeg”。
 - FFmpeg 运行时、真实转换测试和许可记录统一使用不可变 GitHub Release 资源 `GyanD/codexffmpeg`，彻底移除 gyan.dev 直链；仍固定版本并校验归档及双二进制 SHA-256。FFmpeg.org 只发布源代码，其 Windows 下载页列出该构建提供方。
 - 第二轮反馈修正版安装包为 `Resona_0.0.19_windows_x64-setup.exe`，5,403,972 bytes，SHA-256 `3600976E20BCD347843C46AEDADE1F87FC425DF93C4B560672FB9A1A4DBAE98B`，未签名。
@@ -24,7 +35,7 @@
 - 关闭主窗口默认询问“退出 / 隐藏到托盘”，带“不再询问”；设置提供“每次询问 / 隐藏到托盘 / 退出应用”三态 Rust 持久偏好。最小化仍是普通最小化。活动扫描或压缩退出会显示主窗口二次确认，完整退出统一保存几何/播放偏好并协调关闭转换和桌面歌词。
 - FFmpeg/ffprobe 不进入安装包。工具页显式下载固定 FFmpeg 8.1.2，Rust 服务执行流式进度、取消、归档/双二进制 SHA-256、安全解压和同卷原子启用，依赖就绪前不能打开压缩窗口。数据库、窗口状态和依赖统一使用 Local AppData；旧 Roaming 文件执行无覆盖迁移。
 - 完成品牌化 Tauri 官方 NSIS `currentUser` 一键安装器，安装到 `%LOCALAPPDATA%\Programs\Resona`，注册 MP3/WAV/FLAC 和格式图标。更新覆盖保留状态；非更新卸载精确清理 Resona 安装数据、Roaming/Local AppData 和注册表，不遍历或删除用户音频。产物名包含平台/架构。
-- 首轮内部测试安装包：`Resona_0.0.19_windows_x64-setup.exe`，5,323,432 bytes，SHA-256 `AF23F65AEABB24E1EB11C6C5BFB5B1F1D703B784A0D39C19F3475FB39E3543EE`，未签名。该记录已由顶部的验收反馈修正版产物取代；更新下载/安装仍按计划属于 0.0.20，采用 Tauri updater、GitHub Releases 静态清单和独立 updater 密钥。
+- 首轮内部测试安装包：`Resona_0.0.19_windows_x64-setup.exe`，5,323,432 bytes，SHA-256 `AF23F65AEABB24E1EB11C6C5BFB5B1F1D703B784A0D39C19F3475FB39E3543EE`，未签名。该记录已由顶部的验收反馈修正版产物取代；更新下载/安装归入 0.1.0-rc.1，采用 Tauri updater、GitHub Releases 静态清单和独立 updater 密钥。
 
 ### 2026-07-23 0.0.19 播放列表激活导航修复
 

@@ -14,6 +14,7 @@ import {
   type PlaybackFailure,
   type PlaybackSnapshot,
 } from "../../shared/model/playback";
+import { useDocumentVisibility } from "../../shared/ui/useDocumentVisibility";
 
 type DesktopPlaybackCommand =
   | "next_playback"
@@ -28,6 +29,7 @@ interface NowPlayingSnapshot {
 }
 
 export function useDesktopLyricsNowPlaying() {
+  const documentVisible = useDocumentVisibility();
   const preview = !isTauriRuntime();
   const previewEmpty = preview
     && new URLSearchParams(window.location.search).get("preview") === "empty";
@@ -88,11 +90,12 @@ export function useDesktopLyricsNowPlaying() {
   }, [acceptPlayback, playback, preview]);
 
   useEffect(() => {
+    if (!documentVisible) return;
     void refresh();
     if (preview) return;
     const timer = window.setInterval(() => void refresh(), 750);
     return () => window.clearInterval(timer);
-  }, [preview, refresh]);
+  }, [documentVisible, preview, refresh]);
 
   return { error, initialized, lyrics, playback, runPlayback };
 }

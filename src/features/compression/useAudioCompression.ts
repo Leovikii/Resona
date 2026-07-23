@@ -8,8 +8,10 @@ import {
   type CompressionScanSnapshot,
   type CompressionSnapshot,
 } from "../../shared/model/compression";
+import { useDocumentVisibility } from "../../shared/ui/useDocumentVisibility";
 
 export function useAudioCompression() {
+  const documentVisible = useDocumentVisibility();
   const preview = import.meta.env.DEV && !isTauriRuntime();
   const [snapshot, setSnapshot] = useState(emptyCompressionSnapshot);
   const [scan, setScan] = useState<CompressionScanSnapshot>(() =>
@@ -42,16 +44,24 @@ export function useAudioCompression() {
   }, [refresh, refreshScan]);
 
   useEffect(() => {
-    if (snapshot.status !== "running" && snapshot.status !== "cancelling") return;
+    if (
+      !documentVisible
+      || (snapshot.status !== "running" && snapshot.status !== "cancelling")
+    ) return;
+    void refresh();
     const timer = window.setInterval(() => void refresh(), 300);
     return () => window.clearInterval(timer);
-  }, [refresh, snapshot.status]);
+  }, [documentVisible, refresh, snapshot.status]);
 
   useEffect(() => {
-    if (scan.status !== "scanning" && scan.status !== "cancelling") return;
+    if (
+      !documentVisible
+      || (scan.status !== "scanning" && scan.status !== "cancelling")
+    ) return;
+    void refreshScan();
     const timer = window.setInterval(() => void refreshScan(), 250);
     return () => window.clearInterval(timer);
-  }, [refreshScan, scan.status]);
+  }, [documentVisible, refreshScan, scan.status]);
 
   const addInputs = useCallback(async (paths: string[]) => {
     if (paths.length === 0) return false;

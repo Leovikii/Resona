@@ -2,7 +2,7 @@
 
 该结构在初始化应用时逐步创建；当前不为尚未存在的模块添加空目录。
 
-## 当前实际结构（截至 0.0.19 资源预备）
+## 当前实际结构（截至 0.1.0-rc.1）
 
 应用已按实际变化边界拆分前端与 Rust 模块：
 
@@ -26,6 +26,7 @@ src/
 │  ├─ lyrics/                 # 桌面歌词窗口状态与权威正在播放快照 hooks
 │  ├─ library/                # 用户播放列表、项目操作与最近播放 hooks
 │  ├─ playback/               # 播放控制与无回跳 seek transaction hooks
+│  ├─ update/                 # GitHub Releases 更新检查、安装和进度 hook
 │  └─ window/                 # 主窗口布局模式 typed hook；不持有原生坐标
 ├─ shared/
 │  ├─ bridge/                 # 类型化 Tauri command/event 与单实例文件选择边界
@@ -37,6 +38,7 @@ src/
 │  │  ├─ OverflowMarquee.tsx  # 少量高价值单行文本的按溢出滚动展示
 │  │  ├─ PlaylistTrackList.tsx # 默认/用户列表共享曲目交互
 │  │  └─ usePointerReorder.ts # 不依赖组件库的播放列表指针排序行为
+│  ├─ ui/useDocumentVisibility.ts # 隐藏 WebView 轮询休眠边界
 │  └─ utils/format.ts         # 时间等纯格式化函数
 ├─ windows/
 │  └─ DesktopLyricsWindow.tsx # 不加载应用壳的轻量桌面歌词入口
@@ -46,6 +48,7 @@ src-tauri/
 ├─ capabilities/desktop-lyrics.json # 桌面歌词 WebView 最小权限
 ├─ src/
 │  ├─ commands.rs             # 薄 Tauri command 边界
+│  ├─ application_update.rs   # GitHub 原生 Release 发现、SemVer 通道、签名更新
 │  ├─ filesystem.rs           # 直属音频上下文枚举与拖入路径展开
 │  ├─ lyrics.rs               # LRC/SRT/WebVTT 发现、解码、解析、缓存和同步
 │  ├─ main_window.rs          # 主窗口宽/窄模式、两套几何、可见约束与首帧 ready
@@ -79,6 +82,7 @@ scripts/
 ├─ generate-license-report.mjs
 ├─ prepare-ffmpeg-test-tools.ps1 # 仅为真实转换回归准备被忽略的固定 FFmpeg 测试工具
 ├─ finalize-windows-artifacts.ps1 # 生成带平台/架构的 NSIS 产物名与 SHA-256 元数据
+├─ release-channel.mjs        # 版本一致性、SemVer prerelease 与发布判定
 ├─ verify-windows-distribution.ps1 # 审计版本、身份、关联、无 bundled FFmpeg 与安装器元数据
 └─ verify-release-webview.ps1 # 验证 Release 主窗口稳定可见；可选 DPI-aware 原生截图
 ```
@@ -120,14 +124,17 @@ Resona/
 ├─ tests/
 │  ├─ e2e/                     # 桌面关键流程
 │  └─ fixtures/                # 小型、可再分发的音频和标签样本
-├─ docs/
-│  ├─ decisions/               # ADR
-│  └─ vendor/                  # 带来源信息的外部开发参考
+  ├─ docs/
+  │  ├─ decisions/               # ADR
+  │  ├─ performance/             # 版本性能与音频审计证据
+  │  └─ AGENT_GUIDE.md           # AI Agent 完整开发规则
 ├─ scripts/                    # 可重复的开发、检查和打包脚本
 ├─ AGENTS.md                   # 开发代理入口约束
 ├─ README.md
-└─ LICENSE
-```
+  └─ LICENSE
+  ```
+
+`.local-docs/` 是本机忽略目录，可保存与当前依赖版本对应的大型组件参考（当前为 Mantine `llms-full.txt`）；它不参与构建、测试或发布，也不上传 GitHub。
 
 ## 所有权规则
 
