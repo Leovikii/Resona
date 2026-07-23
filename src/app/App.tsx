@@ -84,6 +84,7 @@ import type {
 import type { PlaybackFailure, PlaybackSnapshot } from "../shared/model/playback";
 import type { LyricsSnapshot } from "../shared/model/lyrics";
 import type { TrackDetails } from "../shared/model/metadata";
+import { applicationVersion } from "../shared/model/applicationUpdate";
 import { fileNameFromPath, formatBytes, formatDuration } from "../shared/utils/format";
 import { listInsertionPositionAtY } from "../shared/ui/usePointerReorder";
 import { PlaylistTrackList } from "../shared/ui/PlaylistTrackList";
@@ -1122,7 +1123,7 @@ function SettingsView({ applicationLifetime, busy, desktopLyrics, layoutBusy, la
   } = usePreferences();
   const [backgroundOpacity, setBackgroundOpacity] = useState(lyricsPreferences.backgroundOpacity);
   const [fontDraft, setFontDraft] = useState(String(lyricsPreferences.fontSize));
-  const [appVersion, setAppVersion] = useState(t("app.version"));
+  const [appVersion, setAppVersion] = useState(applicationVersion);
   const [aboutError, setAboutError] = useState<string | null>(null);
   const [updateConfirmationOpen, setUpdateConfirmationOpen] = useState(false);
   useEffect(() => setBackgroundOpacity(lyricsPreferences.backgroundOpacity), [lyricsPreferences.backgroundOpacity]);

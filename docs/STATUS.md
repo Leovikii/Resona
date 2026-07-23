@@ -2,16 +2,24 @@
 
 最后更新：2026-07-23
 
+### 2026-07-23 0.1.0-rc.1 正式更新密钥与首次发布准备
+
+- 项目所有者已生成、离线备份正式 Tauri updater 密钥，并在 GitHub `release` Environment 配置 `RESONA_UPDATER_PUBLIC_KEY`、`TAURI_SIGNING_PRIVATE_KEY` 与 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`；预览版和后续正式版沿用同一信任链，密钥未进入仓库。
+- 修复桌面歌词干净初始化未采用约定默认值的问题。根因是缺失的 localStorage 数值被 `Number(null)` 解析为 `0`，再归一化成 `16px / 10% / 0%`；现明确把缺失、空白和非法值回退为 `30px / 100% / 20%`，已有合法用户偏好保持不变。CSS 首帧字号兜底同步为 `30px`。
+- 主窗口系统标题统一为不含版本号的 `Resona`。前端预览/“关于”版本兜底改为直接读取 `package.json`，FFmpeg 下载 User-Agent 改读 Cargo 包版本；运行时代码中的 `0.0.19` 残留已清理，版本继续保持 `0.1.0-rc.1`。
+- 发布判定允许“当前版本尚无 `v<version>` tag”时由首个合并到 `main` 的 PR 建立该版本 Release；tag 建立后，同版本后续合并只运行 CI、不重复发布。这为现有未发布的 `0.1.0-rc.1` 提供一次性自动启动路径，不增加 push、tag 或手工发布旁路。发布端新增完整 SemVer 优先级门禁，覆盖 alpha、beta、rc、数字标识和正式版，拒绝版本回退及仅改变 build metadata 的伪升级。workflow 以 `cancel-in-progress: false` 和 `queue: max` 对 `main` 合并交付串行化并保留等待任务；`actions/checkout v7.0.1` 与 `actions/setup-node v6.4.0` 均固定到当前稳定版完整 SHA，并运行在 Node 24。
+- 自动验证通过：11 个前端偏好/发行规则测试、TypeScript/Vite production build、许可证生成、Rust format、82 个普通 Rust 测试（9 个设备/FFmpeg 测试按约定忽略）、Clippy `-D warnings` 和差异检查。浏览器干净来源实渲染确认设置页首次值为 `30px / 100% / 20%`，“关于”为 `0.1.0-rc.1`，文档标题为 `Resona`。
+
 ### 2026-07-23 0.1.0-rc.1 自动开发完成，进入项目所有者原生验收
 
-- npm、Cargo、Tauri 和窗口标题统一为 `0.1.0-rc.1`。设置“关于”现使用 GitHub 原生 Releases API 主动检查更新，稳定通道排除所有 prerelease，预览通道按完整 SemVer 接受 alpha、beta、rc、其他合法 prerelease 及更高正式版；下载、签名验证、进度、取消和安装由 Tauri 官方 updater 完成。
+- npm、Cargo 和 Tauri 版本统一为 `0.1.0-rc.1`；主窗口标题现统一为不含版本号的 `Resona`。设置“关于”现使用 GitHub 原生 Releases API 主动检查更新，稳定通道排除所有 prerelease，预览通道按完整 SemVer 接受 alpha、beta、rc、其他合法 prerelease 及更高正式版；下载、签名验证、进度、取消和安装由 Tauri 官方 updater 完成。
 - `.github/workflows/main-merge-delivery.yml` 只响应已合并到 `main` 的 PR。工作流检出精确 merge commit，Action 固定到 Node 24 版本的完整 SHA，运行 Node 26、前后端门禁和签名 NSIS 构建，再由 SemVer 自动创建 GitHub prerelease 或 stable Release；不提供 push、tag 或手工发布旁路。
 - 隐藏 WebView 现暂停播放、桌面歌词、压缩和 FFmpeg 依赖状态轮询，重新可见时立即同步 Rust 权威状态；详见[性能与音频审计](performance/0.1.0-rc.1.md)。Rodio/CPAL/Symphonia、`150ms` actor tick 和 `500ms` 原生播放投影保持不变，没有加入 DSP、额外增益或未经证据的重采样。
 - 新增 Rust 本地诊断日志：只接受 `resona`/`resona_lib` 自身模块 target，Info 及以上，`256 KiB` + `KeepOne` 轮转，位于系统规范的应用日志目录；不上传、不转发 WebView 控制台、不记录媒体完整路径。普通卸载沿既有钩子清理日志，更新安装保留。
 - 英文根 README、中文 README、精简根 `AGENTS.md` 和 `docs/AGENT_GUIDE.md` 已完成。过期根 `CHANGELOG.md` 与 Git 跟踪的 Mantine 快照被移除；完整 `llms-full.txt` 已保留在本机 `.local-docs/` 并由 Git 忽略，Agent 指南明确其检索入口。
 - 签名 NSIS 测试产物、`.sig`、版本元数据、`latest.json`、分发审计和原生主窗口门禁已通过。当前测试安装包为 `Resona_0.1.0-rc.1_windows_x64-setup.exe`，6,007,296 bytes，SHA-256 `6D6922330989F977D32BA78F133FF87958B7E57E839FF3A89C08C5FA82DB6E94`；它只使用一次性本地 updater 密钥，不得作为正式 Release。浏览器视觉回归覆盖深浅色、`1080×700`、`800×600`、更新卡片和安装确认弹窗，控制台无 warning/error。
 - 自动门禁结果：前端 production build、许可证清单、Rust format、Clippy `-D warnings`、82 个普通 Rust 测试、9 个真实音频设备/FFmpeg 测试和 3 个发行通道测试全部通过。10 次 release 主窗口就绪中位数 `259.0ms`；60 秒空闲父进程 CPU `0.016s`，Working Set 平均/峰值 `30.26/30.27 MiB`。
-- 剩余工作只依赖项目所有者环境：生成并离线备份正式 updater 私钥，配置 GitHub `release` Environment 的公钥变量和私钥 secret；随后完成一次 GitHub Release 托管的真实覆盖更新，以及播放/托盘/桌面歌词资源采样和多显示器/DPI 原生矩阵。当前本地测试密钥不会进入仓库或正式发布。
+- 正式 updater 密钥及 GitHub `release` Environment 已由项目所有者配置。剩余工作为完成一次 GitHub Release 托管的真实覆盖更新，以及播放/托盘/桌面歌词资源采样和多显示器/DPI 原生矩阵；当前本地测试密钥不会进入仓库或正式发布。
 
 ### 2026-07-23 0.0.19 Windows 验收完成与阶段切换
 

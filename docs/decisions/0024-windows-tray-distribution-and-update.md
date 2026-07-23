@@ -45,7 +45,7 @@ ADR 0013 当前规定关闭主窗口即退出，防止桌面歌词和播放核�
 - GitHub Actions 只响应目标为 `main` 的 `pull_request` `closed` 事件，并在 `github.event.pull_request.merged == true` 时运行；不增加 `push`、tag push 或 `workflow_dispatch` 发布入口。仓库规则必须禁止直接推送 `main`，使版本 PR 的合并成为唯一发布意图。
 - 该工作流发生在合并之后，不能同时充当阻止合并的 required check。按照项目所有者的“只在合并后触发”约束，PR 合并前继续依赖本地完整检查与代码审查；若未来需要 GitHub 托管的合并前门禁，必须另行接受 PR 事件工作流，不能声称当前 CD 已提供该能力。
 - 工作流检出该 PR 的合并提交，先以只读权限执行版本一致性、构建、测试、许可证和分发审计。只有版本合法、三个版本文件完全一致且 `v<version>` 尚不存在时，发布 job 才取得 `contents: write`，创建版本 tag 和 GitHub Release。
-- 合并未改变版本时仍运行 CI，但跳过 tag 与 Release；版本回退、重复 tag、签名缺失、清单不完整或产物校验失败时不得发布部分产物。
+- 合并未改变版本时通常只运行 CI；唯一例外是当前版本从未创建过 `v<version>` tag，此时允许首个合并后的发布任务为该版本建立初始 Release。tag 建立后，同版本后续合并必须跳过 Release。版本回退、重复 tag、签名缺失、清单不完整或产物校验失败时不得发布部分产物。
 - 所有第三方 Action 固定完整 commit SHA；同一仓库使用串行 release concurrency。updater 私钥和未来 Authenticode 凭据只通过受保护的 GitHub Environment/Secrets 注入。
 - prerelease 版本创建 GitHub 原生 prerelease，稳定版本创建普通 Release；不刷新额外通道清单。发布产物、版本说明、许可证通知、SHA-256、更新 URL 和签名必须来自同一次构建。
 

@@ -13,6 +13,7 @@ import i18n, { resolveLocale } from "../shared/i18n";
 import type { LocalePreference } from "../shared/i18n";
 import type { CompressionPreset } from "../shared/model/compression";
 import { syncCurrentWindowTheme } from "../shared/bridge/windowAppearance";
+import { parseNumberPreference } from "./preferenceValue";
 
 export const accentColors = ["violet", "blue", "green", "pink", "yellow"] as const;
 export type AccentColor = (typeof accentColors)[number];
@@ -247,8 +248,7 @@ function readBooleanPreference(key: string, fallback: boolean) {
 
 function readNumberPreference(key: string, fallback: number) {
   try {
-    const value = Number(localStorage.getItem(key));
-    return Number.isFinite(value) ? value : fallback;
+    return parseNumberPreference(localStorage.getItem(key), fallback);
   } catch (error) {
     console.warn(`Unable to read UI preference ${key}`, error);
     return fallback;

@@ -19,6 +19,49 @@ export function parseReleaseVersion(value) {
   };
 }
 
+function compareNumericIdentifier(left, right) {
+  if (left.length !== right.length) return left.length < right.length ? -1 : 1;
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
+}
+
+export function compareReleaseVersions(left, right) {
+  const leftMatch = semverPattern.exec(left);
+  const rightMatch = semverPattern.exec(right);
+  if (!leftMatch) throw new Error(`Invalid SemVer release version: ${left}`);
+  if (!rightMatch) throw new Error(`Invalid SemVer release version: ${right}`);
+
+  for (let index = 1; index <= 3; index += 1) {
+    const comparison = compareNumericIdentifier(leftMatch[index], rightMatch[index]);
+    if (comparison !== 0) return comparison;
+  }
+
+  const leftPrerelease = leftMatch[4]?.split(".") ?? [];
+  const rightPrerelease = rightMatch[4]?.split(".") ?? [];
+  if (leftPrerelease.length === 0 || rightPrerelease.length === 0) {
+    if (leftPrerelease.length === rightPrerelease.length) return 0;
+    return leftPrerelease.length === 0 ? 1 : -1;
+  }
+
+  const identifierCount = Math.max(leftPrerelease.length, rightPrerelease.length);
+  for (let index = 0; index < identifierCount; index += 1) {
+    const leftIdentifier = leftPrerelease[index];
+    const rightIdentifier = rightPrerelease[index];
+    if (leftIdentifier === undefined) return -1;
+    if (rightIdentifier === undefined) return 1;
+    if (leftIdentifier === rightIdentifier) continue;
+
+    const leftIsNumeric = /^\d+$/.test(leftIdentifier);
+    const rightIsNumeric = /^\d+$/.test(rightIdentifier);
+    if (leftIsNumeric && rightIsNumeric) {
+      return compareNumericIdentifier(leftIdentifier, rightIdentifier);
+    }
+    if (leftIsNumeric !== rightIsNumeric) return leftIsNumeric ? -1 : 1;
+    return leftIdentifier < rightIdentifier ? -1 : 1;
+  }
+  return 0;
+}
+
 export function readProjectVersion(root = projectRoot) {
   const packageVersion = JSON.parse(
     readFileSync(resolve(root, "package.json"), "utf8"),
@@ -52,24 +95,44 @@ export function previousPackageVersion(base, root = projectRoot) {
   }
 }
 
+export function shouldCreateRelease({ currentVersion, previousVersion, tagExists }) {
+  if (previousVersion === null) return false;
+  const comparison = compareReleaseVersions(currentVersion, previousVersion);
+  if (comparison < 0) {
+    throw new Error(
+      `Release version must not move backwards: ${previousVersion} -> ${currentVersion}`,
+    );
+  }
+  if (comparison === 0 && currentVersion !== previousVersion) {
+    throw new Error(
+      `Release version must advance in SemVer precedence: ${previousVersion} -> ${currentVersion}`,
+    );
+  }
+  if (previousVersion !== currentVersion && tagExists) {
+    throw new Error(`Release tag already exists: v${currentVersion}`);
+  }
+  return !tagExists;
+}
+
 export function releaseInspection({ base, root = projectRoot } = {}) {
   const parsed = readProjectVersion(root);
   const previousVersion = previousPackageVersion(base, root);
-  const release = previousVersion !== null && previousVersion !== parsed.version;
-  if (release) {
-    const tag = `v${parsed.version}`;
-    const existing = execFileSync(
-      "git",
-      ["tag", "--list", tag],
-      { cwd: root, encoding: "utf8" },
-    ).trim();
-    if (existing) throw new Error(`Release tag already exists: ${tag}`);
-  }
+  const tag = `v${parsed.version}`;
+  const tagExists = execFileSync(
+    "git",
+    ["tag", "--list", tag],
+    { cwd: root, encoding: "utf8" },
+  ).trim().length > 0;
+  const release = shouldCreateRelease({
+    currentVersion: parsed.version,
+    previousVersion,
+    tagExists,
+  });
   return {
     ...parsed,
     previousVersion,
     release,
-    tag: `v${parsed.version}`,
+    tag,
   };
 }
 
