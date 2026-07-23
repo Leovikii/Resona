@@ -74,6 +74,21 @@ body {
   user-select: text;
 }
 
+/* Keep Mantine's scrollbars mounted long enough for the delayed hidden state to fade. */
+[data-mantine-scrollbar] {
+  transition: background-color 150ms ease, opacity 180ms ease;
+}
+
+[data-mantine-scrollbar][data-state="hidden"]:not([data-hidden]) {
+  display: flex;
+  opacity: 0;
+  pointer-events: none;
+}
+
+[data-mantine-scrollbar][data-state="visible"] {
+  opacity: 1;
+}
+
 html[data-window="desktop-lyrics"],
 html[data-window="desktop-lyrics"] body,
 html[data-window="desktop-lyrics"] #root {
@@ -984,7 +999,7 @@ input {
 .full-player-lyrics-content {
   min-width: 0;
   min-height: 100%;
-  padding: calc(50% - 24px) 8px;
+  padding: 8px 8px max(8px, calc(50% - 24px));
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -1005,10 +1020,18 @@ input {
   min-width: 0;
   padding: 11px 4px;
   display: grid;
-  grid-template-columns: 112px minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 8px;
   border-bottom: 1px solid var(--mantine-color-default-border);
   text-align: left;
+}
+
+.metadata-row > :first-child {
+  white-space: nowrap;
+}
+
+.metadata-row > :last-child {
+  min-width: 0;
 }
 
 .metadata-row[data-compact] > :last-child {
@@ -1510,8 +1533,19 @@ h2.page-heading {
   outline-color: var(--mantine-color-text);
 }
 
+.output-setting {
+  width: min(100%, 320px);
+  min-width: 0;
+}
+
 .output-setting .mantine-Select-root {
-  width: min(360px, 42vw);
+  width: auto;
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.output-setting .mantine-ActionIcon-root {
+  flex: 0 0 auto;
 }
 
 .lyrics-opacity-setting {
@@ -1959,14 +1993,10 @@ h2.page-heading {
   height: 100%;
 }
 
-.app-shell[data-layout="compact"] .full-player-lyrics-content {
-  padding-block: calc(50% - 24px);
-}
-
 .app-shell[data-layout="compact"] .metadata-row {
   padding-block: 9px;
   grid-template-columns: 88px minmax(0, 1fr);
-  gap: 10px;
+  gap: 8px;
 }
 
 .app-shell[data-layout="compact"] .tool-list {

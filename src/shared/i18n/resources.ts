@@ -117,7 +117,6 @@ export const resources = {
       tools: {
         title: "工具",
         compression: "音频压缩",
-        compressionScope: "WAV 无损压缩为 FLAC",
         tagEditor: "标签编辑",
         afterFirstRelease: "首个正式版后实现",
       },
@@ -338,7 +337,6 @@ export const resources = {
       tools: {
         title: "Tools",
         compression: "Audio compression",
-        compressionScope: "Losslessly compress WAV to FLAC",
         tagEditor: "Tag editor",
         afterFirstRelease: "Planned after the first release",
       },

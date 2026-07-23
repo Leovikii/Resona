@@ -246,7 +246,7 @@ export default function AudioCompressionApp() {
               {t("compression.candidateCount", { count: compression.scan.candidateFiles })}
             </Text>
           </div>
-          <ScrollArea className="compression-tree-scroll" type="auto">
+          <ScrollArea className="compression-tree-scroll" scrollHideDelay={700} type="scroll">
             {compression.scan.roots.length === 0 ? (
               <CompressionEmpty icon={<FileAudio />} label={t("compression.emptyInputs")} />
             ) : (
@@ -365,7 +365,7 @@ function CompressionTaskProgress({ snapshot }: {
     <div className="compression-task-progress">
       <Progress animated={snapshot.status === "running"} value={value} />
       <Text c="dimmed" size="xs">{t("compression.progress", { completed: snapshot.completed, total: snapshot.total })}</Text>
-      <ScrollArea.Autosize mah={180} type="auto">
+      <ScrollArea.Autosize mah={180} scrollHideDelay={700} type="scroll">
         <div className="compression-results">
           {snapshot.items.map((item) => (
             <Text c={item.status === "failed" || item.message ? "red" : "dimmed"} key={item.source} lineClamp={1} size="xs" title={item.message || item.output}>

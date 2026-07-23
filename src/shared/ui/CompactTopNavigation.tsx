@@ -88,7 +88,7 @@ export const CompactTopNavigation = memo(function CompactTopNavigation({
       </div>
 
       <div className="compact-playlist-navigation">
-        <ScrollArea className="compact-playlist-scroll" scrollbars="x" scrollbarSize={4} type="hover">
+        <ScrollArea className="compact-playlist-scroll" scrollbars="x" scrollbarSize={4} scrollHideDelay={700} type="scroll">
           <Tabs
             className="compact-playlist-tabs"
             onChange={(value) => {

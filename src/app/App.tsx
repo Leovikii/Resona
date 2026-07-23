@@ -147,11 +147,6 @@ export default function App() {
   }, [playback.openSequence]);
 
   useEffect(() => {
-    if (!isTauriRuntime() || playback.defaultPlaylist.revision === 0) return;
-    if (playback.snapshot.path) setSelection({ kind: "default" });
-  }, [playback.defaultPlaylist.revision, playback.snapshot.path]);
-
-  useEffect(() => {
     if (!isTauriRuntime()) return;
     let disposed = false;
     let unlisten: (() => void) | undefined;
@@ -582,7 +577,7 @@ function Sidebar({
           onClick={() => onSelect({ kind: "default" })}
           onContextMenu={(event) => { event.preventDefault(); setContextMenu({ x: event.clientX, y: event.clientY, playlist: null, isDefault: true }); }}
         />
-        <ScrollArea className="playlist-nav-scroll" type="auto">
+        <ScrollArea className="playlist-nav-scroll" scrollHideDelay={700} type="scroll">
           <div className="playlist-nav-list" data-external-drag={externalDragActive || undefined}>
             <PlaylistGap active={dropTarget?.kind === "playlist-gap" && dropTarget.position === 0} position={0} />
             {playlists.map((playlist, index) => (
@@ -770,7 +765,8 @@ function DefaultPlaylistView({
         <ScrollArea
           className="track-scroll"
           data-drop-kind="default-track-list"
-          type="auto"
+          scrollHideDelay={700}
+          type="scroll"
         >
           <PlaylistTrackList
             busy={busy}
@@ -866,7 +862,8 @@ function UserPlaylistView({
           className="track-scroll"
           data-drop-kind="track-list"
           data-playlist-id={playlist.id}
-          type="auto"
+          scrollHideDelay={700}
+          type="scroll"
         >
           <div>
             <PlaylistTrackList
@@ -911,7 +908,7 @@ function RecentView({ error, loading, onPlay, records }: {
       ) : records.length === 0 ? (
         <EmptyView icon={<History />} label={t("recent.empty")} />
       ) : (
-        <ScrollArea className="track-scroll" type="auto">
+        <ScrollArea className="track-scroll" scrollHideDelay={700} type="scroll">
           <div className="recent-list">
             {records.map((record) => (
               <UnstyledButton className="recent-row" key={record.path} onClick={() => void onPlay(record.path)}>
@@ -939,7 +936,7 @@ function ToolsView() {
     ? ((compression.snapshot.completed + compression.snapshot.currentProgress) / compression.snapshot.total) * 100
     : 0;
   return (
-    <ScrollArea className="page-scroll" type="auto">
+    <ScrollArea className="page-scroll" scrollHideDelay={700} type="scroll">
     <div className="page-content tools-page">
       <Title className="page-heading" order={2}>{t("tools.title")}</Title>
       <div className="tool-list">
@@ -947,7 +944,6 @@ function ToolsView() {
           <ThemeIcon size={38} variant="light"><Wrench size={19} /></ThemeIcon>
           <div className="tool-entry-copy">
             <Text fw={600}>{t("tools.compression")}</Text>
-            <Text c="dimmed" size="xs">{t("tools.compressionScope")}</Text>
             {running && <Progress mt={7} size="xs" value={progress} />}
           </div>
           <Button
@@ -1009,7 +1005,7 @@ function SettingsView({ busy, desktopLyrics, layoutBusy, layoutMode, onRefresh, 
     setDesktopLyrics({ fontSize: value });
   }, [desktopLyrics, lyricsPreferences.fontSize, setDesktopLyrics]);
   return (
-    <ScrollArea className="settings-scroll" type="auto">
+    <ScrollArea className="settings-scroll" scrollHideDelay={700} type="scroll">
     <div className="page-content settings-page">
       <Title className="page-heading" order={2}>{t("settings.title")}</Title>
       <section className="settings-section">
@@ -1584,7 +1580,7 @@ function FullPlayerView({ details, error, loading, lyrics, onClose, onSeek, outp
             </div>
           </ScrollArea>
         ) : (
-          <ScrollArea className="full-player-panel full-player-details" type="auto">
+          <ScrollArea className="full-player-panel full-player-details" scrollHideDelay={700} type="scroll">
             <div className="full-player-details-content">
             <MetadataRow label={t("metadata.artist")} value={details?.artist} />
             <MetadataRow label={t("metadata.album")} value={details?.album} />

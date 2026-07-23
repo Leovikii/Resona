@@ -716,7 +716,7 @@ impl AudioActor {
         };
 
         if let Err(error) = &result {
-            if replace_state_on_error {
+            if replace_state_on_error && !matches!(error, PlaybackError::NothingLoaded) {
                 self.snapshot.status = PlaybackStatus::Failed;
             }
             self.snapshot.error = Some(error.failure());
@@ -1798,6 +1798,31 @@ mod tests {
         assert_eq!(
             removed.queue.iter().map(|item| item.id).collect::<Vec<_>>(),
             [3, 4, 2]
+        );
+    }
+
+    #[test]
+    fn next_without_a_target_preserves_the_active_playback_state() {
+        let mut engine = AudioActor::new();
+        engine
+            .replace_queue(vec![PathBuf::from("only-track.flac")])
+            .expect("replace single-item queue");
+        engine.current_index = Some(0);
+        engine.snapshot.status = PlaybackStatus::Playing;
+        engine.queue[0].status = QueueItemStatus::Playing;
+
+        let (response, receiver) = mpsc::channel();
+        engine.handle(AudioCommand::Next(response));
+
+        assert!(matches!(
+            receiver.recv().expect("receive next result"),
+            Err(PlaybackError::NothingLoaded)
+        ));
+        assert_eq!(engine.snapshot.status, PlaybackStatus::Playing);
+        assert_eq!(engine.queue[0].status, QueueItemStatus::Playing);
+        assert_eq!(
+            engine.snapshot.error.as_ref().map(|failure| failure.code),
+            Some(PlaybackErrorCode::NothingLoaded)
         );
     }
 
