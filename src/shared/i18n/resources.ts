@@ -1,7 +1,7 @@
 export const resources = {
   "zh-CN": {
     translation: {
-      app: { name: "Resona", version: "0.0.19" },
+      app: { name: "Resona" },
       nav: {
         playlists: "播放列表",
         recent: "最近播放",
@@ -273,7 +273,7 @@ export const resources = {
   },
   en: {
     translation: {
-      app: { name: "Resona", version: "0.0.19" },
+      app: { name: "Resona" },
       nav: {
         playlists: "Playlists",
         recent: "Recently played",

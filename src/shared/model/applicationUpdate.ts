@@ -1,3 +1,10 @@
+import packageMetadata from "../../../package.json";
+
+export const applicationVersion = packageMetadata.version;
+export const applicationIsPrerelease = applicationVersion
+  .split("+", 1)[0]
+  .includes("-");
+
 export interface ApplicationUpdateSnapshot {
   currentVersion: string;
   currentIsPrerelease: boolean;
@@ -31,9 +38,8 @@ export interface ApplicationUpdateFailure {
 }
 
 export const defaultApplicationUpdateSnapshot: ApplicationUpdateSnapshot = {
-  currentVersion: "0.1.0-rc.1",
-  currentIsPrerelease: true,
+  currentVersion: applicationVersion,
+  currentIsPrerelease: applicationIsPrerelease,
   receivePrereleaseUpdates: true,
   updaterConfigured: false,
 };
-

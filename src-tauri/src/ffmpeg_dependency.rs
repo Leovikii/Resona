@@ -270,8 +270,9 @@ impl FfmpegDependencyService {
             .join(format!(".{}-download.zip", self.spec.version));
         remove_file_if_present(&archive_path)?;
 
+        let user_agent = concat!("Resona/", env!("CARGO_PKG_VERSION"));
         let mut response = ureq::get(&self.spec.source_url)
-            .header("User-Agent", "Resona/0.0.19")
+            .header("User-Agent", user_agent)
             .call()
             .map_err(|error| {
                 FfmpegDependencyFailure::new(
