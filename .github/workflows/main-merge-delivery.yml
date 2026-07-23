@@ -17,6 +17,10 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   CARGO_TERM_COLOR: always
 
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: ${{ github.event_name == 'push' && 'main-delivery' || github.run_id }}
   cancel-in-progress: false
@@ -56,7 +60,6 @@ jobs:
         run: npm run build
 
       - name: Verify the third-party license report
-        shell: pwsh
         run: |
           npm run licenses
           git diff --exit-code -- docs/THIRD_PARTY_LICENSES.md
@@ -130,63 +133,28 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Require updater signing configuration
-        shell: pwsh
+      - name: Prepare the signed updater configuration
         env:
+          RESONA_UPDATER_PUBLIC_KEY: ${{ vars.RESONA_UPDATER_PUBLIC_KEY }}
+        run: node scripts/prepare-updater-config.mjs
+
+      - name: Build and publish the signed Windows release
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0, Node 24
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
           RESONA_UPDATER_PUBLIC_KEY: ${{ vars.RESONA_UPDATER_PUBLIC_KEY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:RESONA_UPDATER_PUBLIC_KEY)) {
-            throw "Environment variable RESONA_UPDATER_PUBLIC_KEY is missing. Add it under Settings > Environments > release > Environment variables (not Secrets)."
-          }
-          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
-            throw "Environment secret TAURI_SIGNING_PRIVATE_KEY is missing under Settings > Environments > release."
-          }
-
-      - name: Build signed Windows release
-        env:
-          RESONA_UPDATER_PUBLIC_KEY: ${{ vars.RESONA_UPDATER_PUBLIC_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npm run release:windows
-
-      - name: Publish GitHub prerelease
-        if: needs.verify.outputs.prerelease == 'true'
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.verify.outputs.version }}
-          TAG: ${{ needs.verify.outputs.tag }}
-          MERGE_SHA: ${{ github.sha }}
-        run: |
-          $bundle = "src-tauri/target/release/bundle/nsis"
-          gh release create $env:TAG `
-            "$bundle/Resona_$($env:VERSION)_windows_x64-setup.exe" `
-            "$bundle/Resona_$($env:VERSION)_windows_x64-setup.exe.sig" `
-            "$bundle/Resona_$($env:VERSION)_windows_x64-setup.json" `
-            "$bundle/latest.json" `
-            --prerelease `
-            --target $env:MERGE_SHA `
-            --title "Resona $($env:VERSION)" `
-            --notes-file "docs/releases/$($env:VERSION).md"
-
-      - name: Publish GitHub stable release
-        if: needs.verify.outputs.prerelease == 'false'
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.verify.outputs.version }}
-          TAG: ${{ needs.verify.outputs.tag }}
-          MERGE_SHA: ${{ github.sha }}
-        run: |
-          $bundle = "src-tauri/target/release/bundle/nsis"
-          gh release create $env:TAG `
-            "$bundle/Resona_$($env:VERSION)_windows_x64-setup.exe" `
-            "$bundle/Resona_$($env:VERSION)_windows_x64-setup.exe.sig" `
-            "$bundle/Resona_$($env:VERSION)_windows_x64-setup.json" `
-            "$bundle/latest.json" `
-            --latest `
-            --target $env:MERGE_SHA `
-            --title "Resona $($env:VERSION)" `
-            --notes-file "docs/releases/$($env:VERSION).md"
+        with:
+          tagName: ${{ needs.verify.outputs.tag }}
+          releaseName: Resona ${{ needs.verify.outputs.version }}
+          releaseCommitish: ${{ github.sha }}
+          releaseDraft: false
+          prerelease: ${{ needs.verify.outputs.prerelease }}
+          generateReleaseNotes: true
+          retryAttempts: 2
+          updaterJsonPreferNsis: true
+          uploadUpdaterJson: true
+          uploadUpdaterSignatures: true
+          releaseAssetNamePattern: Resona_[version]_[platform]_[arch][setup][ext]
+          args: --bundles nsis --config src-tauri/target/updater.config.json

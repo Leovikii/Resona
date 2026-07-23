@@ -23,7 +23,7 @@ Download the Windows x64 NSIS installer from [GitHub Releases](https://github.co
 
 ## Development
 
-```powershell
+```bash
 npm ci
 npm run tauri dev
 ```

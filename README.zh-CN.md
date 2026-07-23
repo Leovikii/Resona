@@ -23,7 +23,7 @@
 
 ## 开发
 
-```powershell
+```bash
 npm ci
 npm run tauri dev
 ```

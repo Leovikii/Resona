@@ -12,8 +12,9 @@ The matrix covers:
 
 Regenerate from the repository root with FFmpeg 8.1.2 or later and Xiph FLAC 1.5.0 or later. The reference FLAC encoder is required because FFmpeg 8.1.2 silently limits FLAC output to 24-bit.
 
-```powershell
-./scripts/generate-audio-fixtures.ps1
+```bash
+node scripts/generate-audio-fixtures.mjs
+npm run verify:fixtures
 ```
 
 `SHA256SUMS.txt` records the expected generated files. Lossless samples are 0.35 seconds long; `seek_48000_24_stereo.flac` is 4 seconds long.

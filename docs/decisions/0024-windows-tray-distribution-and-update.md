@@ -44,11 +44,11 @@ ADR 0013 当前规定关闭主窗口即退出，防止桌面歌词和播放核�
 
 - GitHub Actions 在单一 `main-merge-delivery.yml` 中分为合并前验证和合并后交付两条边界。目标为 `main` 的 PR 在创建、更新、重新打开和转为 ready 时，以只读权限运行稳定 job `PR validation`，验证 GitHub 生成的 PR merge commit；该 job 必须配置为 `main` ruleset 的 required status check，并要求分支在合并前与 `main` 保持最新。
 - 同一 workflow 以 `push` 到 `main` 运行轻量 `Prepare delivery` 与条件式 release job。`main` ruleset 必须禁止直接 push，并把 `PR validation` 设为 required status check，因此该 push 由已验证的 PR 合并产生；它的 `GITHUB_REF` 与 `release` Environment 的 `main` 限制天然一致，不使用权限更敏感的 `pull_request_target`，也不放宽到 `refs/pull/*/merge`。流程不增加 tag push 或 `workflow_dispatch` 发布入口。合并前 job 不读取 Environment、不接触签名密钥、不创建 tag 或 Release。
-- `Prepare delivery` 检出 push 的精确 `github.sha`，以 `github.event.before` 为比较基线，只读判定版本一致性、目标 tag 和 prerelease 状态，不重复执行已经阻止合并的通用构建、测试、许可证、format 或 Clippy 门禁。只有版本合法、三个版本文件完全一致且 `v<version>` 尚不存在时，发布 job 才自动取得 `contents: write`，通过签名 NSIS 构建执行分发审计和原生窗口门禁，并创建版本 tag 和 GitHub Release；不需要人工批准或手工启动。
+- `Prepare delivery` 检出 push 的精确 `github.sha`，以 `github.event.before` 为比较基线，只读判定版本一致性、目标 tag 和 prerelease 状态，不重复执行已经阻止合并的通用构建、测试、许可证、format 或 Clippy 门禁。只有版本合法、三个版本文件完全一致且 `v<version>` 尚不存在时，发布 job 才自动取得 `contents: write`，由 Tauri 官方 Action 构建签名 NSIS、上传 updater 产物并创建版本 tag 和 GitHub Release；不需要人工批准或手工启动。
 - 合并未改变版本时通常只运行轻量发布判定；唯一例外是当前版本从未创建过 `v<version>` tag，此时允许首个合并后的发布任务为该版本建立初始 Release。tag 建立后，同版本后续合并必须跳过 Release。版本回退、重复 tag、签名缺失、清单不完整或产物校验失败时不得发布部分产物。
-- 所有第三方 Action 固定完整 commit SHA；`main` delivery 使用独立的串行 concurrency 和完整等待队列，PR 验证按 PR 分组并取消过时提交，两类事件不互相阻塞。updater 私钥和未来 Authenticode 凭据只通过受保护的 GitHub Environment/Secrets 注入。
+- 所有第三方 Action 固定完整 commit SHA；Windows runner 的普通命令统一通过 Git Bash 执行。GitHub Release API、产物改名、签名上传和 updater JSON 生成不由仓库脚本或 GitHub CLI 重复实现，统一使用 Tauri 官方 Action 的原生能力。`main` delivery 使用独立的串行 concurrency 和完整等待队列，PR 验证按 PR 分组并取消过时提交，两类事件不互相阻塞。updater 私钥和未来 Authenticode 凭据只通过受保护的 GitHub Environment/Secrets 注入。
 - `release` Environment 只承担 `main` 分支限制、变量与密钥隔离；默认不配置 Required reviewers 或 Wait timer，使符合版本条件的发布全自动完成。只有未来明确决定引入人工发布审批时才开启 reviewer。
-- prerelease 版本创建 GitHub 原生 prerelease，稳定版本创建普通 Release；不刷新额外通道清单。发布产物、版本说明、许可证通知、SHA-256、更新 URL 和签名必须来自同一次构建。
+- prerelease 版本创建 GitHub 原生 prerelease，稳定版本创建普通 Release；不刷新额外通道清单。安装包、`.sig`、`latest.json` 和更新 URL 必须来自同一次 Tauri Action 构建；SHA-256 使用 GitHub Release asset 原生 digest，不维护自定义哈希旁车文件。
 
 ## 理由
 

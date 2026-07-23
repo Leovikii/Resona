@@ -1,13 +1,22 @@
 # 开发状态台账
 
-最后更新：2026-07-23
+最后更新：2026-07-24
+
+### 2026-07-24 自动发布链收束为官方 Action
+
+- 仓库已删除全部平台 shell 脚本。Windows CD 不再调用系统脚本宿主、`gh release create`、自写产物改名器、SHA-256 元数据生成器或 `latest.json` 生成器。Windows runner 上的普通命令统一由 Git Bash 执行；签名 NSIS 构建、tag/Release 创建、GitHub prerelease 标记、平台/架构产物命名、`.sig` 与 updater `latest.json` 上传统一交给 Tauri 官方 `tauri-apps/tauri-action`。
+- Tauri Action 固定到不可变的 `action-v1.0.0` commit `1deb371b0cd8bd54025b384f1cd735e725c4060f`，其 Action 运行时为 Node 24。产物命名使用官方 `releaseAssetNamePattern`：`Resona_[version]_[platform]_[arch][setup][ext]`；预览/正式属性继续只由项目 SemVer 判定结果驱动。
+- 删除已被官方 Action 覆盖的自写产物收尾与分发审计脚本。图标和音频 fixture 生成改为调用 Tauri/FFmpeg/FLAC 官方 CLI 的跨平台 Node 编排；FFmpeg 测试工具准备改用 Node 标准 API 与系统 `tar`。`npm run release:windows` 收束为本地 Tauri 签名 NSIS 构建；原生窗口改由真实安装版人工验收，不在无交互桌面的 GitHub runner 自造窗口探针。
+- GitHub Release asset API 原生提供 `sha256:` digest，因此不再额外上传自定义 `<setup>.json` 哈希旁车文件。Tauri updater 使用的签名和 `latest.json` 仍由同一次官方 Action 构建生成。
+- 新增固定 actionlint v1.7.12 的 `npm run lint:workflow` 本地门禁。actionlint 当前唯一报告是尚未支持 2026-05 GitHub 官方 `concurrency.queue` 新语法；对该精确误报作窄忽略后，workflow 的其余结构、表达式、job 输出引用和 Bash 步骤全部通过。Tauri Action 的输入逐项对照固定 `action-v1.0.0` 的 `action.yml`，并已用一次性临时密钥完成本地 NSIS + updater 签名构建。
+- 本轮验证通过：仓库平台 shell 脚本文件和旧引用均为 0；11 个 Node 测试、TypeScript/Vite production build、许可证一致性、Rust format、82 个普通 Rust 测试（9 个设备/真实转换测试忽略）和 Clippy `-D warnings` 通过；39 个音频 fixture、固定 FFmpeg/ffprobe 工具哈希与 7 组 Tauri CLI 图标复现通过。一次性密钥构建生成 5,990,934 bytes 的 NSIS 与非空 `.sig`，仅用于本地链路验证，不作为正式 Release。
 
 ### 2026-07-23 main PR CI 与自动发布
 
 - 单一 `.github/workflows/main-merge-delivery.yml` 现覆盖两段式 CI/CD：目标为 `main` 的 PR 在创建、更新、重新打开和转为 ready 时通过 `pull_request` 运行稳定检查 `PR validation`；受 ruleset 保护的 `main` 收到合并 push 后运行轻量 `Prepare delivery`，符合版本发布条件时自动进入签名发布。`push` 事件的 Environment ref 天然是 `main`，不再使用高权限 `pull_request_target`，也无需放宽到 `refs/pull/*/merge`。合并前 job 使用只读 `GITHUB_TOKEN`，验证 GitHub 生成的 PR merge commit，并覆盖 npm 测试、production build、许可证报告一致性、Rust format/test/Clippy 与 SemVer 发布规则；不访问 `release` Environment 或签名密钥。
 - `main` ruleset 应把 `PR validation`（来源限定 GitHub Actions）设为唯一 required status check，并启用“Require branches to be up to date before merging”。workflow 名 `Main CI and delivery`、`Prepare delivery` 和 release job 均不得加入 required checks。
 - `main` delivery 使用独立 concurrency group 串行并以 `queue: max` 保留等待任务；PR 验证按 PR 编号分组，新提交会取消同一 PR 的过时检查。两类事件不再互相阻塞，避免发布竞态同时减少无效 Actions 时间。ADR 0024 与 RC 计划已同步为单文件、两阶段 CI/CD。
-- 合并后的重复 npm 测试/build/licenses 与 Cargo format/test/Clippy 已移除；`Prepare delivery` 只检出 `main` push 的精确 `github.sha`，以 `github.event.before` 为比较基线判定版本、tag 和 prerelease 状态。符合版本发布条件时，CD 自动通过 `release:windows` 完成签名 NSIS 构建、分发审计、原生窗口门禁和 GitHub Release；无需人工批准或手工启动。
+- 合并后的重复 npm 测试/build/licenses 与 Cargo format/test/Clippy 已移除；`Prepare delivery` 只检出 `main` push 的精确 `github.sha`，以 `github.event.before` 为比较基线判定版本、tag 和 prerelease 状态。符合版本发布条件时，CD 自动进入 Tauri 官方 Action 完成签名 NSIS 构建和 GitHub Release；无需人工批准或手工启动。
 - 首次 GitHub runner 暴露两条压缩普通测试错误依赖本机已下载 FFmpeg。成功提交后删除源文件的测试现通过注入已提交转换结果离线验证；输出冲突在启动 ffprobe 前失败，并使用只需存在、绝不执行的测试占位文件通过公开启动边界。压缩模块 13 项普通测试通过、1 项真实 FFmpeg 矩阵按约定忽略，干净 runner 不再需要下载运行时依赖。
 - `actions/setup-node` 的 npm 自动缓存已在三个 job 中显式关闭：合并前只读检查和含发布权限的 job 均不需要写共享缓存，避免 `cache write denied` 警告及不必要的缓存信任面。签名预检错误现明确区分 `release` Environment 的 Variables 与 Secrets；公钥必须位于 `RESONA_UPDATER_PUBLIC_KEY` variable，私钥与密码继续位于 Secrets。
 - `release` Environment 继续只允许 `main`，但不启用 Required reviewers 或 Wait timer；因此符合版本条件后会自动发布。若未来主动开启 reviewer，流程才会变为等待人工批准。
@@ -105,7 +114,7 @@
 - Mica 继续作为唯一根材质，但主内容改用一层低 alpha `content surface`；侧栏/窄屏导航使用 `chrome surface`，底栏新增独立 `player surface`，命令区与独立工作单元使用 `subtle surface`。深色四级值依次为 `12%` 黑、`5%` 白、`8%` 白、`10%` 白，浅色依次为 `18%`、`52%`、`70%`、`78%` 白。完整播放器和压缩工作区不会再重复叠加 content fill；仍不使用整高/整宽分隔线、全局模糊或嵌套材质卡片。
 - 主内容增加有限内缩、圆角和裁切，以 WinUI `NavigationView` 式内容层与侧栏区分；播放列表/最近播放命令区使用无描边 subtle surface。设置页保持无卡片分组，宽屏收敛为 `760px`、`240px + 420px` 的稳定双列；空播放状态隐藏无意义的禁用进度轨道，有音频时轨道保持正常。音频压缩和桌面歌词窗口均完成回归，桌面歌词透明、置顶和穿透边界未改动。
 - 浏览器回归覆盖 `1080×700` 深浅宽屏默认列表/设置/工具/完整播放器、`360×600` 与 `420×720` 深浅窄屏、`720×500` 深浅音频压缩窗口、长文本桌面歌词和暗色 solid 回退；全部页面横纵溢出为 0，控制台无 warning/error。Windows Release 的 Per-Monitor v2 DPI 原生截图采样为侧栏 `#2F2929`、主内容 `#221A17`、命令区 `#333236`、底栏 `#333131`，相比旧版已形成可感知层级且仍能看到 Mica 采样差异。
-- `verify-release-webview.ps1` 新增可选 `-CapturePath`，等待有效尺寸和 UI 稳定帧，按进程枚举真实有标题主窗口，并在 DPI-aware 坐标系截图；默认 `npm run release:windows` 行为保持自动验证和清理。TypeScript/Vite build、许可证清单、Rust format、Clippy `-D warnings`、差异检查和 67 个普通 Rust 测试通过；8 个真实音频设备测试按约定忽略。产物为 `src-tauri/target/release/resona.exe`，18,006,528 bytes，SHA-256 `AA36E7400F840FEA9ABB4F247158F9F5C4BC01A05D85D64EB0A4D6A0BF31EEF1`。
+- 当时的本机原生窗口探针曾等待有效尺寸和 UI 稳定帧，并在 DPI-aware 坐标系截图；该历史工具现已随平台 shell 清理删除。TypeScript/Vite build、许可证清单、Rust format、Clippy `-D warnings`、差异检查和 67 个普通 Rust 测试通过；8 个真实音频设备测试按约定忽略。产物为 `src-tauri/target/release/resona.exe`，18,006,528 bytes，SHA-256 `AA36E7400F840FEA9ABB4F247158F9F5C4BC01A05D85D64EB0A4D6A0BF31EEF1`。
 
 ### 2026-07-22 Mica 可见性与系统主题同步修复
 
@@ -132,7 +141,7 @@
 - 窄屏歌词字号和歌词颜色均固定为“标签 + 控件”两列单行布局，避免颜色控件在窄屏落到标签下方。
 - [ADR 0021](decisions/0021-compact-top-navigation-and-playlist-tabs.md) 已同步为无 Drawer、两行底栏的最终方案。
 - `npm run build`、`npm run licenses`、`cargo fmt --all -- --check`、`cargo clippy --all-targets -- -D warnings` 通过；Rust 测试 64 通过，8 个真实音频设备测试按约定忽略。
-- Windows Release 已生成并通过 `verify-release-webview.ps1` 主窗口可见性检查：`src-tauri/target/release/resona.exe`，17,966,080 bytes，SHA-256 `951BBBA0ECBE685A3001724057FF3BF77C6096569589A3B993937911493B66B1`。
+- Windows Release 已生成并通过当时的主窗口可见性检查：`src-tauri/target/release/resona.exe`，17,966,080 bytes，SHA-256 `951BBBA0ECBE685A3001724057FF3BF77C6096569589A3B993937911493B66B1`。
 
 ## 当前阶段
 
@@ -469,7 +478,7 @@ Windows 原生文件选择窗口仍会偶发阻塞。应用侧单实例和 paren
 - 2026-07-22：项目所有者实机发现上述 Release 存在阻断性桌面歌词回归：超过两行时，布局测量会在换行与 `nowrap` 水平滚动两种渲染状态之间形成反馈环路，导致歌词反复跳跃。此前浏览器验证只覆盖默认短句和静态计算样式，不能视为长歌词渲染通过；该 Release 不作为 0.0.18 桌面歌词验收产物。纠正计划已写入 `docs/plans/0.0.18.md`，待项目所有者审阅后实施。
 - 2026-07-22：完成桌面歌词纠正实现。独立 wrapped/nowrap 测量层消除长歌词反馈环路，并修复 `scrollHeight` 舍入导致短句误判两行的问题；歌词开关持久化，后续播放自动显示；字号使用支持手动草稿提交的纯数字输入，不显示步进器、不响应滚轮且不保留预设菜单。Windows 窗口高度按字号固定计算、只记忆位置/宽度，左右点状握柄通过 Tauri 官方水平 resize capability 调整宽度，窗口 `Resized` 事件强制恢复目标高度。
 - 2026-07-22：浏览器稳定性门禁覆盖 `short`、`two-lines`、`long-zh`、`long-latin`、`empty`，16/28/64px 与 480/760/1280px 宽度；每组连续 5 秒采样均保持布局模式、几何和滚动距离稳定，页面横向溢出为 0。前端 build、Rust format、`cargo test --all-targets`（59 通过、8 个设备测试忽略）和 Clippy `-D warnings` 通过。
-- 2026-07-22：最终 Windows Release（含高 DPI 宽度恢复修正和中文预设文案修正）已通过 `verify-release-webview.ps1` 原生主窗口可见性检查。产物：`src-tauri/target/release/resona.exe`，大小 18,012,672 bytes，SHA-256 `D6B32DB8AAF67DDA79B00038F5AE994691357C06D792623DA1E816AEC6D91DF8`。左右 resize 手感、锁定穿透和多显示器位置恢复仍需项目所有者实机验收。
+- 2026-07-22：最终 Windows Release（含高 DPI 宽度恢复修正和中文预设文案修正）已通过当时的原生主窗口可见性检查。产物：`src-tauri/target/release/resona.exe`，大小 18,012,672 bytes，SHA-256 `D6B32DB8AAF67DDA79B00038F5AE994691357C06D792623DA1E816AEC6D91DF8`。左右 resize 手感、锁定穿透和多显示器位置恢复仍需项目所有者实机验收。
 - 2026-07-22：按项目所有者反馈移除左右整条可见 resize 热区，改为未锁定 hover/focus 时出现的点状握柄；删除自定义 Win32 resize command，改用歌词窗口最小 capability 调用 Tauri 官方 `startResizeDragging`。顶部工具栏使用对称 `22px` 内边距和左右 `86px` 控制区，中央播放控制严格居中、右侧窗口控制贴近边界。浏览器在 480px/760px 验证工具栏对称、零横向溢出，以及纯数字字号输入的 Enter/失焦/Escape 行为；原生左右拖动手感仍需 Windows 实机验收。
 - 2026-07-22：上述修订通过前端 build、许可证、Rust format/test/Clippy、差异检查及 Windows Release 主窗口可见性门禁；59 个普通 Rust 测试通过、8 个真实设备测试按约定忽略。最终产物为 `src-tauri/target/release/resona.exe`，大小 17,932,288 bytes，SHA-256 `BD94A1A84D2F223B202CF6C50D3710E7DE3DB1BB08B08571B7E9EF8B19942991`。
 - 2026-07-22：项目所有者确认桌面歌词握柄、字号输入和工具栏功能正常，但多显示器位置恢复失败。根因是保存窗口横跨副屏与主屏时，旧算法选择枚举中的首个相交屏幕，并在移动前使用主屏 DPI 计算尺寸，最终将副屏负坐标夹到 `x=0`。现按最大可见交集面积选择目标屏，完全离屏时选最近屏幕，尺寸约束使用目标屏 DPI，并在跨屏 DPI 转换后重新设置物理原点。完整前端 build、Rust format/test/Clippy 通过；61 个普通测试通过、8 个设备测试按约定忽略，修复待 Windows 多显示器实机复验。
