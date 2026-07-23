@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -35,7 +36,9 @@ import {
   Captions,
   ArrowRight,
   Check,
+  Code2,
   Disc3,
+  ExternalLink,
   FileAudio,
   History,
   ListMusic,
@@ -61,13 +64,15 @@ import { useTranslation } from "react-i18next";
 
 import { useDesktopLyricsWindow } from "../features/lyrics/useDesktopLyricsWindow";
 import { useAudioCompression } from "../features/compression/useAudioCompression";
+import { useFfmpegDependency } from "../features/compression/useFfmpegDependency";
 import { useLibrary } from "../features/library/useLibrary";
 import { useTrackDetails } from "../features/metadata/useTrackDetails";
 import { showAudioCompressionWindow } from "../shared/bridge/compressionWindow";
 import { usePlaybackController } from "../features/playback/usePlaybackController";
 import { useSeekTransaction } from "../features/playback/useSeekTransaction";
 import { useMainWindowLayout } from "../features/window/useMainWindowLayout";
-import { isTauriRuntime } from "../shared/bridge/tauri";
+import { useApplicationLifetime } from "../features/window/useApplicationLifetime";
+import { invokeTauri, isTauriRuntime } from "../shared/bridge/tauri";
 import type {
   DefaultPlaylistItem,
   DefaultPlaylistSnapshot,
@@ -78,7 +83,7 @@ import type {
 import type { PlaybackFailure, PlaybackSnapshot } from "../shared/model/playback";
 import type { LyricsSnapshot } from "../shared/model/lyrics";
 import type { TrackDetails } from "../shared/model/metadata";
-import { fileNameFromPath, formatDuration } from "../shared/utils/format";
+import { fileNameFromPath, formatBytes, formatDuration } from "../shared/utils/format";
 import { listInsertionPositionAtY } from "../shared/ui/usePointerReorder";
 import { PlaylistTrackList } from "../shared/ui/PlaylistTrackList";
 import { AddMediaMenu } from "../shared/ui/AddMediaMenu";
@@ -101,10 +106,12 @@ export default function App() {
   const playback = usePlaybackController();
   const library = useLibrary();
   const desktopLyrics = useDesktopLyricsWindow();
+  const applicationLifetime = useApplicationLifetime();
   const { desktopLyrics: lyricsPreferences, setDesktopLyrics } = usePreferences();
   const mainWindow = useMainWindowLayout();
   const [selection, setSelection] = useState<Selection>({ kind: "default" });
   const [createPlaylistOpen, setCreatePlaylistOpen] = useState(false);
+  const [rememberCloseDecision, setRememberCloseDecision] = useState(false);
   const [playlistName, setPlaylistName] = useState("");
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const [externalDragActive, setExternalDragActive] = useState(false);
@@ -112,6 +119,10 @@ export default function App() {
   const dropActionsRef = useRef({ library, playback, t });
   const autoLyricsPathRef = useRef<string | null>(null);
   dropActionsRef.current = { library, playback, t };
+
+  useEffect(() => {
+    if (applicationLifetime.closePromptOpen) setRememberCloseDecision(false);
+  }, [applicationLifetime.closePromptOpen]);
 
   const hasCurrentTrack = playback.snapshot.currentItemId !== null
     && playback.selectedPath !== null;
@@ -424,6 +435,7 @@ export default function App() {
             {selection.kind === "tools" && <MemoToolsView />}
             {selection.kind === "settings" && (
               <MemoSettingsView
+                applicationLifetime={applicationLifetime}
                 busy={playback.busy}
                 desktopLyrics={desktopLyrics}
                 layoutBusy={mainWindow.busy}
@@ -508,6 +520,70 @@ export default function App() {
               }}
             >
               {t("common.create")}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+      <Modal
+        centered
+        closeOnClickOutside={false}
+        onClose={applicationLifetime.dismissClosePrompt}
+        opened={applicationLifetime.closePromptOpen}
+        title={t("lifetime.closeTitle")}
+      >
+        <Stack>
+          <Text c="dimmed" size="sm">{t("lifetime.closeBody")}</Text>
+          <Switch
+            checked={rememberCloseDecision}
+            label={t("lifetime.remember")}
+            onChange={(event) => setRememberCloseDecision(event.currentTarget.checked)}
+          />
+          {applicationLifetime.error && (
+            <Text c="red" role="alert" size="xs">{applicationLifetime.error}</Text>
+          )}
+          <Group justify="flex-end">
+            <Button
+              onClick={() => void applicationLifetime.resolveClose(
+                "hide_to_tray",
+                rememberCloseDecision,
+              )}
+              variant="default"
+            >
+              {t("lifetime.hideToTray")}
+            </Button>
+            <Button
+              color="red"
+              onClick={() => void applicationLifetime.resolveClose(
+                "exit",
+                rememberCloseDecision,
+              )}
+            >
+              {t("lifetime.exit")}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+      <Modal
+        centered
+        closeOnClickOutside={false}
+        onClose={applicationLifetime.dismissExitConfirmation}
+        opened={applicationLifetime.exitConfirmationOpen}
+        title={t("lifetime.activeWorkTitle")}
+      >
+        <Stack>
+          <Text c="dimmed" size="sm">{t("lifetime.activeWorkBody")}</Text>
+          {applicationLifetime.error && (
+            <Text c="red" role="alert" size="xs">{applicationLifetime.error}</Text>
+          )}
+          <Group justify="flex-end">
+            <Button
+              onClick={applicationLifetime.dismissExitConfirmation}
+              variant="default"
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button color="red" onClick={() => void applicationLifetime.confirmExit()}>
+              {t("lifetime.exitAnyway")}
             </Button>
           </Group>
         </Stack>
@@ -930,11 +1006,34 @@ function RecentView({ error, loading, onPlay, records }: {
 function ToolsView() {
   const { t } = useTranslation();
   const compression = useAudioCompression();
+  const dependency = useFfmpegDependency();
   const [openError, setOpenError] = useState<string | null>(null);
   const running = compression.snapshot.status === "running" || compression.snapshot.status === "cancelling";
   const progress = compression.snapshot.total > 0
     ? ((compression.snapshot.completed + compression.snapshot.currentProgress) / compression.snapshot.total) * 100
     : 0;
+  const dependencyBusy = ["downloading", "installing", "cancelling"].includes(
+    dependency.snapshot.status,
+  );
+  const dependencyProgress = dependency.snapshot.totalBytes
+    ? (dependency.snapshot.downloadedBytes / dependency.snapshot.totalBytes) * 100
+    : 0;
+  const dependencyDetail = dependency.snapshot.status === "ready"
+    ? t("tools.ffmpegReady", {
+        size: formatBytes(dependency.snapshot.installedBytes),
+      })
+    : dependencyBusy
+      ? t(`tools.ffmpegStatus.${dependency.snapshot.status}`, {
+          downloaded: formatBytes(dependency.snapshot.downloadedBytes),
+          total: dependency.snapshot.totalBytes
+            ? formatBytes(dependency.snapshot.totalBytes)
+            : t("tools.unknownSize"),
+        })
+      : dependency.snapshot.status === "checking"
+        ? t("tools.ffmpegStatus.checking")
+        : dependency.snapshot.status === "failed"
+          ? dependency.snapshot.error?.message ?? t("tools.ffmpegStatus.failed")
+          : t("tools.ffmpegRequired");
   return (
     <ScrollArea className="page-scroll" scrollHideDelay={700} type="scroll">
     <div className="page-content tools-page">
@@ -944,17 +1043,49 @@ function ToolsView() {
           <ThemeIcon size={38} variant="light"><Wrench size={19} /></ThemeIcon>
           <div className="tool-entry-copy">
             <Text fw={600}>{t("tools.compression")}</Text>
+            <Text c="dimmed" lineClamp={2} size="xs">{dependencyDetail}</Text>
+            {dependencyBusy && (
+              <Progress
+                animated={dependency.snapshot.totalBytes === null}
+                mt={7}
+                size="xs"
+                value={dependency.snapshot.totalBytes === null ? 100 : dependencyProgress}
+              />
+            )}
             {running && <Progress mt={7} size="xs" value={progress} />}
           </div>
-          <Button
-            onClick={() => void showAudioCompressionWindow()
-              .then(() => setOpenError(null))
-              .catch((error) => setOpenError(String(error)))}
-            size="xs"
-            variant="light"
-          >{t("common.launch")}</Button>
+          {dependency.snapshot.status === "ready" ? (
+            <Button
+              onClick={() => void showAudioCompressionWindow()
+                .then(() => setOpenError(null))
+                .catch((error) => setOpenError(String(error)))}
+              size="xs"
+              variant="light"
+            >{t("common.launch")}</Button>
+          ) : dependencyBusy ? (
+            <Button
+              disabled={dependency.snapshot.status === "cancelling"}
+              onClick={() => void dependency.cancel()}
+              size="xs"
+              variant="subtle"
+            >{t("common.cancel")}</Button>
+          ) : dependency.snapshot.status === "checking" ? (
+            <Loader size="sm" />
+          ) : (
+            <Button
+              onClick={() => void dependency.install()}
+              size="xs"
+              variant="light"
+            >{dependency.snapshot.status === "failed"
+              ? t("tools.retryFfmpeg")
+              : t("tools.downloadFfmpeg")}</Button>
+          )}
         </Paper>
-        {openError && <div className="error-banner" role="alert">{openError}</div>}
+        {(openError || dependency.commandError) && (
+          <div className="error-banner" role="alert">
+            {openError || dependency.commandError}
+          </div>
+        )}
         <Paper className="tool-row" data-deferred>
           <ThemeIcon color="gray" size={38} variant="light"><Tags size={19} /></ThemeIcon>
           <Text fw={600}>{t("tools.tagEditor")}</Text>
@@ -966,7 +1097,8 @@ function ToolsView() {
   );
 }
 
-function SettingsView({ busy, desktopLyrics, layoutBusy, layoutMode, onRefresh, onSetLayoutMode, onSelectOutput, output }: {
+function SettingsView({ applicationLifetime, busy, desktopLyrics, layoutBusy, layoutMode, onRefresh, onSetLayoutMode, onSelectOutput, output }: {
+  applicationLifetime: ReturnType<typeof useApplicationLifetime>;
   busy: boolean;
   desktopLyrics: ReturnType<typeof useDesktopLyricsWindow>;
   layoutBusy: boolean;
@@ -988,8 +1120,36 @@ function SettingsView({ busy, desktopLyrics, layoutBusy, layoutMode, onRefresh, 
   } = usePreferences();
   const [backgroundOpacity, setBackgroundOpacity] = useState(lyricsPreferences.backgroundOpacity);
   const [fontDraft, setFontDraft] = useState(String(lyricsPreferences.fontSize));
+  const [appVersion, setAppVersion] = useState(t("app.version"));
+  const [aboutError, setAboutError] = useState<string | null>(null);
   useEffect(() => setBackgroundOpacity(lyricsPreferences.backgroundOpacity), [lyricsPreferences.backgroundOpacity]);
   useEffect(() => setFontDraft(String(lyricsPreferences.fontSize)), [lyricsPreferences.fontSize]);
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    void getVersion()
+      .then(setAppVersion)
+      .catch((error) => {
+        console.warn("Unable to read application version", error);
+      });
+  }, []);
+  const openProjectPage = useCallback(async (page: "repository" | "releases") => {
+    try {
+      if (isTauriRuntime()) {
+        await invokeTauri("open_project_page", { page });
+      } else {
+        window.open(
+          page === "repository"
+            ? "https://github.com/Leovikii/Resona"
+            : "https://github.com/Leovikii/Resona/releases/latest",
+          "_blank",
+          "noopener,noreferrer",
+        );
+      }
+      setAboutError(null);
+    } catch (error) {
+      setAboutError(String(error));
+    }
+  }, []);
   const commitFontSize = useCallback(async (raw: string) => {
     const parsed = Number(raw);
     if (!Number.isFinite(parsed)) {
@@ -1061,6 +1221,28 @@ function SettingsView({ busy, desktopLyrics, layoutBusy, layoutMode, onRefresh, 
             value={layoutMode}
           />
         </SettingRow>
+        <SettingRow label={t("settings.closeBehavior")}>
+          <Select
+            allowDeselect={false}
+            data={[
+              { label: t("settings.closeBehaviors.ask"), value: "ask" },
+              { label: t("settings.closeBehaviors.hide_to_tray"), value: "hide_to_tray" },
+              { label: t("settings.closeBehaviors.exit"), value: "exit" },
+            ]}
+            onChange={(value) => {
+              if (value) {
+                void applicationLifetime.setCloseBehavior(
+                  value as "ask" | "hide_to_tray" | "exit",
+                );
+              }
+            }}
+            size="xs"
+            value={applicationLifetime.snapshot.closeBehavior}
+          />
+        </SettingRow>
+        {applicationLifetime.error && (
+          <Text c="red" role="alert" size="xs">{applicationLifetime.error}</Text>
+        )}
       </section>
 
       <section className="settings-section">
@@ -1162,6 +1344,38 @@ function SettingsView({ busy, desktopLyrics, layoutBusy, layoutMode, onRefresh, 
               ? t("settings.activeOutput", { name: output.activeDeviceName })
               : t("settings.outputClosed")}
         </Text>
+      </section>
+
+      <section className="settings-section">
+        <Text className="settings-section-title" fw={650}>{t("settings.about")}</Text>
+        <SettingRow label={t("settings.version")}>
+          <Text fw={600} size="sm">{appVersion}</Text>
+        </SettingRow>
+        <SettingRow label={t("settings.project")}>
+          <Group gap="xs">
+            <Button
+              leftSection={<RefreshCw size={14} />}
+              onClick={() => void openProjectPage("releases")}
+              size="xs"
+              variant="light"
+            >
+              {t("settings.checkUpdates")}
+            </Button>
+            <Button
+              leftSection={<Code2 size={14} />}
+              onClick={() => void openProjectPage("repository")}
+              rightSection={<ExternalLink size={12} />}
+              size="xs"
+              variant="default"
+            >
+              {t("settings.repository")}
+            </Button>
+          </Group>
+        </SettingRow>
+        <Text c="dimmed" className="about-copyright" size="xs">
+          {t("settings.copyright")}
+        </Text>
+        {aboutError && <Text c="red" role="alert" size="xs">{aboutError}</Text>}
       </section>
     </div>
     </ScrollArea>

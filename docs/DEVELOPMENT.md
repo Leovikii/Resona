@@ -9,13 +9,14 @@
 - Visual Studio Build Tools 2022，包含 MSVC/C++ 桌面工具
 - Microsoft Edge WebView2 Runtime
 
-首次安装依赖使用 `npm ci`，随后运行 `npm run prepare:sidecars` 下载并校验固定 FFmpeg/ffprobe。两个约 97 MiB 的可执行文件不进入 Git；`npm run tauri dev`、`npm run tauri build` 和 `npm run release:windows` 也会自动执行该准备步骤。Rust 命令应在已加载 MSVC 环境的 Developer PowerShell/Command Prompt 中运行。
+首次安装源码依赖使用 `npm ci`。FFmpeg/ffprobe 不再是构建 sidecar：普通开发、`npm run tauri build` 和 `npm run release:windows` 都不会下载或打包它们。应用只在用户从工具页明确选择“下载依赖”后，从固定 GitHub Release 资源把经 SHA-256 校验的 FFmpeg 8.1.2 安装到当前用户 Local AppData；不得恢复为第三方站点直链。只有需要运行真实转换矩阵回归时才执行 `npm run prepare:test-tools`；两个约 97 MiB 的测试工具不进入 Git。Rust 命令应在已加载 MSVC 环境的 Developer PowerShell/Command Prompt 中运行。
 
 常用验证命令：
 
 ```powershell
 npm run build
 npm run licenses
+npm run icons:windows
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
 cargo test --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
@@ -34,9 +35,9 @@ cargo test --manifest-path src-tauri/Cargo.toml opens_default_output_and_accepts
 
 Windows 交付版本只能通过 `npm run release:windows` 生成。不得在 Tauri 构建后用 `cargo build --release` 重建或覆盖 `src-tauri/target/release/resona.exe`：普通 Cargo 构建不会注入 Tauri 生产协议，生成的 WebView 会错误访问 `devUrl`。`release:windows` 在构建后先确认 Vite 开发服务器未运行，再启动可执行文件，等待可见主窗口达到有效尺寸并经过 UI settling interval，随后自动关闭测试实例。需要原生视觉证据时可直接运行 `scripts/verify-release-webview.ps1 -CapturePath <png>`；脚本会按进程枚举真实有标题主窗口，并在 Per-Monitor v2 DPI 坐标系抓取窗口。
 
-`scripts/prepare-ffmpeg-sidecars.ps1` 固定下载 FFmpeg 8.1.2 essentials archive，并分别校验归档、ffmpeg 和 ffprobe 的 SHA-256。下载文件只写入已忽略的 `src-tauri/binaries/*.exe`；修改版本、来源或任一哈希前必须重新审查许可证、构建选项和转换回归。自动化构建应调用 `npm run tauri -- build` 使用同一准备路径，不依赖仓库内二进制。
+`scripts/prepare-ffmpeg-test-tools.ps1` 只服务于被忽略的真实转换矩阵测试，固定从 GitHub Release 下载 FFmpeg 8.1.2 essentials archive，并分别校验归档、ffmpeg 和 ffprobe 的 SHA-256。文件只写入已忽略的 `src-tauri/binaries/*.exe`，不会进入安装包。运行时下载逻辑位于 `ffmpeg_dependency.rs`，使用同一 GitHub Release URL 和哈希、流式进度、取消、安全解压与同卷原子启用；修改版本、来源或任一哈希前必须同时重新审查许可证、构建选项、下载失败边界和转换回归。
 
-0.1.0 功能开发完成前不维护 GitHub Actions；当前由本地自动检查和阶段验收提供反馈。CI、分支保护和 Action 依赖更新策略在 0.0.20 发布加固阶段按实际发布渠道建立，启用时必须重新核对所有 Action 的最新稳定版本、运行时和权限，并优先固定完整 commit SHA。
+0.1.0 功能开发已经冻结；当前由本地自动检查和阶段验收提供反馈。CI、分支保护和 Action 依赖更新策略在 0.1.0-rc.1 发布加固阶段按实际发布渠道建立，启用时必须重新核对所有 Action 的最新稳定版本、运行时和权限，并优先固定完整 commit SHA。
 
 涉及前端的改动至少要在独立浏览器中检查一次页面加载、控制台错误和主要布局状态。浏览器预览不替代 Tauri command、窗口、媒体键、透明穿透等原生验收，但必须先拦截白屏、根组件崩溃、资源路径和明显布局问题。
 
@@ -95,7 +96,7 @@ Tauri 原生拖放处理器与 WebView2 HTML5 drag-and-drop 在 Windows 上存�
 - 首先使用标准库、现有依赖或外部工具已提供的能力。
 - 不同时引入两套完整 UI 组件库、状态库或数据库层。
 - adapter 解决真实的变化点；禁止为“以后可能替换”预建空泛接口。
-- FFmpeg sidecar 版本固定并记录来源、构建选项、许可证和校验值。
+- FFmpeg 运行时依赖版本固定并记录来源、构建选项、许可证和校验值；安装包不得包含二进制，开发测试工具也不得误入 bundle。
 - Rodio、CPAL、Symphonia 使用稳定发布版和最小 feature 集；Cargo.lock 记录实际版本。
 - 不因上游发布新版本自动升级音频栈，升级必须通过完整播放 fixture 回归。
 - 外部参考快照放在 `docs/vendor`，必须带来源与获取日期。

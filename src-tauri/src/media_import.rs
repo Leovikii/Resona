@@ -660,6 +660,7 @@ fn sequence_mismatch() -> PlaybackFailure {
 #[cfg(test)]
 mod tests {
     use std::fs::{self, File};
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
@@ -929,11 +930,16 @@ mod tests {
     }
 
     fn test_directory() -> PathBuf {
+        static TEST_DIRECTORY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock before epoch")
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("resona-default-list-test-{nonce}"));
+        let sequence = TEST_DIRECTORY_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "resona-default-list-test-{}-{nonce}-{sequence}",
+            std::process::id()
+        ));
         fs::create_dir_all(&path).expect("create test directory");
         path
     }

@@ -77,7 +77,7 @@ pub fn persist_geometry<R: Runtime>(app: &AppHandle<R>) {
         width: size.width.clamp(MIN_WIDTH, MAX_WIDTH),
         height: size.height.clamp(MIN_HEIGHT, MAX_HEIGHT),
     };
-    let Ok(data_dir) = app.path().app_data_dir() else {
+    let Ok(data_dir) = app.path().app_local_data_dir() else {
         return;
     };
     if let Err(error) = std::fs::create_dir_all(&data_dir) {
@@ -95,7 +95,7 @@ pub fn persist_geometry<R: Runtime>(app: &AppHandle<R>) {
 }
 
 fn restore_geometry<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
-    let Ok(data_dir) = app.path().app_data_dir() else {
+    let Ok(data_dir) = app.path().app_local_data_dir() else {
         return;
     };
     let Ok(bytes) = std::fs::read(data_dir.join(GEOMETRY_FILE)) else {

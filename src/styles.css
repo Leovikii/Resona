@@ -1503,6 +1503,10 @@ h2.page-heading {
   justify-self: start;
 }
 
+.about-copyright {
+  margin-top: 4px;
+}
+
 .desktop-lyrics-font-input {
   width: 112px;
 }

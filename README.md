@@ -6,11 +6,10 @@ Resona 是一个从零构建的本地桌面高解析度音频播放器。当前�
 
 - 桌面框架：Tauri 2
 - 前端：React、TypeScript、Vite、Mantine
-- 状态与长列表：Zustand、TanStack Virtual
 - 播放核心：Rodio + CPAL + Symphonia
 - 本地数据：SQLite
 - 元数据：lofty-rs
-- 格式转换：FFmpeg sidecar
+- 格式转换：按需下载并校验的 FFmpeg 工具，不进入安装包
 
 技术选择以最低总开发成本、成熟实现优先、离线可用和可维护性为准。详细约束见[开发准则](docs/DEVELOPMENT.md)。
 
@@ -18,11 +17,12 @@ Resona 是一个从零构建的本地桌面高解析度音频播放器。当前�
 
 ```powershell
 npm ci
-npm run prepare:sidecars
 npm run tauri dev
 ```
 
-FFmpeg/ffprobe 使用固定版本和 SHA-256 校验，构建前按需下载，不提交约 194 MiB 的本地 sidecar。版本、来源和校验值见 [sidecar 说明](src-tauri/binaries/README.md)。
+普通开发和发行构建不下载 FFmpeg/ffprobe。应用只在用户从工具页明确操作后，从固定 GitHub Release 资源下载并校验依赖；真实转换矩阵测试可单独执行 `npm run prepare:test-tools`。版本、来源和校验值见 [测试工具说明](src-tauri/binaries/README.md)。
+
+Windows 安装包通过 `npm run release:windows` 生成，文件名包含版本、平台和架构。
 
 ## 文档
 
@@ -36,9 +36,7 @@ FFmpeg/ffprobe 使用固定版本和 SHA-256 校验，构建前按需下载，�
 
 ## 当前状态
 
-`0.0.1` 最小技术验证已完成自动化检查与 Windows 实机试听：Tauri 窗口可以选择 WAV/FLAC，Rust 后端通过 Rodio 在独立线程中播放、暂停、继续和停止。
-
-`0.0.2` 播放能力闭环已完成自动验证和 Windows 实机验收，支持 MP3、WAV 16/24/32-bit 与 FLAC 16/24-bit。32-bit FLAC 明确不支持；导入时会安全进入可恢复的解码失败状态。验证矩阵见 [docs/STATUS.md](docs/STATUS.md) 与 [0.0.2 记录](docs/releases/0.0.2.md)。
+`0.0.19` 已完成 Windows SMTC、任务栏媒体控件与进度、托盘和三态关闭行为、NSIS 当前用户安装器、文件关联、Local AppData 迁移及按需 FFmpeg 依赖，并通过项目所有者安装版验收。当前进入 `0.1.0-rc.1` 发布候选收尾，只处理更新器、签名/发布链、诊断与性能审计、遗留原生矩阵和发行阻塞缺陷。完整进度见 [开发状态台账](docs/STATUS.md) 与 [0.1.0-rc.1 计划](docs/plans/0.1.0-rc.1.md)。
 
 ## 许可证
 

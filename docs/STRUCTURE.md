@@ -77,7 +77,9 @@ tests/
 scripts/
 ├─ generate-audio-fixtures.ps1
 ├─ generate-license-report.mjs
-├─ prepare-ffmpeg-sidecars.ps1 # 下载并校验不进入 Git 的固定 FFmpeg sidecar
+├─ prepare-ffmpeg-test-tools.ps1 # 仅为真实转换回归准备被忽略的固定 FFmpeg 测试工具
+├─ finalize-windows-artifacts.ps1 # 生成带平台/架构的 NSIS 产物名与 SHA-256 元数据
+├─ verify-windows-distribution.ps1 # 审计版本、身份、关联、无 bundled FFmpeg 与安装器元数据
 └─ verify-release-webview.ps1 # 验证 Release 主窗口稳定可见；可选 DPI-aware 原生截图
 ```
 
@@ -112,7 +114,7 @@ Resona/
 │  │  ├─ adapters/             # Rodio、FFmpeg、SQLite、文件系统
 │  │  └─ platform/             # Windows SMTC/桌面歌词；通用辅助窗口在 app 层组装
 │  ├─ migrations/              # SQLite migrations
-│  ├─ binaries/                # 按 target 分发的 FFmpeg sidecar
+│  ├─ binaries/                # 已忽略的 FFmpeg 真实转换测试工具；不进入 bundle
 │  ├─ capabilities/            # Tauri capability 配置
 │  └─ tests/                   # Rust 跨模块集成测试
 ├─ tests/

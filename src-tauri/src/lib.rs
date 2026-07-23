@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+mod application_lifetime;
 mod commands;
 mod compression;
 mod compression_window;
+mod ffmpeg_dependency;
 mod filesystem;
 mod lyrics;
 mod main_window;
@@ -19,29 +21,34 @@ use std::sync::Arc;
 use tauri::webview::PageLoadEvent;
 use tauri::{Emitter, Manager, WindowEvent};
 
+use application_lifetime::{ApplicationLifetimeService, CloseDisposition};
 use commands::{
     add_default_playlist_items, add_playlist_items, cancel_audio_compression,
-    cancel_audio_compression_scan, clear_audio_compression_inputs, clear_default_playlist,
-    clear_playlist_items, create_playlist, delete_playlist, desktop_lyrics_window_ready,
-    fit_desktop_lyrics_window, get_audio_compression_scan_state, get_audio_compression_state,
-    get_default_playlist, get_desktop_lyrics_window_state, get_main_window_state,
-    get_now_playing_state, get_playback_state, get_track_details, hide_desktop_lyrics_window,
-    list_playlist_items, list_playlists, list_recent_play, lock_desktop_lyrics_window,
-    main_window_ready, move_default_playlist_item, move_playlist, move_playlist_item,
-    next_playback, open_main_settings, open_media_context, pause_playback,
+    cancel_audio_compression_scan, cancel_ffmpeg_dependency_install,
+    clear_audio_compression_inputs, clear_default_playlist, clear_playlist_items,
+    confirm_application_exit, create_playlist, delete_playlist, desktop_lyrics_window_ready,
+    fit_desktop_lyrics_window, get_application_lifetime_state, get_audio_compression_scan_state,
+    get_audio_compression_state, get_default_playlist, get_desktop_lyrics_window_state,
+    get_ffmpeg_dependency_state, get_main_window_state, get_now_playing_state, get_playback_state,
+    get_track_details, hide_desktop_lyrics_window, install_ffmpeg_dependency, list_playlist_items,
+    list_playlists, list_recent_play, lock_desktop_lyrics_window, main_window_ready,
+    move_default_playlist_item, move_playlist, move_playlist_item, next_playback,
+    open_main_settings, open_media_context, open_project_page, pause_playback,
     play_default_playlist_item, play_queue_item, play_user_playlist_item, previous_playback,
     refresh_output_devices, remove_audio_compression_inputs, remove_default_playlist_items,
-    remove_playlist_item, remove_playlist_items, rename_playlist, resume_playback,
-    scan_audio_compression_inputs, seek_playback, select_output_device,
-    set_main_window_layout_mode, set_playback_mode, set_playback_volume,
+    remove_playlist_item, remove_playlist_items, rename_playlist, resolve_main_window_close,
+    resume_playback, scan_audio_compression_inputs, seek_playback, select_output_device,
+    set_close_behavior, set_main_window_layout_mode, set_playback_mode, set_playback_volume,
     show_audio_compression_window, show_desktop_lyrics_window, start_audio_compression,
     start_desktop_lyrics_drag, sync_window_theme, unlock_desktop_lyrics_window,
 };
 use compression::CompressionService;
+use ffmpeg_dependency::FfmpegDependencyService;
 use lyrics::LyricsService;
 use media_import::MediaImportService;
 use persistence::{PersistenceService, PlaybackSessionRecord};
 use platform::desktop_lyrics::DesktopLyricsWindowService;
+use platform::playback_projection::NativePlaybackProjection;
 use playback::{PlaybackEngine, PlaybackMode, RestoredPlaybackSession, RodioPlaybackEngine};
 
 pub fn run() {
@@ -51,16 +58,14 @@ pub fn run() {
     let playback_for_restore = Arc::clone(&playback_engine);
     let lyrics_service = Arc::new(LyricsService::default());
     let desktop_lyrics_service = Arc::new(DesktopLyricsWindowService::default());
-    let compression_service = Arc::new(CompressionService::default());
     #[cfg(target_os = "windows")]
     let playback_for_smtc = Arc::clone(&playback_engine);
     #[cfg(target_os = "windows")]
     let smtc_attempted = Arc::new(AtomicBool::new(false));
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
+            if let Err(error) = application_lifetime::show_main_window(app) {
+                eprintln!("second instance main window restore failed: {}", error.message);
             }
             if let Some(path) =
                 media_import::external_media_path(argv, std::path::Path::new(&cwd))
@@ -69,6 +74,7 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .on_page_load(|webview, payload| {
             if webview.label() == compression_window::LABEL
                 && payload.event() == PageLoadEvent::Finished {
@@ -98,13 +104,22 @@ pub fn run() {
         .manage(media_import_service)
         .manage(lyrics_service)
         .manage(desktop_lyrics_service)
-        .manage(compression_service)
         .setup(move |app| {
-            let data_dir = app
+            let legacy_data_dir = app
                 .path()
                 .app_data_dir()
                 .map_err(|error| std::io::Error::other(format!("无法定位应用数据目录：{error}")))?;
+            let data_dir = app
+                .path()
+                .app_local_data_dir()
+                .map_err(|error| std::io::Error::other(format!("无法定位本地应用数据目录：{error}")))?;
+            migrate_legacy_data_directory(&legacy_data_dir, &data_dir)?;
             std::fs::create_dir_all(&data_dir)?;
+            let ffmpeg_dependency = FfmpegDependencyService::new(&data_dir);
+            let (ffmpeg, ffprobe) = ffmpeg_dependency.binary_paths();
+            app.manage(Arc::new(CompressionService::with_binaries(ffmpeg, ffprobe)));
+            app.manage(ffmpeg_dependency);
+            app.manage(Arc::new(ApplicationLifetimeService::load(&data_dir)));
             let database = PersistenceService::open(&data_dir.join("resona.sqlite3"))
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
             restore_playback_preferences(&playback_for_restore, &database);
@@ -119,6 +134,19 @@ pub fn run() {
                 }
             }
             app.manage(main_window);
+            let native_projection = Arc::new(
+                NativePlaybackProjection::start(Arc::clone(
+                    app.state::<Arc<RodioPlaybackEngine>>().inner(),
+                ))
+                .map_err(std::io::Error::other)?,
+            );
+            let tray = platform::tray::TrayService::create(
+                app.handle(),
+                native_projection.subscribe(),
+            )
+            .map_err(|error| std::io::Error::other(format!("无法创建系统托盘：{error}")))?;
+            app.manage(native_projection);
+            app.manage(tray);
             let arguments = std::env::args().collect::<Vec<_>>();
             let current_directory = std::env::current_dir().unwrap_or_default();
             if let Some(path) =
@@ -148,6 +176,11 @@ pub fn run() {
             seek_playback,
             set_playback_volume,
             get_playback_state,
+            get_application_lifetime_state,
+            set_close_behavior,
+            resolve_main_window_close,
+            confirm_application_exit,
+            open_project_page,
             get_main_window_state,
             set_main_window_layout_mode,
             main_window_ready,
@@ -156,6 +189,9 @@ pub fn run() {
             get_track_details,
             start_audio_compression,
             get_audio_compression_state,
+            get_ffmpeg_dependency_state,
+            install_ffmpeg_dependency,
+            cancel_ffmpeg_dependency_install,
             cancel_audio_compression,
             scan_audio_compression_inputs,
             remove_audio_compression_inputs,
@@ -190,25 +226,27 @@ pub fn run() {
         .run(move |app_handle, event| {
             if let tauri::RunEvent::WindowEvent {
                 label,
-                event: WindowEvent::CloseRequested { .. },
+                event: WindowEvent::CloseRequested { api, .. },
                 ..
             } = &event
             {
                 if label == compression_window::LABEL {
                     compression_window::persist_geometry(app_handle);
                 } else if label == "main" {
+                    api.prevent_close();
                     app_handle
                         .state::<Arc<main_window::MainWindowService>>()
                         .capture(app_handle);
-                    compression_window::persist_geometry(app_handle);
-                    app_handle
-                        .state::<Arc<DesktopLyricsWindowService>>()
-                        .persist_geometry(app_handle);
-                    app_handle
-                        .state::<Arc<CompressionService>>()
-                        .shutdown();
-                    persist_playback_session(app_handle);
-                    app_handle.exit(0);
+                    match app_handle
+                        .state::<Arc<ApplicationLifetimeService>>()
+                        .handle_close(app_handle)
+                    {
+                        Ok(CloseDisposition::Exit) => request_application_exit(app_handle),
+                        Ok(CloseDisposition::KeepRunning) => {}
+                        Err(error) => {
+                            eprintln!("main window close handling failed: {}", error.message);
+                        }
+                    }
                     return;
                 }
             }
@@ -254,9 +292,22 @@ pub fn run() {
                                     std::thread::sleep(std::time::Duration::from_millis(100));
                                     continue;
                                 };
+                                let resource_dir = app_handle.path().resource_dir();
+                                let logo_path = resource_dir
+                                    .as_ref()
+                                    .map(|directory| directory.join("icons").join("128x128.png"))
+                                    .unwrap_or_else(|_| {
+                                        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                                            .join("icons")
+                                            .join("128x128.png")
+                                    });
                                 match platform::media_session::MediaSessionAdapter::start(
                                     hwnd.0 as isize,
-                                    playback,
+                                    Arc::clone(&playback),
+                                    &logo_path,
+                                    app_handle
+                                        .state::<Arc<NativePlaybackProjection>>()
+                                        .subscribe(),
                                 ) {
                                     Ok(adapter) => {
                                         app_handle.manage(adapter);
@@ -264,6 +315,34 @@ pub fn run() {
                                     }
                                     Err(error) => {
                                         eprintln!("Windows SMTC unavailable; continuing without it: {error}");
+                                    }
+                                }
+                                match resource_dir {
+                                    Ok(resource_dir) => {
+                                        match platform::taskbar::TaskbarAdapter::start(
+                                            &app_handle,
+                                            hwnd.0 as isize,
+                                            playback,
+                                            resource_dir,
+                                            app_handle
+                                                .state::<Arc<NativePlaybackProjection>>()
+                                                .subscribe(),
+                                        ) {
+                                            Ok(adapter) => {
+                                                app_handle.manage(adapter);
+                                                eprintln!("Windows taskbar media controls initialized");
+                                            }
+                                            Err(error) => {
+                                                eprintln!(
+                                                    "Windows taskbar media controls unavailable; continuing without them: {error}"
+                                                );
+                                            }
+                                        }
+                                    }
+                                    Err(error) => {
+                                        eprintln!(
+                                            "Windows taskbar resources unavailable; continuing without media controls: {error}"
+                                        );
                                     }
                                 }
                                 return;
@@ -274,6 +353,37 @@ pub fn run() {
                     });
             }
         });
+}
+
+pub(crate) fn request_application_exit(app: &tauri::AppHandle) {
+    if app.state::<Arc<CompressionService>>().has_active_work() {
+        if let Err(error) = application_lifetime::show_main_window(app) {
+            eprintln!(
+                "main window restore for active compression confirmation failed: {}",
+                error.message
+            );
+        }
+        if let Err(error) = app.emit_to("main", "resona://exit-confirmation-requested", ()) {
+            eprintln!("active compression exit confirmation event failed: {error}");
+        }
+        return;
+    }
+    perform_application_exit(app);
+}
+
+pub(crate) fn perform_application_exit(app: &tauri::AppHandle) {
+    let lifetime = app.state::<Arc<ApplicationLifetimeService>>();
+    if !lifetime.begin_exit() {
+        return;
+    }
+    app.state::<Arc<main_window::MainWindowService>>()
+        .capture(app);
+    compression_window::persist_geometry(app);
+    app.state::<Arc<DesktopLyricsWindowService>>()
+        .persist_geometry(app);
+    app.state::<Arc<CompressionService>>().shutdown();
+    persist_playback_session(app);
+    app.exit(0);
 }
 
 fn restore_playback_preferences(engine: &Arc<RodioPlaybackEngine>, database: &PersistenceService) {
@@ -302,6 +412,48 @@ fn restore_playback_preferences(engine: &Arc<RodioPlaybackEngine>, database: &Pe
             let _ = engine.select_output_device(None);
         }
     }
+}
+
+fn migrate_legacy_data_directory(
+    legacy_data_dir: &std::path::Path,
+    local_data_dir: &std::path::Path,
+) -> std::io::Result<()> {
+    if legacy_data_dir == local_data_dir || !legacy_data_dir.is_dir() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(local_data_dir)?;
+    const APP_OWNED_FILES: &[&str] = &[
+        "resona.sqlite3",
+        "resona.sqlite3-wal",
+        "resona.sqlite3-shm",
+        "main-window.json",
+        "audio-compression-window.json",
+        "desktop-lyrics-window.json",
+        "application-lifetime.json",
+    ];
+    for name in APP_OWNED_FILES {
+        let source = legacy_data_dir.join(name);
+        let target = local_data_dir.join(name);
+        if !source.is_file() || target.exists() {
+            continue;
+        }
+        if let Err(rename_error) = std::fs::rename(&source, &target) {
+            std::fs::copy(&source, &target).map_err(|copy_error| {
+                std::io::Error::other(format!(
+                    "failed to migrate {} from roaming to local app data (rename: {rename_error}; copy: {copy_error})",
+                    source.display()
+                ))
+            })?;
+            std::fs::remove_file(&source)?;
+        }
+    }
+    if legacy_data_dir
+        .read_dir()
+        .is_ok_and(|mut entries| entries.next().is_none())
+    {
+        let _ = std::fs::remove_dir(legacy_data_dir);
+    }
+    Ok(())
 }
 
 fn persist_playback_session(app: &tauri::AppHandle) {
@@ -363,4 +515,43 @@ fn dispatch_external_media(app: tauri::AppHandle, path: std::path::PathBuf) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::migrate_legacy_data_directory;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn legacy_roaming_data_moves_to_local_without_overwriting_newer_state() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "resona-data-migration-{}-{unique}",
+            std::process::id()
+        ));
+        let roaming = root.join("roaming");
+        let local = root.join("local");
+        fs::create_dir_all(&roaming).expect("roaming directory");
+        fs::create_dir_all(&local).expect("local directory");
+        fs::write(roaming.join("resona.sqlite3"), b"legacy").expect("legacy database");
+        fs::write(roaming.join("main-window.json"), b"legacy-window").expect("legacy window");
+        fs::write(local.join("main-window.json"), b"local-window").expect("local window");
+
+        migrate_legacy_data_directory(&roaming, &local).expect("migration");
+
+        assert_eq!(
+            fs::read(local.join("resona.sqlite3")).expect("migrated database"),
+            b"legacy"
+        );
+        assert_eq!(
+            fs::read(local.join("main-window.json")).expect("preserved local window"),
+            b"local-window"
+        );
+        assert!(roaming.join("main-window.json").is_file());
+        fs::remove_dir_all(root).expect("cleanup");
+    }
 }

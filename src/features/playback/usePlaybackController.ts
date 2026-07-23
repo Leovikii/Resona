@@ -72,6 +72,7 @@ export function usePlaybackController() {
   const snapshotRef = useRef(snapshot);
   const defaultPlaylistRef = useRef(defaultPlaylist);
   const lyricsRevisionRef = useRef(lyrics.revision);
+  const playRequestIdRef = useRef(0);
 
   useEffect(() => {
     lyricsRevisionRef.current = lyrics.revision;
@@ -251,9 +252,10 @@ export function usePlaybackController() {
   }, [addDefaultItems, preview]);
 
   const playDefaultItem = useCallback(async (itemId: number) => {
-    setPending(true);
+    const requestId = ++playRequestIdRef.current;
     try {
       if (preview) {
+        await waitForPreviewPlayDelay();
         const current = defaultPlaylistRef.current;
         const selectedIndex = current.items.findIndex((item) => item.id === itemId);
         const playback = replacePreviewAndPlay(
@@ -271,14 +273,14 @@ export function usePlaybackController() {
       const result = await invokeTauri<OpenMediaResult>("play_default_playlist_item", {
         itemId,
       });
+      if (requestId !== playRequestIdRef.current) return result.playback;
       acceptOpenResult(result);
       return result.playback;
     } catch (error) {
+      if (requestId !== playRequestIdRef.current) return null;
       const failure = toPlaybackFailure(error);
       setSnapshot((current) => ({ ...current, error: failure }));
       return null;
-    } finally {
-      setPending(false);
     }
   }, [acceptOpenResult, preview]);
 
@@ -358,9 +360,10 @@ export function usePlaybackController() {
     itemId: number,
     previewItems: PlaylistItem[] = [],
   ) => {
-    setPending(true);
+    const requestId = ++playRequestIdRef.current;
     try {
       if (preview) {
+        await waitForPreviewPlayDelay();
         const selectedIndex = previewItems.findIndex((item) => item.id === itemId);
         const playback = selectedIndex >= 0
           ? replacePreviewAndPlay(
@@ -380,14 +383,14 @@ export function usePlaybackController() {
         playlistId,
         itemId,
       });
+      if (requestId !== playRequestIdRef.current) return result.playback;
       acceptPlaylistPlayback(result);
       return result.playback;
     } catch (error) {
+      if (requestId !== playRequestIdRef.current) return null;
       const failure = toPlaybackFailure(error);
       setSnapshot((current) => ({ ...current, error: failure }));
       return null;
-    } finally {
-      setPending(false);
     }
   }, [acceptPlaylistPlayback, preview]);
 
@@ -434,6 +437,13 @@ export function usePlaybackController() {
     selectedPath,
     snapshot,
   };
+}
+
+async function waitForPreviewPlayDelay() {
+  const value = Number(new URLSearchParams(window.location.search).get("playDelay"));
+  if (Number.isFinite(value) && value > 0) {
+    await new Promise((resolve) => window.setTimeout(resolve, Math.min(value, 2_000)));
+  }
 }
 
 interface NowPlayingSnapshot {

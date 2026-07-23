@@ -251,7 +251,7 @@ impl DesktopLyricsWindowService {
             width: size.width,
             height: size.height,
         };
-        let Ok(data_dir) = app.path().app_data_dir() else {
+        let Ok(data_dir) = app.path().app_local_data_dir() else {
             return;
         };
         if let Err(error) = std::fs::create_dir_all(&data_dir).and_then(|_| {
@@ -433,7 +433,7 @@ fn create_windows(
 }
 
 fn restore_geometry(app: &AppHandle, window: &WebviewWindow, height: f64) {
-    let Ok(data_dir) = app.path().app_data_dir() else {
+    let Ok(data_dir) = app.path().app_local_data_dir() else {
         return;
     };
     let Ok(bytes) = std::fs::read(data_dir.join(GEOMETRY_FILE)) else {

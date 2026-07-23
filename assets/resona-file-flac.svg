@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
   <title id="title">Resona FLAC audio file</title>
-  <desc id="desc">Resona violet R mark with a FLAC format label.</desc>
+  <desc id="desc">Resona violet R mark.</desc>
   <defs>
     <g id="r-letterform">
       <path d="M28 208V58l21-20 21 18v152l-21 18z"/>
@@ -9,5 +9,4 @@
   </defs>
   <use href="#r-letterform" fill="#17151c" transform="translate(64 -68) scale(2.5)"/>
   <use href="#r-letterform" fill="#845ef7" transform="translate(52 -82) scale(2.5)"/>
-  <text x="300" y="435" fill="#ffffff" stroke="#17151c" stroke-width="12" paint-order="stroke fill" stroke-linejoin="round" font-family="'Arial Black', 'Segoe UI', sans-serif" font-size="112" font-weight="900" text-anchor="middle" textLength="300" lengthAdjust="spacingAndGlyphs">FLAC</text>
 </svg>

@@ -1,7 +1,7 @@
 export const resources = {
   "zh-CN": {
     translation: {
-      app: { name: "Resona", version: "0.0.18" },
+      app: { name: "Resona", version: "0.0.19" },
       nav: {
         playlists: "播放列表",
         recent: "最近播放",
@@ -117,6 +117,18 @@ export const resources = {
       tools: {
         title: "工具",
         compression: "音频压缩",
+        downloadFfmpeg: "下载依赖",
+        retryFfmpeg: "重试下载",
+        ffmpegRequired: "需下载 FFmpeg",
+        ffmpegReady: "FFmpeg 已就绪 · {{size}}",
+        unknownSize: "未知大小",
+        ffmpegStatus: {
+          checking: "正在检查 FFmpeg 依赖",
+          downloading: "正在下载 {{downloaded}} / {{total}}",
+          installing: "正在校验并安装",
+          cancelling: "正在取消",
+          failed: "FFmpeg 依赖准备失败",
+        },
         tagEditor: "标签编辑",
         afterFirstRelease: "首个正式版后实现",
       },
@@ -186,6 +198,12 @@ export const resources = {
         windowLayout: "窗口布局",
         wideLayout: "宽屏",
         compactLayout: "窄屏",
+        closeBehavior: "关闭主窗口时",
+        closeBehaviors: {
+          ask: "每次询问",
+          hide_to_tray: "隐藏到托盘",
+          exit: "退出应用",
+        },
         languageSystem: "跟随系统",
         chinese: "中文",
         english: "English",
@@ -194,6 +212,22 @@ export const resources = {
         followDefault: "跟随系统默认",
         outputClosed: "未打开输出设备",
         activeOutput: "当前：{{name}}",
+        about: "关于",
+        version: "当前版本",
+        project: "项目",
+        checkUpdates: "检查更新",
+        repository: "代码仓库",
+        copyright: "Copyright © 2026 Viki · GPL-3.0-only",
+      },
+      lifetime: {
+        closeTitle: "关闭 Resona？",
+        closeBody: "你可以退出应用，也可以隐藏到系统托盘并继续播放。",
+        remember: "不再询问，将本次选择设为默认",
+        hideToTray: "隐藏到托盘",
+        exit: "退出应用",
+        activeWorkTitle: "压缩任务仍在进行",
+        activeWorkBody: "退出会取消正在进行的扫描或音频压缩。已完成并提交的文件不会回滚。",
+        exitAnyway: "取消任务并退出",
       },
       import: {
         rejected: "{{count}} 个项目未能加入",
@@ -221,7 +255,7 @@ export const resources = {
   },
   en: {
     translation: {
-      app: { name: "Resona", version: "0.0.18" },
+      app: { name: "Resona", version: "0.0.19" },
       nav: {
         playlists: "Playlists",
         recent: "Recently played",
@@ -337,6 +371,18 @@ export const resources = {
       tools: {
         title: "Tools",
         compression: "Audio compression",
+        downloadFfmpeg: "Download dependency",
+        retryFfmpeg: "Retry download",
+        ffmpegRequired: "FFmpeg download required",
+        ffmpegReady: "FFmpeg ready · {{size}}",
+        unknownSize: "unknown size",
+        ffmpegStatus: {
+          checking: "Checking the FFmpeg dependency",
+          downloading: "Downloading {{downloaded}} / {{total}}",
+          installing: "Verifying and installing",
+          cancelling: "Cancelling",
+          failed: "FFmpeg dependency setup failed",
+        },
         tagEditor: "Tag editor",
         afterFirstRelease: "Planned after the first release",
       },
@@ -406,6 +452,12 @@ export const resources = {
         windowLayout: "Window layout",
         wideLayout: "Wide",
         compactLayout: "Compact",
+        closeBehavior: "When closing the main window",
+        closeBehaviors: {
+          ask: "Ask every time",
+          hide_to_tray: "Hide to tray",
+          exit: "Exit the app",
+        },
         languageSystem: "System",
         chinese: "中文",
         english: "English",
@@ -414,6 +466,22 @@ export const resources = {
         followDefault: "Follow system default",
         outputClosed: "Output device closed",
         activeOutput: "Active: {{name}}",
+        about: "About",
+        version: "Current version",
+        project: "Project",
+        checkUpdates: "Check for updates",
+        repository: "Repository",
+        copyright: "Copyright © 2026 Viki · GPL-3.0-only",
+      },
+      lifetime: {
+        closeTitle: "Close Resona?",
+        closeBody: "Exit the app, or hide it in the system tray and keep playback running.",
+        remember: "Don't ask again; make this choice the default",
+        hideToTray: "Hide to tray",
+        exit: "Exit app",
+        activeWorkTitle: "Compression is still active",
+        activeWorkBody: "Exiting cancels the active scan or audio compression. Files already committed will not be rolled back.",
+        exitAnyway: "Cancel task and exit",
       },
       import: {
         rejected: "{{count}} items could not be added",

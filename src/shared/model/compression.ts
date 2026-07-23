@@ -1,4 +1,29 @@
 export type CompressionPreset = "fast" | "balanced" | "smallest";
+export type FfmpegDependencyStatus =
+  | "checking"
+  | "missing"
+  | "downloading"
+  | "installing"
+  | "cancelling"
+  | "cancelled"
+  | "ready"
+  | "failed";
+
+export interface FfmpegDependencyFailure {
+  code: string;
+  message: string;
+}
+
+export interface FfmpegDependencySnapshot {
+  status: FfmpegDependencyStatus;
+  version: string;
+  sourceUrl: string;
+  license: string;
+  downloadedBytes: number;
+  totalBytes: number | null;
+  installedBytes: number;
+  error: FfmpegDependencyFailure | null;
+}
 export type CompressionStatus = "idle" | "running" | "cancelling" | "completed" | "completed_with_errors" | "cancelled";
 
 export interface CompressionItem {
@@ -54,6 +79,17 @@ export const emptyCompressionSnapshot: CompressionSnapshot = {
   total: 0,
   currentProgress: 0,
   items: [],
+};
+
+export const checkingFfmpegDependency: FfmpegDependencySnapshot = {
+  status: "checking",
+  version: "8.1.2",
+  sourceUrl: "https://github.com/GyanD/codexffmpeg/releases/download/8.1.2/ffmpeg-8.1.2-essentials_build.zip",
+  license: "GPL-3.0-or-later",
+  downloadedBytes: 0,
+  totalBytes: null,
+  installedBytes: 0,
+  error: null,
 };
 
 export const emptyCompressionScanSnapshot: CompressionScanSnapshot = {

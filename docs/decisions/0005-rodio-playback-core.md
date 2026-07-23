@@ -22,7 +22,7 @@ Tauri 后端使用 Rust，Rodio 与其底层 CPAL、Symphonia 可以在同一类
 - `mp4` 只有通过 P1 的 AAC/M4A 可行性验证后才进入发布配置。
 - 播放引擎运行在专用 Rust actor 线程，通过 typed channel 接收命令并发布领域事件。
 - 产品中不实现 mpv fallback 或第二套并行播放引擎。
-- FFmpeg sidecar 仍只承担格式转换，不参与日常播放。
+- FFmpeg 仍只承担格式转换，不参与日常播放；其 0.0.16 随包 sidecar 分发方式已由 [ADR 0024](0024-windows-tray-distribution-and-update.md) 的按需下载依赖替代。
 
 ## 理由
 

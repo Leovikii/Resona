@@ -18,3 +18,11 @@ export function directoryOf(path: string) {
   if (separator === 2 && path[1] === ":") return path.slice(0, 3);
   return separator > 0 ? path.slice(0, separator) : path.slice(0, 1);
 }
+
+export function formatBytes(bytes: number | null | undefined) {
+  const value = Math.max(0, bytes ?? 0);
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MiB`;
+  return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GiB`;
+}

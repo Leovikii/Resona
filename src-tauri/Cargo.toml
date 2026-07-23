@@ -1,6 +1,6 @@
 [package]
 name = "resona"
-version = "0.0.18"
+version = "0.0.19"
 description = "A local desktop audio player"
 authors = ["Viki"]
 edition = "2021"
@@ -27,11 +27,15 @@ encoding_rs = "0.8.35"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 souvlaki = { version = "0.8.3", default-features = false }
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-dialog = "2"
+tauri-plugin-opener = "=2.5.4"
 tauri-plugin-single-instance = "2"
 thiserror = "2"
+sha2 = "0.11.0"
+ureq = { version = "3.3.0", features = ["win-system-proxy"] }
+zip = { version = "8.2.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.44", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_UI_Controls", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.44", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_UI_Controls", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 windows-version = "0.1.7"

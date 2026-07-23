@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use souvlaki::{
     MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig,
@@ -13,7 +13,7 @@ use souvlaki::{
 
 use crate::playback::{PlaybackEngine, PlaybackStatus, RodioPlaybackEngine};
 
-const STATE_POLL_INTERVAL: Duration = Duration::from_millis(500);
+const COMMAND_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const SEEK_STEP: Duration = Duration::from_secs(10);
 
 enum MediaSessionCommand {
@@ -27,13 +27,29 @@ pub struct MediaSessionAdapter {
 }
 
 impl MediaSessionAdapter {
-    pub fn start(hwnd: isize, engine: Arc<RodioPlaybackEngine>) -> Result<Self, String> {
+    pub fn start(
+        hwnd: isize,
+        engine: Arc<RodioPlaybackEngine>,
+        app_logo_path: &Path,
+        projection: Receiver<crate::playback::PlaybackSnapshot>,
+    ) -> Result<Self, String> {
         let (commands, receiver) = mpsc::channel();
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
         let callback_sender = commands.clone();
+        let app_logo_url = format!("file://{}", app_logo_path.display());
         let worker = thread::Builder::new()
             .name("resona-smtc".to_owned())
-            .spawn(move || run_session(hwnd, engine, receiver, ready_sender, callback_sender))
+            .spawn(move || {
+                run_session(
+                    hwnd,
+                    engine,
+                    receiver,
+                    ready_sender,
+                    callback_sender,
+                    app_logo_url,
+                    projection,
+                )
+            })
             .map_err(|error| format!("failed to start SMTC worker: {error}"))?;
 
         match ready_receiver.recv_timeout(Duration::from_secs(5)) {
@@ -71,6 +87,8 @@ fn run_session(
     receiver: Receiver<MediaSessionCommand>,
     ready_sender: SyncSender<Result<(), String>>,
     callback_sender: Sender<MediaSessionCommand>,
+    app_logo_url: String,
+    projection: Receiver<crate::playback::PlaybackSnapshot>,
 ) {
     let config = PlatformConfig {
         dbus_name: "io.github.vki.resona",
@@ -99,21 +117,17 @@ fn run_session(
         return;
     }
 
-    let mut last_sync = Instant::now() - STATE_POLL_INTERVAL;
     let mut last_metadata: Option<(String, Option<u64>)> = None;
     loop {
-        let timeout = STATE_POLL_INTERVAL.saturating_sub(last_sync.elapsed());
-        match receiver.recv_timeout(timeout) {
+        match receiver.recv_timeout(COMMAND_POLL_INTERVAL) {
             Ok(MediaSessionCommand::Event(event)) => {
                 handle_event(&engine, event);
-                sync_controls(&engine, &mut controls, &mut last_metadata);
-                last_sync = Instant::now();
             }
             Ok(MediaSessionCommand::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
-            Err(RecvTimeoutError::Timeout) => {
-                sync_controls(&engine, &mut controls, &mut last_metadata);
-                last_sync = Instant::now();
-            }
+            Err(RecvTimeoutError::Timeout) => {}
+        }
+        if let Some(snapshot) = projection.try_iter().last() {
+            sync_controls(&snapshot, &mut controls, &mut last_metadata, &app_logo_url);
         }
     }
 }
@@ -180,29 +194,38 @@ fn seek_by(
 }
 
 fn sync_controls(
-    engine: &RodioPlaybackEngine,
+    snapshot: &crate::playback::PlaybackSnapshot,
     controls: &mut MediaControls,
     last_metadata: &mut Option<(String, Option<u64>)>,
+    app_logo_url: &str,
 ) {
-    let Ok(snapshot) = engine.snapshot() else {
-        return;
-    };
-
-    let title = snapshot
-        .path
-        .as_deref()
-        .and_then(|path| Path::new(path).file_name())
-        .and_then(|name| name.to_str())
-        .unwrap_or_default()
-        .to_owned();
+    let title = current_track_title(snapshot);
     let metadata_key = (title.clone(), snapshot.duration_ms);
     if last_metadata.as_ref() != Some(&metadata_key) {
-        let _ = controls.set_metadata(MediaMetadata {
+        let metadata = MediaMetadata {
             title: (!title.is_empty()).then_some(title.as_str()),
+            cover_url: Some(app_logo_url),
             duration: snapshot.duration_ms.map(Duration::from_millis),
             ..MediaMetadata::default()
-        });
-        *last_metadata = Some(metadata_key);
+        };
+        match controls.set_metadata(metadata) {
+            Ok(()) => *last_metadata = Some(metadata_key),
+            Err(cover_error) => {
+                eprintln!(
+                    "Windows SMTC artwork update failed; retrying metadata without artwork: {cover_error}"
+                );
+                match controls.set_metadata(MediaMetadata {
+                    title: (!title.is_empty()).then_some(title.as_str()),
+                    duration: snapshot.duration_ms.map(Duration::from_millis),
+                    ..MediaMetadata::default()
+                }) {
+                    Ok(()) => *last_metadata = Some(metadata_key),
+                    Err(error) => {
+                        eprintln!("Windows SMTC metadata update failed: {error}");
+                    }
+                }
+            }
+        }
     }
 
     let playback = match snapshot.status {
@@ -219,9 +242,44 @@ fn sync_controls(
     let _ = controls.set_playback(playback);
 }
 
+fn current_track_title(snapshot: &crate::playback::PlaybackSnapshot) -> String {
+    snapshot
+        .current_item_id
+        .and_then(|id| snapshot.queue.iter().find(|item| item.id == id))
+        .map(|item| item.display_name.clone())
+        .or_else(|| {
+            snapshot
+                .path
+                .as_deref()
+                .and_then(|path| Path::new(path).file_name())
+                .and_then(|name| name.to_str())
+                .map(str::to_owned)
+        })
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn current_track_title_prefers_the_authoritative_queue_item() {
+        let snapshot = crate::playback::PlaybackSnapshot {
+            path: Some(r"C:\Music\fallback.flac".to_owned()),
+            current_item_id: Some(7),
+            queue: vec![crate::playback::QueueItemSnapshot {
+                id: 7,
+                path: r"C:\Music\fallback.flac".to_owned(),
+                display_name: "媒体标题.flac".to_owned(),
+                duration_ms: Some(1_000),
+                status: crate::playback::QueueItemStatus::Playing,
+                error: None,
+            }],
+            ..Default::default()
+        };
+
+        assert_eq!(current_track_title(&snapshot), "媒体标题.flac");
+    }
 
     #[test]
     #[ignore = "requires a system audio output device"]

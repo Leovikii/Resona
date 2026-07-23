@@ -158,6 +158,14 @@ impl Default for CompressionService {
 }
 
 impl CompressionService {
+    pub fn with_binaries(ffmpeg: PathBuf, ffprobe: PathBuf) -> Self {
+        Self {
+            ffmpeg,
+            ffprobe,
+            ..Self::default()
+        }
+    }
+
     pub fn shutdown(&self) {
         self.cancel();
         self.cancel_scan();
@@ -173,6 +181,14 @@ impl CompressionService {
             thread::sleep(Duration::from_millis(40));
         }
         eprintln!("compression shutdown timed out; process exit will release remaining resources");
+    }
+
+    pub fn has_active_work(&self) -> bool {
+        matches!(self.snapshot().status.as_str(), "running" | "cancelling")
+            || matches!(
+                self.scan_snapshot().status.as_str(),
+                "scanning" | "cancelling"
+            )
     }
 
     pub fn scan_snapshot(&self) -> CompressionScanSnapshot {
@@ -1283,7 +1299,27 @@ mod tests {
     }
 
     #[test]
-    fn bundled_ffmpeg_preserves_matrix_and_quantizes_32_bit_to_24() {
+    fn active_work_is_reported_for_exit_coordination() {
+        let service = CompressionService::default();
+        assert!(!service.has_active_work());
+        service
+            .snapshot
+            .lock()
+            .expect("compression snapshot")
+            .status = "running".to_owned();
+        assert!(service.has_active_work());
+        service
+            .snapshot
+            .lock()
+            .expect("compression snapshot")
+            .status = "completed".to_owned();
+        service.scan_snapshot.lock().expect("scan snapshot").status = "scanning".to_owned();
+        assert!(service.has_active_work());
+    }
+
+    #[test]
+    #[ignore = "requires pinned FFmpeg test tools prepared by npm run prepare:test-tools"]
+    fn pinned_ffmpeg_test_tools_preserve_matrix_and_quantize_32_bit_to_24() {
         let service = CompressionService::default();
         assert!(service.ffmpeg.is_file(), "bundled ffmpeg is required");
         assert!(service.ffprobe.is_file(), "bundled ffprobe is required");

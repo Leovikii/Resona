@@ -43,10 +43,10 @@ export interface CompressionPreferences {
 
 export const defaultDesktopLyricsPreferences: DesktopLyricsPreferences = {
   enabled: false,
-  fontSize: 28,
+  fontSize: 30,
   color: "#ffffff",
   textOpacity: 100,
-  backgroundOpacity: 0,
+  backgroundOpacity: 20,
 };
 
 const defaultCompressionPreferences: CompressionPreferences = {

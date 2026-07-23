@@ -4,12 +4,20 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_opener::OpenerExt;
 
+use crate::application_lifetime::{
+    ApplicationLifetimeFailure, ApplicationLifetimeService, ApplicationLifetimeSnapshot,
+    CloseBehavior, CloseDecision, CloseDisposition,
+};
 use crate::compression::{
     CompressionFailure, CompressionPreset, CompressionScanSnapshot, CompressionService,
     CompressionSnapshot,
 };
 use crate::compression_window;
+use crate::ffmpeg_dependency::{
+    FfmpegDependencyFailure, FfmpegDependencyService, FfmpegDependencySnapshot,
+};
 use crate::lyrics::{LyricsService, LyricsSnapshot};
 use crate::main_window::{
     MainWindowFailure, MainWindowLayoutMode, MainWindowService, MainWindowSnapshot,
@@ -32,12 +40,67 @@ use crate::playback::{
 use crate::playlists::PlaylistMutationResult;
 
 type ManagedPlaybackEngine = Arc<RodioPlaybackEngine>;
+type ManagedApplicationLifetimeService = Arc<ApplicationLifetimeService>;
 type ManagedPersistence = Arc<PersistenceService>;
 type ManagedMediaImportService = Arc<MediaImportService>;
 type ManagedLyricsService = Arc<LyricsService>;
 type ManagedDesktopLyricsWindowService = Arc<DesktopLyricsWindowService>;
 type ManagedCompressionService = Arc<CompressionService>;
+type ManagedFfmpegDependencyService = Arc<FfmpegDependencyService>;
 type ManagedMainWindowService = Arc<MainWindowService>;
+
+#[derive(Clone, Copy, Debug, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectPage {
+    Repository,
+    Releases,
+}
+
+#[tauri::command]
+pub async fn open_project_page(page: ProjectPage, app: AppHandle) -> Result<(), String> {
+    let url = match page {
+        ProjectPage::Repository => "https://github.com/Leovikii/Resona",
+        ProjectPage::Releases => "https://github.com/Leovikii/Resona/releases/latest",
+    };
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|error| format!("无法使用系统浏览器打开 {url}：{error}"))
+}
+
+#[tauri::command]
+pub async fn get_application_lifetime_state(
+    service: State<'_, ManagedApplicationLifetimeService>,
+) -> Result<ApplicationLifetimeSnapshot, ApplicationLifetimeFailure> {
+    service.snapshot()
+}
+
+#[tauri::command]
+pub async fn set_close_behavior(
+    behavior: CloseBehavior,
+    service: State<'_, ManagedApplicationLifetimeService>,
+) -> Result<ApplicationLifetimeSnapshot, ApplicationLifetimeFailure> {
+    service.set_close_behavior(behavior)
+}
+
+#[tauri::command]
+pub async fn resolve_main_window_close(
+    decision: CloseDecision,
+    remember: bool,
+    app: AppHandle,
+    service: State<'_, ManagedApplicationLifetimeService>,
+) -> Result<ApplicationLifetimeSnapshot, ApplicationLifetimeFailure> {
+    let disposition = service.resolve_close(&app, decision, remember)?;
+    let snapshot = service.snapshot()?;
+    if disposition == CloseDisposition::Exit {
+        crate::request_application_exit(&app);
+    }
+    Ok(snapshot)
+}
+
+#[tauri::command]
+pub async fn confirm_application_exit(app: AppHandle) {
+    crate::perform_application_exit(&app);
+}
 
 #[tauri::command]
 pub async fn get_main_window_state(
@@ -73,8 +136,35 @@ pub async fn sync_window_theme(
 }
 
 #[tauri::command]
-pub async fn show_audio_compression_window(app: AppHandle) -> Result<(), CompressionFailure> {
+pub async fn show_audio_compression_window(
+    app: AppHandle,
+    dependency: State<'_, ManagedFfmpegDependencyService>,
+) -> Result<(), CompressionFailure> {
+    dependency
+        .require_ready()
+        .map_err(compression_dependency_failure)?;
     compression_window::show(&app)
+}
+
+#[tauri::command]
+pub async fn get_ffmpeg_dependency_state(
+    dependency: State<'_, ManagedFfmpegDependencyService>,
+) -> Result<FfmpegDependencySnapshot, FfmpegDependencyFailure> {
+    Ok(dependency.snapshot())
+}
+
+#[tauri::command]
+pub async fn install_ffmpeg_dependency(
+    dependency: State<'_, ManagedFfmpegDependencyService>,
+) -> Result<FfmpegDependencySnapshot, FfmpegDependencyFailure> {
+    Arc::clone(dependency.inner()).install()
+}
+
+#[tauri::command]
+pub async fn cancel_ffmpeg_dependency_install(
+    dependency: State<'_, ManagedFfmpegDependencyService>,
+) -> Result<FfmpegDependencySnapshot, FfmpegDependencyFailure> {
+    Ok(dependency.cancel())
 }
 
 #[tauri::command]
@@ -121,13 +211,21 @@ pub async fn start_audio_compression(
     delete_source: bool,
     deletion_confirmed: bool,
     service: State<'_, ManagedCompressionService>,
+    dependency: State<'_, ManagedFfmpegDependencyService>,
 ) -> Result<CompressionSnapshot, CompressionFailure> {
+    dependency
+        .require_ready()
+        .map_err(compression_dependency_failure)?;
     Arc::clone(service.inner()).start(
         paths.into_iter().map(PathBuf::from).collect(),
         preset,
         delete_source,
         deletion_confirmed,
     )
+}
+
+fn compression_dependency_failure(failure: FfmpegDependencyFailure) -> CompressionFailure {
+    CompressionFailure::new(&failure.code, failure.message)
 }
 
 #[tauri::command]

@@ -5,7 +5,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$archiveUri = "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.1.2-essentials_build.zip"
+$archiveUri = "https://github.com/GyanD/codexffmpeg/releases/download/8.1.2/ffmpeg-8.1.2-essentials_build.zip"
 $archiveHash = "DB580001CAA24AC104C8CB856CD113A87B0A443F7BDF47D8C12B1D740584A2EC"
 $ffmpegHash = "1326DDE4C84FF1F96FE6B8916C5BED29E163E9B5DCCF995F6F3DB069D143EC5E"
 $ffprobeHash = "B49CCC7C6547B141AD5A2F6EC69CC04323D7133D7704D70B331B904C63EECB07"
@@ -33,7 +33,7 @@ if (-not $Force -and
     (Test-Path -LiteralPath $ffprobeTarget -PathType Leaf)) {
     Assert-FileHash -Path $ffmpegTarget -Expected $ffmpegHash -Label "ffmpeg"
     Assert-FileHash -Path $ffprobeTarget -Expected $ffprobeHash -Label "ffprobe"
-    Write-Host "FFmpeg sidecars are present and verified."
+    Write-Host "FFmpeg test tools are present and verified."
     exit 0
 }
 
@@ -63,7 +63,7 @@ try {
     Copy-Item -LiteralPath $ffprobeSource.FullName -Destination $ffprobeTarget -Force
     Assert-FileHash -Path $ffmpegTarget -Expected $ffmpegHash -Label "installed ffmpeg"
     Assert-FileHash -Path $ffprobeTarget -Expected $ffprobeHash -Label "installed ffprobe"
-    Write-Host "FFmpeg sidecars downloaded and verified."
+    Write-Host "FFmpeg test tools downloaded and verified."
 }
 finally {
     $resolvedTempRoot = [IO.Path]::GetFullPath($tempRoot)

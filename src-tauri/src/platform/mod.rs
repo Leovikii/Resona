@@ -2,6 +2,9 @@
 
 pub mod desktop_lyrics;
 pub mod media_session;
+pub mod playback_projection;
+pub mod taskbar;
+pub mod tray;
 pub mod window_material;
 
 #[cfg(target_os = "windows")]

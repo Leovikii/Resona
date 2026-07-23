@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Resona",
-  "version": "0.0.18",
+  "version": "0.0.19",
   "identifier": "io.github.vki.resona",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Resona 0.0.18",
+        "title": "Resona 0.0.19",
         "width": 1080,
         "height": 700,
         "minWidth": 760,
@@ -30,10 +30,83 @@
     }
   },
   "bundle": {
-    "active": false,
-    "externalBin": [
-      "binaries/ffmpeg",
-      "binaries/ffprobe"
-    ]
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "category": "Music",
+    "publisher": "Viki",
+    "copyright": "Copyright © 2026 Viki",
+    "license": "GPL-3.0-only",
+    "licenseFile": "../LICENSE",
+    "shortDescription": "A private, local-first desktop audio player",
+    "longDescription": "Resona is a local-first desktop audio player with playlists, lyrics, audio output control, and optional lossless compression tools.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "icons/file-mp3.ico": "icons/file-mp3.ico",
+      "icons/file-wav.ico": "icons/file-wav.ico",
+      "icons/file-flac.ico": "icons/file-flac.ico",
+      "icons/128x128.png": "icons/128x128.png",
+      "icons/taskbar-previous.ico": "icons/taskbar-previous.ico",
+      "icons/taskbar-play.ico": "icons/taskbar-play.ico",
+      "icons/taskbar-pause.ico": "icons/taskbar-pause.ico",
+      "icons/taskbar-next.ico": "icons/taskbar-next.ico"
+    },
+    "fileAssociations": [
+      {
+        "ext": [
+          "mp3"
+        ],
+        "name": "Resona.MP3",
+        "description": "MP3 audio",
+        "role": "Viewer",
+        "mimeType": "audio/mpeg"
+      },
+      {
+        "ext": [
+          "wav"
+        ],
+        "name": "Resona.WAV",
+        "description": "WAV audio",
+        "role": "Viewer",
+        "mimeType": "audio/wav"
+      },
+      {
+        "ext": [
+          "flac"
+        ],
+        "name": "Resona.FLAC",
+        "description": "FLAC audio",
+        "role": "Viewer",
+        "mimeType": "audio/flac"
+      }
+    ],
+    "windows": {
+      "allowDowngrades": false,
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "template": "windows/nsis/installer.nsi",
+        "headerImage": "windows/nsis/header.bmp",
+        "sidebarImage": "windows/nsis/sidebar.bmp",
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "installMode": "currentUser",
+        "languages": [
+          "SimpChinese",
+          "English"
+        ],
+        "displayLanguageSelector": false,
+        "compression": "lzma",
+        "installerHooks": "windows/nsis/installer-hooks.nsh"
+      }
+    }
   }
 }
