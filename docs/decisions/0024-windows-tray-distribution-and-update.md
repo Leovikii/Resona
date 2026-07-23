@@ -42,8 +42,8 @@ ADR 0013 当前规定关闭主窗口即退出，防止桌面歌词和播放核�
 
 ### CI/CD
 
-- GitHub Actions 只响应目标为 `main` 的 `pull_request` `closed` 事件，并在 `github.event.pull_request.merged == true` 时运行；不增加 `push`、tag push 或 `workflow_dispatch` 发布入口。仓库规则必须禁止直接推送 `main`，使版本 PR 的合并成为唯一发布意图。
-- 该工作流发生在合并之后，不能同时充当阻止合并的 required check。按照项目所有者的“只在合并后触发”约束，PR 合并前继续依赖本地完整检查与代码审查；若未来需要 GitHub 托管的合并前门禁，必须另行接受 PR 事件工作流，不能声称当前 CD 已提供该能力。
+- GitHub Actions 在单一 `main-merge-delivery.yml` 中分为合并前验证和合并后交付两条边界。目标为 `main` 的 PR 在创建、更新、重新打开和转为 ready 时，以只读权限运行稳定 job `PR validation`，验证 GitHub 生成的 PR merge commit；该 job 必须配置为 `main` ruleset 的 required status check，并要求分支在合并前与 `main` 保持最新。
+- 同一 workflow 在 `pull_request` `closed` 且 `github.event.pull_request.merged == true` 时才运行 `Post-merge verification` 与 release job；不增加 `push`、tag push 或 `workflow_dispatch` 发布入口。仓库规则必须禁止直接推送 `main`，使通过 `PR validation` 的版本 PR 合并成为唯一发布意图。合并前 job 不读取 Environment、不接触签名密钥、不创建 tag 或 Release。
 - 工作流检出该 PR 的合并提交，先以只读权限执行版本一致性、构建、测试、许可证和分发审计。只有版本合法、三个版本文件完全一致且 `v<version>` 尚不存在时，发布 job 才取得 `contents: write`，创建版本 tag 和 GitHub Release。
 - 合并未改变版本时通常只运行 CI；唯一例外是当前版本从未创建过 `v<version>` tag，此时允许首个合并后的发布任务为该版本建立初始 Release。tag 建立后，同版本后续合并必须跳过 Release。版本回退、重复 tag、签名缺失、清单不完整或产物校验失败时不得发布部分产物。
 - 所有第三方 Action 固定完整 commit SHA；同一仓库使用串行 release concurrency。updater 私钥和未来 Authenticode 凭据只通过受保护的 GitHub Environment/Secrets 注入。
@@ -57,7 +57,7 @@ ADR 0013 当前规定关闭主窗口即退出，防止桌面歌词和播放核�
 - 用户主动更新符合本地离线播放器范围，并把联网行为保持为明确动作。
 - 提前分离两种签名可以避免把 updater 完整性签名误当成 Windows 发布者身份。
 - 按 SemVer 自动分流让版本号成为单一发布事实；稳定通道不会因 GitHub prerelease 更新而意外收到候选版，预览用户仍能自然升级到更高的正式版。
-- 只在 PR 合并后运行发布链避免 direct push、手工 tag 和手工工作流形成旁路；版本不变时只做 CI，避免每次合并都产生无意义 Release。
+- 合并前 required check 阻止未通过构建、测试、格式、Clippy、许可证和版本门禁的提交进入 `main`；只在 PR 合并后运行发布链则避免 direct push、手工 tag 和手工工作流形成发布旁路。版本不变时只做 CI，避免每次合并都产生无意义 Release。
 
 ## 后果
 
@@ -72,4 +72,5 @@ ADR 0013 当前规定关闭主窗口即退出，防止桌面歌词和播放核�
 - [Tauri Updater：静态 JSON、签名和 `createUpdaterArtifacts`](https://v2.tauri.app/plugin/updater/)
 - [Tauri GitHub Actions 发布流程](https://v2.tauri.app/distribute/pipelines/github/)
 - [GitHub Actions：仅在 PR 合并后运行](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#running-your-pull_request-workflow-when-a-pull-request-merges)
+- [GitHub Rulesets：Required status checks](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#require-status-checks-to-pass-before-merging)
 - [GitHub Releases REST API：列出版本与原生 `prerelease` 字段](https://docs.github.com/en/rest/releases/releases#list-releases)
