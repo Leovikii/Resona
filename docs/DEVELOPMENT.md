@@ -9,13 +9,14 @@
 - Visual Studio Build Tools 2022，包含 MSVC/C++ 桌面工具
 - Microsoft Edge WebView2 Runtime
 
-首次安装源码依赖使用 `npm ci`。FFmpeg/ffprobe 不再是构建 sidecar：普通开发、`npm run tauri build` 和 `npm run release:windows` 都不会下载或打包它们。应用只在用户从工具页明确选择“下载依赖”后，从固定 GitHub Release 资源把经 SHA-256 校验的 FFmpeg 8.1.2 安装到当前用户 Local AppData；不得恢复为第三方站点直链。只有需要运行真实转换矩阵回归时才执行 `npm run prepare:test-tools`；两个约 97 MiB 的测试工具不进入 Git。Rust 命令应在已加载 MSVC 环境的 Developer PowerShell/Command Prompt 中运行。
+首次安装源码依赖使用 `npm ci`。FFmpeg/ffprobe 不再是构建 sidecar：普通开发、`npm run tauri build` 和 `npm run release:windows` 都不会下载或打包它们。应用只在用户从工具页明确选择“下载依赖”后，从固定 GitHub Release 资源把经 SHA-256 校验的 FFmpeg 8.1.2 安装到当前用户 Local AppData；不得恢复为第三方站点直链。只有需要运行真实转换矩阵回归时才执行 `npm run prepare:test-tools`；两个约 97 MiB 的测试工具不进入 Git。Windows Rust 命令应在已加载 MSVC 环境的 Visual Studio Developer Command Prompt 中运行。
 
 常用验证命令：
 
-```powershell
+```bash
 npm run build
 npm run licenses
+npm run lint:workflow
 npm run icons:windows
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
 cargo test --manifest-path src-tauri/Cargo.toml
@@ -27,17 +28,19 @@ fixture 重新生成需要 FFmpeg 8.1.2+ 与 Xiph FLAC 1.5.0+，详见 `tests/fi
 
 需要真实默认音频设备的 smoke test 默认忽略，显式执行：
 
-```powershell
+```bash
 cargo test --manifest-path src-tauri/Cargo.toml opens_default_output_and_accepts_a_flac -- --ignored
 ```
 
 开发运行使用 `npm run tauri dev`。单独执行 `npm run dev` 只预览 Web 前端，没有 Tauri 文件对话框或 Rust 播放能力。
 
-Windows 交付版本只能通过 `npm run release:windows` 生成。不得在 Tauri 构建后用 `cargo build --release` 重建或覆盖 `src-tauri/target/release/resona.exe`：普通 Cargo 构建不会注入 Tauri 生产协议，生成的 WebView 会错误访问 `devUrl`。`release:windows` 在构建后先确认 Vite 开发服务器未运行，再启动可执行文件，等待可见主窗口达到有效尺寸并经过 UI settling interval，随后自动关闭测试实例。需要原生视觉证据时可直接运行 `scripts/verify-release-webview.ps1 -CapturePath <png>`；脚本会按进程枚举真实有标题主窗口，并在 Per-Monitor v2 DPI 坐标系抓取窗口。
+Windows 本地交付构建只能通过 `npm run release:windows` 生成。不得在 Tauri 构建后用 `cargo build --release` 重建或覆盖 `src-tauri/target/release/resona.exe`：普通 Cargo 构建不会注入 Tauri 生产协议，生成的 WebView 会错误访问 `devUrl`。本地构建完成后直接启动该 Release 或安装版，检查主窗口、Mica、生命周期和退出残留；仓库不维护依赖单一 shell 的原生窗口探针。
 
-`scripts/prepare-ffmpeg-test-tools.ps1` 只服务于被忽略的真实转换矩阵测试，固定从 GitHub Release 下载 FFmpeg 8.1.2 essentials archive，并分别校验归档、ffmpeg 和 ffprobe 的 SHA-256。文件只写入已忽略的 `src-tauri/binaries/*.exe`，不会进入安装包。运行时下载逻辑位于 `ffmpeg_dependency.rs`，使用同一 GitHub Release URL 和哈希、流式进度、取消、安全解压与同卷原子启用；修改版本、来源或任一哈希前必须同时重新审查许可证、构建选项、下载失败边界和转换回归。
+`scripts/prepare-ffmpeg-test-tools.mjs` 只服务于被忽略的真实转换矩阵测试，固定从 GitHub Release 下载 FFmpeg 8.1.2 essentials archive，并分别校验归档、ffmpeg 和 ffprobe 的 SHA-256。脚本使用 Node 标准 API 和系统 `tar` 解压，不依赖平台 shell。文件只写入已忽略的 `src-tauri/binaries/*.exe`，不会进入安装包。运行时下载逻辑位于 `ffmpeg_dependency.rs`，使用同一 GitHub Release URL 和哈希、流式进度、取消、安全解压与同卷原子启用；修改版本、来源或任一哈希前必须同时重新审查许可证、构建选项、下载失败边界和转换回归。
 
-0.1.0 功能开发已经冻结。完整 CI 在目标为 `main` 的 PR 上运行并作为 required status check；受 ruleset 保护的 `main` 收到合并 push 后只做轻量版本判定，符合版本发布条件时自动进入 CD。发布不使用 `pull_request_target`、手工 tag 或 `workflow_dispatch`。Action 固定到已审查的完整 commit SHA，必须使用 Node 24 或更新运行时。版本号含任意 SemVer prerelease 段时发布为 GitHub prerelease，不得把 alpha、beta 或 rc 写死为唯一预览阶段。
+0.1.0 功能开发已经冻结。完整 CI 在目标为 `main` 的 PR 上运行并作为 required status check；受 ruleset 保护的 `main` 收到合并 push 后只做轻量版本判定，符合版本发布条件时自动进入 CD。发布不使用 `pull_request_target`、手工 tag 或 `workflow_dispatch`。Action 固定到已审查的完整 commit SHA，必须使用 Node 24 或更新运行时。仓库不保存平台 shell 脚本；Windows `run:` 步骤统一使用 Git Bash，项目自动化使用 Node、npm、Cargo 和官方 CLI。构建、产物命名、签名上传、updater JSON 和 GitHub Release 使用 Tauri 官方 Action，不用 GitHub CLI 或自写上传器。版本号含任意 SemVer prerelease 段时发布为 GitHub prerelease，不得把 alpha、beta 或 rc 写死为唯一预览阶段。
+
+workflow 修改后必须运行 `npm run lint:workflow`。该命令固定使用成熟的 actionlint v1.7.12；当前仅忽略 actionlint 尚未发布支持、但 GitHub 官方已启用的 `concurrency.queue` 新语法，其他 YAML、表达式、job/output/needs 与 shell 检查均不得忽略。Tauri Action 输入以固定 commit 的 `action.yml` 为准。
 
 涉及前端的改动至少要在独立浏览器中检查一次页面加载、控制台错误和主要布局状态。浏览器预览不替代 Tauri command、窗口、媒体键、透明穿透等原生验收，但必须先拦截白屏、根组件崩溃、资源路径和明显布局问题。
 
@@ -128,12 +131,12 @@ Tauri 原生拖放处理器与 WebView2 HTML5 drag-and-drop 在 Windows 上存�
 - 播放边界：顺序模式下单曲或队尾点击下一曲可以返回可诊断的无目标错误，但不得停止仍在运行的音频或把播放、歌词、进度和按钮快照改成失败/停止状态；真实解码或输出错误继续进入失败状态
 - 主窗口布局：宽屏验证 `1080×700`/`760×520`，窄屏验证 `420×720`/`360×600`；两种模式均覆盖中英文、明暗主题、长文本和完整功能可达性
 - 主窗口几何：Windows 原生验证两种布局各自的位置/尺寸/最大化恢复、多显示器可见区域修正和 100%/125%/150% DPI；浏览器截图不能替代该项
-- 原生材质：浏览器以 `material=mica` 检查透明 Mica 外壳、单一 content layer、无描边列表行、独立工作单元、设置节间距、明暗对比度和溢出；至少覆盖宽屏主界面、窄屏设置/工具、完整播放器和压缩窗口。Windows 11 Release 还必须用 `verify-release-webview.ps1 -CapturePath <png>` 或等价 DPI-aware 方法抓取原生窗口，确认侧栏与底栏属于同一根材质、主内容是唯一上色大区域且没有退回整块 solid 遮罩。浏览器计算样式差异、普通屏幕截图或单独 HWND 存活都不能代替该门禁；Windows 10/Linux 检查完整实色回退
+- 原生材质：浏览器以 `material=mica` 检查透明 Mica 外壳、单一 content layer、无描边列表行、独立工作单元、设置节间距、明暗对比度和溢出；至少覆盖宽屏主界面、窄屏设置/工具、完整播放器和压缩窗口。Windows 11 Release 还必须由项目所有者在真实安装版中抓取原生窗口，确认侧栏与底栏属于同一根材质、主内容是唯一上色大区域且没有退回整块 solid 遮罩。浏览器计算样式差异或单独进程存活都不能代替该门禁；Windows 10/Linux 检查完整实色回退
 - 启动首帧：冷/暖启动、浅色/深色/跟随系统下不得出现明显白色空窗；隐藏到首帧的窗口必须有 Release 启动失败检测
 - Windows SMTC：系统回调必须通过 typed command 进入播放服务，并在实机验证媒体键与系统显示状态
 - Windows 桌面歌词：透明、置顶、焦点、跨进程点击/滚轮/拖动穿透和原生解锁辅助窗口必须实机验证；浏览器预览不能替代
 - Windows 应用生命周期：关闭主窗口、隐藏歌词资源释放、重复启动单实例和退出后无残留进程必须单独验证；WebView2 子进程数量不能作为播放核心重复的判断依据
-- Windows Release：必须通过 `npm run release:windows` 构建并验证内嵌前端；仅通过 `npm run build` 或普通 `cargo build --release` 不构成交付验证
+- Windows Release：本机必须通过 `npm run release:windows` 构建并直接启动验证内嵌前端；GitHub CD 必须由 Tauri 官方 Action 生成同一 NSIS/updater 产物。仅通过 `npm run build` 或普通 `cargo build --release` 不构成交付验证
 
 音频 fixture 必须体积小、来源清晰并允许重新分发。
 

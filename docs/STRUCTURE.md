@@ -78,13 +78,11 @@ tests/
    ├─ audio/                  # 可再生成的 WAV/FLAC/MP3 与边界样本
    └─ lyrics/                 # LRC/SRT/WebVTT 文本样本
 scripts/
-├─ generate-audio-fixtures.ps1
+├─ generate-audio-fixtures.mjs
 ├─ generate-license-report.mjs
-├─ prepare-ffmpeg-test-tools.ps1 # 仅为真实转换回归准备被忽略的固定 FFmpeg 测试工具
-├─ finalize-windows-artifacts.ps1 # 生成带平台/架构的 NSIS 产物名与 SHA-256 元数据
-├─ release-channel.mjs        # 版本一致性、SemVer prerelease 与发布判定
-├─ verify-windows-distribution.ps1 # 审计版本、身份、关联、无 bundled FFmpeg 与安装器元数据
-└─ verify-release-webview.ps1 # 验证 Release 主窗口稳定可见；可选 DPI-aware 原生截图
+├─ generate-windows-shell-icons.mjs # 调用 Tauri 官方 CLI 生成 Windows shell ICO
+├─ prepare-ffmpeg-test-tools.mjs # 仅为真实转换回归准备被忽略的固定 FFmpeg 测试工具
+└─ release-channel.mjs        # 版本一致性、SemVer prerelease 与发布判定
 ```
 
 Mantine 直接导入仍限制在 `src/app` 与 `src/shared/ui`；`AddMediaMenu` 统一跨窗口添加来源行为，`PlaylistTrackList` 统一默认/用户列表选择与排序，`CompactTopNavigation` 负责窄屏顶部全局导航和播放列表 Tabs，`OverflowMarquee` 只负责按尺寸判断的单行展示，`usePointerReorder.ts` 是不导入 Mantine、Tauri 或领域服务的纯 Pointer Events 行为。不为每个 Mantine 组件创建空包装层。
@@ -93,7 +91,7 @@ Mantine 直接导入仍限制在 `src/app` 与 `src/shared/ui`；`AddMediaMenu` 
 
 ADR 0020 已由 `main_window.rs` 与 `features/window` 实现：Rust 保存模式和原生几何，React 只消费布局快照。当前 ScrollArea 组合没有形成重复默认值或复杂行为，因此继续在 `src/app` 直接组合 Mantine，不增加无收益包装层。
 
-ADR 0022 由 `platform/window_material.rs`、`shared/bridge/windowAppearance.ts` 和 `styles.css` 的语义表面 token 实现。Windows 版本判断与 Tauri Window Effects 在 Rust 边界终止；React 不出现 Windows 条件分支。Mica 下导航与底栏 token 透明，组成连续外壳；主内容使用唯一 content surface，独立工作单元使用 subtle surface，普通列表行保持无描边透明。完整播放器在主内容内保持透明，桌面歌词继续使用独立透明平台边界。`verify-release-webview.ps1` 负责等待稳定主窗口并可选抓取 Per-Monitor v2 DPI 原生截图，避免浏览器预览替代 Windows 材质验收。
+ADR 0022 由 `platform/window_material.rs`、`shared/bridge/windowAppearance.ts` 和 `styles.css` 的语义表面 token 实现。Windows 版本判断与 Tauri Window Effects 在 Rust 边界终止；React 不出现 Windows 条件分支。Mica 下导航与底栏 token 透明，组成连续外壳；主内容使用唯一 content surface，独立工作单元使用 subtle surface，普通列表行保持无描边透明。完整播放器在主内容内保持透明，桌面歌词继续使用独立透明平台边界。原生材质最终通过 Windows 安装版人工截图验收，浏览器预览不能替代。
 
 ## 目标结构
 

@@ -12,10 +12,10 @@ Resona uses the static GPLv3 FFmpeg 8.1.2 essentials build from an immutable Git
 
 The executables in this directory are development-only inputs for the ignored real-conversion regression. They are never bundled with Resona. Prepare them explicitly with:
 
-```powershell
+```bash
 npm run prepare:test-tools
 ```
 
-[`scripts/prepare-ffmpeg-test-tools.ps1`](../../scripts/prepare-ffmpeg-test-tools.ps1) downloads the pinned archive, verifies the archive and both executables, and places them in this ignored directory. Normal development, Tauri builds and Windows releases do not run this script.
+[`scripts/prepare-ffmpeg-test-tools.mjs`](../../scripts/prepare-ffmpeg-test-tools.mjs) downloads the pinned archive, verifies the archive and both executables, and places them in this ignored directory. It uses Node standard APIs plus the platform `tar` implementation for extraction. Normal development, Tauri builds and Windows releases do not run this script.
 
 The installed application downloads the same pinned GitHub Release asset only after an explicit user action and stores it under Local AppData. FFmpeg.org publishes source code rather than official Windows executables; FFmpeg's download page links this Windows build provider. Do not commit these test executables or replace the pinned build without updating the runtime dependency specification, license review, hashes and conversion regression together.

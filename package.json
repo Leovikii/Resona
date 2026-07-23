@@ -7,13 +7,14 @@
     "dev": "vite --port 1420",
     "build": "tsc && vite build",
     "licenses": "node scripts/generate-license-report.mjs",
-    "icons:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-windows-shell-icons.ps1",
+    "lint:workflow": "go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -ignore \"unexpected key .queue. for .concurrency. section\"",
+    "icons:windows": "node scripts/generate-windows-shell-icons.mjs",
     "preview": "vite preview --port 1421",
     "test": "node --test scripts/release-channel.test.mjs scripts/preference-value.test.mjs",
     "test:release": "node --test scripts/release-channel.test.mjs",
-    "prepare:test-tools": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-ffmpeg-test-tools.ps1",
-    "release:windows": "node scripts/prepare-updater-config.mjs && tauri build --bundles nsis --config src-tauri/target/updater.config.json && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/finalize-windows-artifacts.ps1 -RequireUpdaterSignature && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-windows-distribution.ps1 && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release-webview.ps1",
-    "verify:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release-webview.ps1",
+    "verify:fixtures": "node scripts/generate-audio-fixtures.mjs --verify",
+    "prepare:test-tools": "node scripts/prepare-ffmpeg-test-tools.mjs",
+    "release:windows": "node scripts/prepare-updater-config.mjs && tauri build --bundles nsis --config src-tauri/target/updater.config.json",
     "tauri": "tauri"
   },
   "dependencies": {
