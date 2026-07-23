@@ -37,7 +37,7 @@ Windows 交付版本只能通过 `npm run release:windows` 生成。不得在 Ta
 
 `scripts/prepare-ffmpeg-test-tools.ps1` 只服务于被忽略的真实转换矩阵测试，固定从 GitHub Release 下载 FFmpeg 8.1.2 essentials archive，并分别校验归档、ffmpeg 和 ffprobe 的 SHA-256。文件只写入已忽略的 `src-tauri/binaries/*.exe`，不会进入安装包。运行时下载逻辑位于 `ffmpeg_dependency.rs`，使用同一 GitHub Release URL 和哈希、流式进度、取消、安全解压与同卷原子启用；修改版本、来源或任一哈希前必须同时重新审查许可证、构建选项、下载失败边界和转换回归。
 
-0.1.0 功能开发已经冻结。CI/CD 只在 PR 合并到 `main` 后触发；Action 固定到已审查的完整 commit SHA，必须使用 Node 24 或更新运行时。版本号含任意 SemVer prerelease 段时发布为 GitHub prerelease，不得把 alpha、beta 或 rc 写死为唯一预览阶段。
+0.1.0 功能开发已经冻结。完整 CI 在目标为 `main` 的 PR 上运行并作为 required status check；合并后只做轻量版本判定并按需进入 CD。Action 固定到已审查的完整 commit SHA，必须使用 Node 24 或更新运行时。版本号含任意 SemVer prerelease 段时发布为 GitHub prerelease，不得把 alpha、beta 或 rc 写死为唯一预览阶段。
 
 涉及前端的改动至少要在独立浏览器中检查一次页面加载、控制台错误和主要布局状态。浏览器预览不替代 Tauri command、窗口、媒体键、透明穿透等原生验收，但必须先拦截白屏、根组件崩溃、资源路径和明显布局问题。
 

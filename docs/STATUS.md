@@ -4,10 +4,12 @@
 
 ### 2026-07-23 main 合并前 Required status check
 
-- 单一 `.github/workflows/main-merge-delivery.yml` 现覆盖两段式 CI/CD：目标为 `main` 的 PR 在创建、更新、重新打开和转为 ready 时运行稳定检查 `PR validation`；合并关闭后才运行 `Post-merge verification` 与签名发布。合并前 job 使用只读 `GITHUB_TOKEN`，验证 GitHub 生成的 PR merge commit，并覆盖 npm 测试、production build、许可证报告一致性、Rust format/test/Clippy 与 SemVer 发布规则；不访问 `release` Environment 或签名密钥。
-- `main` ruleset 应把 `PR validation`（来源限定 GitHub Actions）设为唯一 required status check，并启用“Require branches to be up to date before merging”。workflow 名 `Main CI and delivery`、`Post-merge verification` 和 release job 均不得加入 required checks。
+- 单一 `.github/workflows/main-merge-delivery.yml` 现覆盖两段式 CI/CD：目标为 `main` 的 PR 在创建、更新、重新打开和转为 ready 时运行稳定检查 `PR validation`；合并关闭后只运行轻量 `Prepare delivery` 版本判定，并在需要时进入签名发布。合并前 job 使用只读 `GITHUB_TOKEN`，验证 GitHub 生成的 PR merge commit，并覆盖 npm 测试、production build、许可证报告一致性、Rust format/test/Clippy 与 SemVer 发布规则；不访问 `release` Environment 或签名密钥。
+- `main` ruleset 应把 `PR validation`（来源限定 GitHub Actions）设为唯一 required status check，并启用“Require branches to be up to date before merging”。workflow 名 `Main CI and delivery`、`Prepare delivery` 和 release job 均不得加入 required checks。
 - 单人开发 workflow 统一串行并保留等待任务，避免 PR 更新与合并事件争用发布边界。ADR 0024 与 RC 计划已同步为单文件、两阶段 CI/CD。
+- 合并后的重复 npm 测试/build/licenses 与 Cargo format/test/Clippy 已移除；`Prepare delivery` 只检出精确 merge commit 并判定版本、tag 和 prerelease 状态。若需要发布，CD 仍通过 `release:windows` 完成签名 NSIS 构建、分发审计和原生窗口门禁，因此不会牺牲发布产物专项验证。
 - 首次 GitHub runner 暴露两条压缩普通测试错误依赖本机已下载 FFmpeg。成功提交后删除源文件的测试现通过注入已提交转换结果离线验证；输出冲突在启动 ffprobe 前失败，并使用只需存在、绝不执行的测试占位文件通过公开启动边界。压缩模块 13 项普通测试通过、1 项真实 FFmpeg 矩阵按约定忽略，干净 runner 不再需要下载运行时依赖。
+- `actions/setup-node` 的 npm 自动缓存已在三个 job 中显式关闭：合并前只读检查和含发布权限的 job 均不需要写共享缓存，避免 `cache write denied` 警告及不必要的缓存信任面。签名预检错误现明确区分 `release` Environment 的 Variables 与 Secrets；公钥必须位于 `RESONA_UPDATER_PUBLIC_KEY` variable，私钥与密码继续位于 Secrets。
 
 ### 2026-07-23 0.1.0-rc.1 正式更新密钥与首次发布准备
 
