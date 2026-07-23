@@ -2,27 +2,28 @@
 
 最后更新：2026-07-23
 
-### 2026-07-23 main 合并前 Required status check
+### 2026-07-23 main PR CI 与自动发布
 
-- 单一 `.github/workflows/main-merge-delivery.yml` 现覆盖两段式 CI/CD：目标为 `main` 的 PR 在创建、更新、重新打开和转为 ready 时运行稳定检查 `PR validation`；合并关闭后只运行轻量 `Prepare delivery` 版本判定，并在需要时进入签名发布。合并前 job 使用只读 `GITHUB_TOKEN`，验证 GitHub 生成的 PR merge commit，并覆盖 npm 测试、production build、许可证报告一致性、Rust format/test/Clippy 与 SemVer 发布规则；不访问 `release` Environment 或签名密钥。
+- 单一 `.github/workflows/main-merge-delivery.yml` 现覆盖两段式 CI/CD：目标为 `main` 的 PR 在创建、更新、重新打开和转为 ready 时通过 `pull_request` 运行稳定检查 `PR validation`；受 ruleset 保护的 `main` 收到合并 push 后运行轻量 `Prepare delivery`，符合版本发布条件时自动进入签名发布。`push` 事件的 Environment ref 天然是 `main`，不再使用高权限 `pull_request_target`，也无需放宽到 `refs/pull/*/merge`。合并前 job 使用只读 `GITHUB_TOKEN`，验证 GitHub 生成的 PR merge commit，并覆盖 npm 测试、production build、许可证报告一致性、Rust format/test/Clippy 与 SemVer 发布规则；不访问 `release` Environment 或签名密钥。
 - `main` ruleset 应把 `PR validation`（来源限定 GitHub Actions）设为唯一 required status check，并启用“Require branches to be up to date before merging”。workflow 名 `Main CI and delivery`、`Prepare delivery` 和 release job 均不得加入 required checks。
-- 单人开发 workflow 统一串行并保留等待任务，避免 PR 更新与合并事件争用发布边界。ADR 0024 与 RC 计划已同步为单文件、两阶段 CI/CD。
-- 合并后的重复 npm 测试/build/licenses 与 Cargo format/test/Clippy 已移除；`Prepare delivery` 只检出精确 merge commit 并判定版本、tag 和 prerelease 状态。若需要发布，CD 仍通过 `release:windows` 完成签名 NSIS 构建、分发审计和原生窗口门禁，因此不会牺牲发布产物专项验证。
+- `main` delivery 使用独立 concurrency group 串行并以 `queue: max` 保留等待任务；PR 验证按 PR 编号分组，新提交会取消同一 PR 的过时检查。两类事件不再互相阻塞，避免发布竞态同时减少无效 Actions 时间。ADR 0024 与 RC 计划已同步为单文件、两阶段 CI/CD。
+- 合并后的重复 npm 测试/build/licenses 与 Cargo format/test/Clippy 已移除；`Prepare delivery` 只检出 `main` push 的精确 `github.sha`，以 `github.event.before` 为比较基线判定版本、tag 和 prerelease 状态。符合版本发布条件时，CD 自动通过 `release:windows` 完成签名 NSIS 构建、分发审计、原生窗口门禁和 GitHub Release；无需人工批准或手工启动。
 - 首次 GitHub runner 暴露两条压缩普通测试错误依赖本机已下载 FFmpeg。成功提交后删除源文件的测试现通过注入已提交转换结果离线验证；输出冲突在启动 ffprobe 前失败，并使用只需存在、绝不执行的测试占位文件通过公开启动边界。压缩模块 13 项普通测试通过、1 项真实 FFmpeg 矩阵按约定忽略，干净 runner 不再需要下载运行时依赖。
 - `actions/setup-node` 的 npm 自动缓存已在三个 job 中显式关闭：合并前只读检查和含发布权限的 job 均不需要写共享缓存，避免 `cache write denied` 警告及不必要的缓存信任面。签名预检错误现明确区分 `release` Environment 的 Variables 与 Secrets；公钥必须位于 `RESONA_UPDATER_PUBLIC_KEY` variable，私钥与密码继续位于 Secrets。
+- `release` Environment 继续只允许 `main`，但不启用 Required reviewers 或 Wait timer；因此符合版本条件后会自动发布。若未来主动开启 reviewer，流程才会变为等待人工批准。
 
 ### 2026-07-23 0.1.0-rc.1 正式更新密钥与首次发布准备
 
 - 项目所有者已生成、离线备份正式 Tauri updater 密钥，并在 GitHub `release` Environment 配置 `RESONA_UPDATER_PUBLIC_KEY`、`TAURI_SIGNING_PRIVATE_KEY` 与 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`；预览版和后续正式版沿用同一信任链，密钥未进入仓库。
 - 修复桌面歌词干净初始化未采用约定默认值的问题。根因是缺失的 localStorage 数值被 `Number(null)` 解析为 `0`，再归一化成 `16px / 10% / 0%`；现明确把缺失、空白和非法值回退为 `30px / 100% / 20%`，已有合法用户偏好保持不变。CSS 首帧字号兜底同步为 `30px`。
 - 主窗口系统标题统一为不含版本号的 `Resona`。前端预览/“关于”版本兜底改为直接读取 `package.json`，FFmpeg 下载 User-Agent 改读 Cargo 包版本；运行时代码中的 `0.0.19` 残留已清理，版本继续保持 `0.1.0-rc.1`。
-- 发布判定允许“当前版本尚无 `v<version>` tag”时由首个合并到 `main` 的 PR 建立该版本 Release；tag 建立后，同版本后续合并只运行 CI、不重复发布。这为现有未发布的 `0.1.0-rc.1` 提供一次性自动启动路径，不增加 push、tag 或手工发布旁路。发布端新增完整 SemVer 优先级门禁，覆盖 alpha、beta、rc、数字标识和正式版，拒绝版本回退及仅改变 build metadata 的伪升级。workflow 以 `cancel-in-progress: false` 和 `queue: max` 对 `main` 合并交付串行化并保留等待任务；`actions/checkout v7.0.1` 与 `actions/setup-node v6.4.0` 均固定到当前稳定版完整 SHA，并运行在 Node 24。
+- 发布判定允许“当前版本尚无 `v<version>` tag”时由首个进入 `main` 的合并 push 建立该版本 Release；tag 建立后，同版本后续合并只运行轻量判定、不重复发布。这为现有未发布的 `0.1.0-rc.1` 提供一次性自动启动路径，不增加 tag、`workflow_dispatch` 或手工发布旁路。发布端新增完整 SemVer 优先级门禁，覆盖 alpha、beta、rc、数字标识和正式版，拒绝版本回退及仅改变 build metadata 的伪升级。workflow 以 `cancel-in-progress: false` 和 `queue: max` 对 `main` 合并交付串行化并保留等待任务；`actions/checkout v7.0.1` 与 `actions/setup-node v6.4.0` 均固定到当前稳定版完整 SHA，并运行在 Node 24。
 - 自动验证通过：11 个前端偏好/发行规则测试、TypeScript/Vite production build、许可证生成、Rust format、82 个普通 Rust 测试（9 个设备/FFmpeg 测试按约定忽略）、Clippy `-D warnings` 和差异检查。浏览器干净来源实渲染确认设置页首次值为 `30px / 100% / 20%`，“关于”为 `0.1.0-rc.1`，文档标题为 `Resona`。
 
 ### 2026-07-23 0.1.0-rc.1 自动开发完成，进入项目所有者原生验收
 
 - npm、Cargo 和 Tauri 版本统一为 `0.1.0-rc.1`；主窗口标题现统一为不含版本号的 `Resona`。设置“关于”现使用 GitHub 原生 Releases API 主动检查更新，稳定通道排除所有 prerelease，预览通道按完整 SemVer 接受 alpha、beta、rc、其他合法 prerelease 及更高正式版；下载、签名验证、进度、取消和安装由 Tauri 官方 updater 完成。
-- `.github/workflows/main-merge-delivery.yml` 只响应已合并到 `main` 的 PR。工作流检出精确 merge commit，Action 固定到 Node 24 版本的完整 SHA，运行 Node 26、前后端门禁和签名 NSIS 构建，再由 SemVer 自动创建 GitHub prerelease 或 stable Release；不提供 push、tag 或手工发布旁路。
+- `.github/workflows/main-merge-delivery.yml` 在 PR 上执行完整 required CI，并在受保护的 `main` push 后执行轻量发布判定；符合版本条件时自动运行签名 NSIS 构建，再由 SemVer 创建 GitHub prerelease 或 stable Release。Action 固定到 Node 24 版本的完整 SHA，并运行 Node 26；不提供 tag、`workflow_dispatch` 或手工发布旁路。
 - 隐藏 WebView 现暂停播放、桌面歌词、压缩和 FFmpeg 依赖状态轮询，重新可见时立即同步 Rust 权威状态；详见[性能与音频审计](performance/0.1.0-rc.1.md)。Rodio/CPAL/Symphonia、`150ms` actor tick 和 `500ms` 原生播放投影保持不变，没有加入 DSP、额外增益或未经证据的重采样。
 - 新增 Rust 本地诊断日志：只接受 `resona`/`resona_lib` 自身模块 target，Info 及以上，`256 KiB` + `KeepOne` 轮转，位于系统规范的应用日志目录；不上传、不转发 WebView 控制台、不记录媒体完整路径。普通卸载沿既有钩子清理日志，更新安装保留。
 - 英文根 README、中文 README、精简根 `AGENTS.md` 和 `docs/AGENT_GUIDE.md` 已完成。过期根 `CHANGELOG.md` 与 Git 跟踪的 Mantine 快照被移除；完整 `llms-full.txt` 已保留在本机 `.local-docs/` 并由 Git 忽略，Agent 指南明确其检索入口。

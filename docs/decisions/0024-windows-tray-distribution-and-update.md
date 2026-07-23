@@ -43,10 +43,11 @@ ADR 0013 当前规定关闭主窗口即退出，防止桌面歌词和播放核�
 ### CI/CD
 
 - GitHub Actions 在单一 `main-merge-delivery.yml` 中分为合并前验证和合并后交付两条边界。目标为 `main` 的 PR 在创建、更新、重新打开和转为 ready 时，以只读权限运行稳定 job `PR validation`，验证 GitHub 生成的 PR merge commit；该 job 必须配置为 `main` ruleset 的 required status check，并要求分支在合并前与 `main` 保持最新。
-- 同一 workflow 在 `pull_request` `closed` 且 `github.event.pull_request.merged == true` 时才运行轻量 `Prepare delivery` 与按需 release job；不增加 `push`、tag push 或 `workflow_dispatch` 发布入口。仓库规则必须禁止直接推送 `main`，使通过 `PR validation` 的版本 PR 合并成为唯一发布意图。合并前 job 不读取 Environment、不接触签名密钥、不创建 tag 或 Release。
-- `Prepare delivery` 检出该 PR 的精确合并提交，只读判定版本一致性、目标 tag 和 prerelease 状态，不重复执行已经阻止合并的通用构建、测试、许可证、format 或 Clippy 门禁。只有版本合法、三个版本文件完全一致且 `v<version>` 尚不存在时，发布 job 才取得 `contents: write`，通过签名 NSIS 构建执行分发审计和原生窗口门禁，并创建版本 tag 和 GitHub Release。
+- 同一 workflow 以 `push` 到 `main` 运行轻量 `Prepare delivery` 与条件式 release job。`main` ruleset 必须禁止直接 push，并把 `PR validation` 设为 required status check，因此该 push 由已验证的 PR 合并产生；它的 `GITHUB_REF` 与 `release` Environment 的 `main` 限制天然一致，不使用权限更敏感的 `pull_request_target`，也不放宽到 `refs/pull/*/merge`。流程不增加 tag push 或 `workflow_dispatch` 发布入口。合并前 job 不读取 Environment、不接触签名密钥、不创建 tag 或 Release。
+- `Prepare delivery` 检出 push 的精确 `github.sha`，以 `github.event.before` 为比较基线，只读判定版本一致性、目标 tag 和 prerelease 状态，不重复执行已经阻止合并的通用构建、测试、许可证、format 或 Clippy 门禁。只有版本合法、三个版本文件完全一致且 `v<version>` 尚不存在时，发布 job 才自动取得 `contents: write`，通过签名 NSIS 构建执行分发审计和原生窗口门禁，并创建版本 tag 和 GitHub Release；不需要人工批准或手工启动。
 - 合并未改变版本时通常只运行轻量发布判定；唯一例外是当前版本从未创建过 `v<version>` tag，此时允许首个合并后的发布任务为该版本建立初始 Release。tag 建立后，同版本后续合并必须跳过 Release。版本回退、重复 tag、签名缺失、清单不完整或产物校验失败时不得发布部分产物。
-- 所有第三方 Action 固定完整 commit SHA；同一仓库使用串行 release concurrency。updater 私钥和未来 Authenticode 凭据只通过受保护的 GitHub Environment/Secrets 注入。
+- 所有第三方 Action 固定完整 commit SHA；`main` delivery 使用独立的串行 concurrency 和完整等待队列，PR 验证按 PR 分组并取消过时提交，两类事件不互相阻塞。updater 私钥和未来 Authenticode 凭据只通过受保护的 GitHub Environment/Secrets 注入。
+- `release` Environment 只承担 `main` 分支限制、变量与密钥隔离；默认不配置 Required reviewers 或 Wait timer，使符合版本条件的发布全自动完成。只有未来明确决定引入人工发布审批时才开启 reviewer。
 - prerelease 版本创建 GitHub 原生 prerelease，稳定版本创建普通 Release；不刷新额外通道清单。发布产物、版本说明、许可证通知、SHA-256、更新 URL 和签名必须来自同一次构建。
 
 ## 理由
@@ -57,7 +58,7 @@ ADR 0013 当前规定关闭主窗口即退出，防止桌面歌词和播放核�
 - 用户主动更新符合本地离线播放器范围，并把联网行为保持为明确动作。
 - 提前分离两种签名可以避免把 updater 完整性签名误当成 Windows 发布者身份。
 - 按 SemVer 自动分流让版本号成为单一发布事实；稳定通道不会因 GitHub prerelease 更新而意外收到候选版，预览用户仍能自然升级到更高的正式版。
-- 合并前 required check 阻止未通过构建、测试、格式、Clippy、许可证和版本门禁的提交进入 `main`；只在 PR 合并后运行发布链则避免 direct push、手工 tag 和手工工作流形成发布旁路。版本不变时只做轻量发布判定，避免重复门禁和无意义 Release。
+- 合并前 required check 阻止未通过构建、测试、格式、Clippy、许可证和版本门禁的提交进入 `main`；ruleset 禁止直接 push，使 `main` push 成为可信的合并后发布信号，并避免手工 tag 和手工工作流形成发布旁路。版本不变时只做轻量发布判定，避免重复门禁和无意义 Release。
 
 ## 后果
 
@@ -71,6 +72,6 @@ ADR 0013 当前规定关闭主窗口即退出，防止桌面歌词和播放核�
 
 - [Tauri Updater：静态 JSON、签名和 `createUpdaterArtifacts`](https://v2.tauri.app/plugin/updater/)
 - [Tauri GitHub Actions 发布流程](https://v2.tauri.app/distribute/pipelines/github/)
-- [GitHub Actions：仅在 PR 合并后运行](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#running-your-pull_request-workflow-when-a-pull-request-merges)
+- [GitHub Actions：使用分支过滤触发 workflow](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#using-filters)
 - [GitHub Rulesets：Required status checks](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#require-status-checks-to-pass-before-merging)
 - [GitHub Releases REST API：列出版本与原生 `prerelease` 字段](https://docs.github.com/en/rest/releases/releases#list-releases)
