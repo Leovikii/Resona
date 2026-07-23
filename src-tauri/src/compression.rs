@@ -473,13 +473,32 @@ impl CompressionService {
         preset: CompressionPreset,
         delete_source: bool,
     ) {
+        self.run_batch_with(
+            task_id,
+            paths,
+            preset,
+            delete_source,
+            |task_id, source, preset| self.convert_one(task_id, source, preset),
+        );
+    }
+
+    fn run_batch_with<F>(
+        &self,
+        task_id: u64,
+        paths: Vec<PathBuf>,
+        preset: CompressionPreset,
+        delete_source: bool,
+        convert: F,
+    ) where
+        F: Fn(u64, &Path, CompressionPreset) -> Result<(), String>,
+    {
         for (index, source) in paths.iter().enumerate() {
             if self.cancel.load(Ordering::Acquire) {
                 self.finish_cancelled(index);
                 return;
             }
             self.update_item(index, "running", None, false);
-            match self.convert_one(task_id, source, preset) {
+            match convert(task_id, source, preset) {
                 Ok(()) => {
                     let mut message = None;
                     let mut deleted = false;
@@ -540,13 +559,13 @@ impl CompressionService {
         {
             return Err("only PCM WAV input is supported".to_owned());
         }
-        let input = probe_audio(&self.ffprobe, source)?;
-        if !input.codec_name.starts_with("pcm_") {
-            return Err(format!("WAV codec {} is not PCM", input.codec_name));
-        }
         let output = source.with_extension("flac");
         if output.exists() {
             return Err("output FLAC already exists".to_owned());
+        }
+        let input = probe_audio(&self.ffprobe, source)?;
+        if !input.codec_name.starts_with("pcm_") {
+            return Err(format!("WAV codec {} is not PCM", input.codec_name));
         }
         let temp = source.with_file_name(format!(
             ".{}.resona-{task_id}.tmp.flac",
@@ -1354,21 +1373,23 @@ mod tests {
 
     #[test]
     fn successful_confirmed_batch_deletes_source_after_commit() {
-        let service = Arc::new(CompressionService::default());
+        let service = CompressionService::default();
         let directory = test_directory("delete");
         fs::create_dir_all(&directory).expect("create compression test directory");
         let source = directory.join("source.wav");
-        fs::copy(fixture_directory().join("wav_44100_16_stereo.wav"), &source)
-            .expect("copy WAV fixture");
-        service
-            .start(
-                vec![source.clone()],
-                CompressionPreset::Balanced,
-                true,
-                true,
-            )
-            .expect("start conversion");
-        let snapshot = wait_for_completion(&service);
+        fs::write(&source, b"source audio").expect("create source fixture");
+        prime_batch_snapshot(&service, 7, &source);
+        service.run_batch_with(
+            7,
+            vec![source.clone()],
+            CompressionPreset::Balanced,
+            true,
+            |_, input, _| {
+                fs::write(input.with_extension("flac"), b"committed FLAC")
+                    .map_err(|error| error.to_string())
+            },
+        );
+        let snapshot = service.snapshot();
         assert_eq!(snapshot.status, "completed");
         assert!(!source.exists());
         assert!(source.with_extension("flac").is_file());
@@ -1378,14 +1399,18 @@ mod tests {
 
     #[test]
     fn output_conflict_retains_source_and_existing_output() {
-        let service = Arc::new(CompressionService::default());
         let directory = test_directory("conflict");
         fs::create_dir_all(&directory).expect("create compression test directory");
         let source = directory.join("source.wav");
         let output = source.with_extension("flac");
+        let fake_ffmpeg = directory.join("ffmpeg.exe");
+        let fake_ffprobe = directory.join("ffprobe.exe");
         fs::copy(fixture_directory().join("wav_44100_16_stereo.wav"), &source)
             .expect("copy WAV fixture");
         fs::write(&output, b"existing output").expect("create existing output");
+        fs::write(&fake_ffmpeg, b"not executed").expect("create fake ffmpeg");
+        fs::write(&fake_ffprobe, b"not executed").expect("create fake ffprobe");
+        let service = Arc::new(CompressionService::with_binaries(fake_ffmpeg, fake_ffprobe));
         service
             .start(vec![source.clone()], CompressionPreset::Fast, true, true)
             .expect("start conversion");
@@ -1581,6 +1606,26 @@ mod tests {
             thread::sleep(Duration::from_millis(25));
         }
         panic!("compression task did not finish");
+    }
+
+    fn prime_batch_snapshot(service: &CompressionService, task_id: u64, source: &Path) {
+        *service
+            .snapshot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = CompressionSnapshot {
+            task_id,
+            status: "running".to_owned(),
+            completed: 0,
+            total: 1,
+            current_progress: 0.0,
+            items: vec![CompressionItem {
+                source: source.to_string_lossy().into_owned(),
+                output: source.with_extension("flac").to_string_lossy().into_owned(),
+                status: "pending".to_owned(),
+                message: None,
+                source_deleted: false,
+            }],
+        };
     }
 
     fn wait_for_scan(service: &CompressionService) -> CompressionScanSnapshot {

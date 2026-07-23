@@ -2,6 +2,13 @@
 
 最后更新：2026-07-23
 
+### 2026-07-23 main 合并前 Required status check
+
+- 单一 `.github/workflows/main-merge-delivery.yml` 现覆盖两段式 CI/CD：目标为 `main` 的 PR 在创建、更新、重新打开和转为 ready 时运行稳定检查 `PR validation`；合并关闭后才运行 `Post-merge verification` 与签名发布。合并前 job 使用只读 `GITHUB_TOKEN`，验证 GitHub 生成的 PR merge commit，并覆盖 npm 测试、production build、许可证报告一致性、Rust format/test/Clippy 与 SemVer 发布规则；不访问 `release` Environment 或签名密钥。
+- `main` ruleset 应把 `PR validation`（来源限定 GitHub Actions）设为唯一 required status check，并启用“Require branches to be up to date before merging”。workflow 名 `Main CI and delivery`、`Post-merge verification` 和 release job 均不得加入 required checks。
+- 单人开发 workflow 统一串行并保留等待任务，避免 PR 更新与合并事件争用发布边界。ADR 0024 与 RC 计划已同步为单文件、两阶段 CI/CD。
+- 首次 GitHub runner 暴露两条压缩普通测试错误依赖本机已下载 FFmpeg。成功提交后删除源文件的测试现通过注入已提交转换结果离线验证；输出冲突在启动 ffprobe 前失败，并使用只需存在、绝不执行的测试占位文件通过公开启动边界。压缩模块 13 项普通测试通过、1 项真实 FFmpeg 矩阵按约定忽略，干净 runner 不再需要下载运行时依赖。
+
 ### 2026-07-23 0.1.0-rc.1 正式更新密钥与首次发布准备
 
 - 项目所有者已生成、离线备份正式 Tauri updater 密钥，并在 GitHub `release` Environment 配置 `RESONA_UPDATER_PUBLIC_KEY`、`TAURI_SIGNING_PRIVATE_KEY` 与 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`；预览版和后续正式版沿用同一信任链，密钥未进入仓库。
