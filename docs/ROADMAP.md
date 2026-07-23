@@ -97,7 +97,7 @@
 ### 0.1.0-rc.1 更新与发布加固
 
 - Tauri updater 主动检查、稳定/预览通道、用户确认更新和失败降级；无强制更新、后台静默下载或遥测
-- 只在 PR 合并到 `main` 后执行 CI/CD，由 SemVer 自动标记预发行/稳定 Release；最小权限、完整 SHA 固定和单一 NSIS 渠道
+- 目标为 `main` 的 PR 执行 required CI，合并后只做轻量版本判定并按需 CD；由 SemVer 自动标记预发行/稳定 Release，保持最小权限、完整 SHA 固定和单一 NSIS 渠道
 - updater/Authenticode 密钥保管、旧版升级、断网运行、许可证、GPL 源码义务和本地诊断
 - 前端渲染、后端资源与音频输出证据审计；不扩大为 Exclusive/bit-perfect 或第二播放引擎
 - 英文/中文简洁用户 README、Agent 规范归入 `docs/`、无引用仓库文件清理和完整原生回归
