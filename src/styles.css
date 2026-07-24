@@ -1827,7 +1827,23 @@ h2.page-heading {
 .audio-quality-badge[data-quality="sq"] { color: var(--mantine-color-teal-6); }
 
 .player-volume-popover {
-  padding: 16px;
+  display: flex;
+  height: 184px;
+  padding: 12px;
+  align-items: center;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.player-volume-value {
+  width: 100%;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.player-volume-slider {
+  flex: 1;
+  min-height: 0;
 }
 
 .error-banner,
@@ -2128,14 +2144,6 @@ h2.page-heading {
 }
 
 @media (max-width: 420px) {
-  .app-shell[data-layout="compact"] .track-index {
-    display: none;
-  }
-
-  .app-shell[data-layout="compact"] .saved-track-row {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .app-shell[data-layout="compact"] .page-heading {
     align-items: flex-start;
   }

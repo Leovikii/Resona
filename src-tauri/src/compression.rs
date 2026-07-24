@@ -254,6 +254,11 @@ impl CompressionService {
 
     pub fn clear_scan_inputs(&self) -> Result<CompressionScanSnapshot, CompressionFailure> {
         self.ensure_scan_idle()?;
+        Ok(self.discard_scan_inputs())
+    }
+
+    pub fn discard_scan_inputs(&self) -> CompressionScanSnapshot {
+        self.scan_cancel.store(true, Ordering::Release);
         let mut workspace = self
             .scan_workspace
             .lock()
@@ -264,7 +269,7 @@ impl CompressionService {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         *snapshot = CompressionScanSnapshot::idle();
-        Ok(snapshot.clone())
+        snapshot.clone()
     }
 
     pub fn cancel_scan(&self) -> CompressionScanSnapshot {
@@ -1326,6 +1331,37 @@ mod tests {
             .status = "completed".to_owned();
         service.scan_snapshot.lock().expect("scan snapshot").status = "scanning".to_owned();
         assert!(service.has_active_work());
+    }
+
+    #[test]
+    fn discarding_window_inputs_cancels_scan_and_resets_workspace() {
+        let service = CompressionService::default();
+        service
+            .scan_workspace
+            .lock()
+            .expect("scan workspace")
+            .roots
+            .push(PathBuf::from("example"));
+        *service.scan_snapshot.lock().expect("scan snapshot") = CompressionScanSnapshot {
+            scan_id: 7,
+            status: "scanning".to_owned(),
+            input_roots: vec!["example".to_owned()],
+            ..CompressionScanSnapshot::idle()
+        };
+
+        let snapshot = service.discard_scan_inputs();
+
+        assert_eq!(snapshot.scan_id, 0);
+        assert_eq!(snapshot.status, "idle");
+        assert!(snapshot.input_roots.is_empty());
+        assert!(snapshot.roots.is_empty());
+        assert!(service.scan_cancel.load(Ordering::Acquire));
+        assert!(service
+            .scan_workspace
+            .lock()
+            .expect("scan workspace")
+            .roots
+            .is_empty());
     }
 
     #[test]

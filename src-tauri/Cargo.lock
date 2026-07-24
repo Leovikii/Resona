@@ -3420,7 +3420,7 @@ dependencies = [
 
 [[package]]
 name = "resona"
-version = "0.1.0-rc.2"
+version = "0.1.0-rc.3"
 dependencies = [
  "base64 0.22.1",
  "encoding_rs",

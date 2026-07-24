@@ -1,12 +1,12 @@
 # ADR 0023：Windows Shell 媒体与任务栏集成
 
-- 状态：Accepted；rc.2 修订
-- 日期：2026-07-23，修订于 2026-07-24
+- 状态：Accepted；rc.3 修订
+- 日期：2026-07-23，修订于 2026-07-25
 
 ## 决定
 
 - `NativePlaybackProjection` 是 SMTC、任务栏和托盘的唯一原生播放投影。它低频消费 Rust 权威 `PlaybackSnapshot` 与共享当前曲目封面，不经 WebView 中转，也不分别轮询 Rodio。
-- SMTC adapter 继续使用 souvlaki，提交标题、艺术家、专辑、时长、状态、时间轴、可用动作和真实封面。封面提交失败时重试无封面元数据，不能连带丢失曲名。
+- SMTC adapter 继续使用 souvlaki。共享封面编码字节按内容哈希原子写入应用缓存，正规化 WinRT 不接受的扩展路径前缀后再以 `file://` 提交；切歌/退出清理旧文件。歌曲封面失败时先重试应用占位图，再退到纯文本，不能连带丢失曲名。
 - `MetadataService` 为当前曲目生成有界共享 `Artwork`：编码字节供 SMTC，data URL 供 React，限制尺寸的 BGRA 供 DWM。无封面、过大或损坏时统一使用应用占位图。
 - 任务栏 `ITaskbarList3` 固定上一首、播放/暂停、下一首三个按钮；事件只通过 typed command channel 进入播放服务。Explorer 重启后响应 `TaskbarButtonCreated` 重新注册。
 - 任务栏进度只在时长确定且可定位时显示：播放 normal、暂停 paused、无有效进度时清除，真实播放失败才使用 error。

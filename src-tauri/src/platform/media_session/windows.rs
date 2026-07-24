@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::path::Path;
+use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use sha2::{Digest, Sha256};
 use souvlaki::{
     MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig,
     SeekDirection,
 };
 
+use crate::metadata::Artwork;
 use crate::platform::playback_projection::NativePlaybackSnapshot;
 use crate::playback::{PlaybackEngine, PlaybackStatus, RodioPlaybackEngine};
 
@@ -27,17 +30,26 @@ pub struct MediaSessionAdapter {
     worker: Mutex<Option<JoinHandle<()>>>,
 }
 
+struct MediaSessionArtwork {
+    app_logo_url: String,
+    cache_dir: PathBuf,
+}
+
 impl MediaSessionAdapter {
     pub fn start(
         hwnd: isize,
         engine: Arc<RodioPlaybackEngine>,
         app_logo_path: &Path,
+        artwork_cache_dir: PathBuf,
         projection: Receiver<NativePlaybackSnapshot>,
     ) -> Result<Self, String> {
         let (commands, receiver) = mpsc::channel();
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
         let callback_sender = commands.clone();
-        let app_logo_url = format!("file://{}", app_logo_path.display());
+        let artwork = MediaSessionArtwork {
+            app_logo_url: file_url(app_logo_path)?,
+            cache_dir: artwork_cache_dir,
+        };
         let worker = thread::Builder::new()
             .name("resona-smtc".to_owned())
             .spawn(move || {
@@ -47,7 +59,7 @@ impl MediaSessionAdapter {
                     receiver,
                     ready_sender,
                     callback_sender,
-                    app_logo_url,
+                    artwork,
                     projection,
                 )
             })
@@ -88,7 +100,7 @@ fn run_session(
     receiver: Receiver<MediaSessionCommand>,
     ready_sender: SyncSender<Result<(), String>>,
     callback_sender: Sender<MediaSessionCommand>,
-    app_logo_url: String,
+    artwork: MediaSessionArtwork,
     projection: Receiver<NativePlaybackSnapshot>,
 ) {
     let config = PlatformConfig {
@@ -118,7 +130,7 @@ fn run_session(
         return;
     }
 
-    let mut last_metadata: Option<(String, String, Option<u64>)> = None;
+    let mut last_metadata: Option<(String, String, Option<u64>, Option<usize>)> = None;
     loop {
         match receiver.recv_timeout(COMMAND_POLL_INTERVAL) {
             Ok(MediaSessionCommand::Event(event)) => {
@@ -132,10 +144,13 @@ fn run_session(
                 &projection,
                 &mut controls,
                 &mut last_metadata,
-                &app_logo_url,
+                &artwork.app_logo_url,
+                &artwork.cache_dir,
             );
         }
     }
+    drop(controls);
+    cleanup_artwork_cache(&artwork.cache_dir, None);
 }
 
 fn handle_event(engine: &RodioPlaybackEngine, event: MediaControlEvent) {
@@ -202,8 +217,9 @@ fn seek_by(
 fn sync_controls(
     projection: &NativePlaybackSnapshot,
     controls: &mut MediaControls,
-    last_metadata: &mut Option<(String, String, Option<u64>)>,
+    last_metadata: &mut Option<(String, String, Option<u64>, Option<usize>)>,
     app_logo_url: &str,
+    artwork_cache_dir: &Path,
 ) {
     let snapshot = &projection.playback;
     let title = current_track_title(snapshot);
@@ -211,12 +227,27 @@ fn sync_controls(
         snapshot.path.clone().unwrap_or_default(),
         title.clone(),
         snapshot.duration_ms,
+        projection
+            .artwork
+            .as_ref()
+            .map(|artwork| Arc::as_ptr(artwork) as usize),
     );
     if last_metadata.as_ref() != Some(&metadata_key) {
+        if projection.artwork.is_none() {
+            cleanup_artwork_cache(artwork_cache_dir, None);
+        }
         let cover_url = projection
             .artwork
             .as_ref()
-            .map(|artwork| artwork.data_url())
+            .and_then(
+                |artwork| match materialize_artwork(artwork_cache_dir, artwork) {
+                    Ok(url) => Some(url),
+                    Err(error) => {
+                        eprintln!("Windows SMTC artwork cache failed; using placeholder: {error}");
+                        None
+                    }
+                },
+            )
             .unwrap_or_else(|| app_logo_url.to_owned());
         let metadata = MediaMetadata {
             title: (!title.is_empty()).then_some(title.as_str()),
@@ -224,23 +255,40 @@ fn sync_controls(
             duration: snapshot.duration_ms.map(Duration::from_millis),
             ..MediaMetadata::default()
         };
+        let mut metadata_applied = false;
         match controls.set_metadata(metadata) {
-            Ok(()) => *last_metadata = Some(metadata_key),
+            Ok(()) => metadata_applied = true,
             Err(cover_error) => {
-                eprintln!(
-                    "Windows SMTC artwork update failed; retrying metadata without artwork: {cover_error}"
-                );
-                match controls.set_metadata(MediaMetadata {
-                    title: (!title.is_empty()).then_some(title.as_str()),
-                    duration: snapshot.duration_ms.map(Duration::from_millis),
-                    ..MediaMetadata::default()
-                }) {
-                    Ok(()) => *last_metadata = Some(metadata_key),
-                    Err(error) => {
-                        eprintln!("Windows SMTC metadata update failed: {error}");
+                eprintln!("Windows SMTC artwork update failed: {cover_error}");
+                if cover_url != app_logo_url {
+                    match controls.set_metadata(MediaMetadata {
+                        title: (!title.is_empty()).then_some(title.as_str()),
+                        cover_url: Some(app_logo_url),
+                        duration: snapshot.duration_ms.map(Duration::from_millis),
+                        ..MediaMetadata::default()
+                    }) {
+                        Ok(()) => metadata_applied = true,
+                        Err(error) => {
+                            eprintln!("Windows SMTC placeholder update failed: {error}");
+                        }
+                    }
+                }
+                if !metadata_applied {
+                    match controls.set_metadata(MediaMetadata {
+                        title: (!title.is_empty()).then_some(title.as_str()),
+                        duration: snapshot.duration_ms.map(Duration::from_millis),
+                        ..MediaMetadata::default()
+                    }) {
+                        Ok(()) => metadata_applied = true,
+                        Err(error) => {
+                            eprintln!("Windows SMTC metadata update failed: {error}");
+                        }
                     }
                 }
             }
+        }
+        if metadata_applied {
+            *last_metadata = Some(metadata_key);
         }
     }
 
@@ -256,6 +304,65 @@ fn sync_controls(
         }
     };
     let _ = controls.set_playback(playback);
+}
+
+fn materialize_artwork(cache_dir: &Path, artwork: &Artwork) -> Result<String, String> {
+    std::fs::create_dir_all(cache_dir).map_err(|error| error.to_string())?;
+    let digest = Sha256::digest(artwork.encoded.as_ref());
+    let mut fingerprint = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        write!(&mut fingerprint, "{byte:02x}").expect("writing to a string cannot fail");
+    }
+    let path = cache_dir.join(format!(
+        "{fingerprint}.{}",
+        artwork_extension(&artwork.mime_type)
+    ));
+    if !path.is_file() {
+        let temporary = cache_dir.join(format!(".{}.tmp", fastrand::u64(..)));
+        std::fs::write(&temporary, artwork.encoded.as_ref()).map_err(|error| error.to_string())?;
+        if let Err(error) = std::fs::rename(&temporary, &path) {
+            let _ = std::fs::remove_file(&temporary);
+            if !path.is_file() {
+                return Err(error.to_string());
+            }
+        }
+    }
+    cleanup_artwork_cache(cache_dir, Some(&path));
+    file_url(&path)
+}
+
+fn file_url(path: &Path) -> Result<String, String> {
+    let absolute = std::fs::canonicalize(path).map_err(|error| error.to_string())?;
+    let raw = absolute.to_string_lossy();
+    let winrt_path = if let Some(path) = raw.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{path}")
+    } else if let Some(path) = raw.strip_prefix(r"\\?\") {
+        path.to_owned()
+    } else {
+        raw.into_owned()
+    };
+    Ok(format!("file://{winrt_path}"))
+}
+
+fn artwork_extension(mime_type: &str) -> &'static str {
+    if mime_type.eq_ignore_ascii_case("image/jpeg") || mime_type.eq_ignore_ascii_case("image/jpg") {
+        "jpg"
+    } else {
+        "png"
+    }
+}
+
+fn cleanup_artwork_cache(cache_dir: &Path, keep: Option<&Path>) {
+    let Ok(entries) = std::fs::read_dir(cache_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if keep == Some(path.as_path()) || !path.is_file() {
+            continue;
+        }
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 fn current_track_title(snapshot: &crate::playback::PlaybackSnapshot) -> String {
@@ -295,6 +402,51 @@ mod tests {
         };
 
         assert_eq!(current_track_title(&snapshot), "媒体标题.flac");
+    }
+
+    #[test]
+    fn smtc_artwork_is_materialized_as_a_reusable_file_url() {
+        let cache_dir =
+            std::env::temp_dir().join(format!("resona-smtc-artwork-{}", fastrand::u64(..)));
+        let artwork = Artwork {
+            mime_type: "image/jpeg".to_owned(),
+            encoded: Arc::from(&b"encoded artwork"[..]),
+            bgra: Arc::from(&b"\0\0\0\xff"[..]),
+            width: 1,
+            height: 1,
+        };
+
+        let first = materialize_artwork(&cache_dir, &artwork).expect("materialize artwork");
+        let second = materialize_artwork(&cache_dir, &artwork).expect("reuse artwork");
+        assert_eq!(first, second);
+        assert!(first.ends_with(".jpg"));
+        assert_eq!(
+            std::fs::read(first.trim_start_matches("file://")).expect("read cached artwork"),
+            artwork.encoded.as_ref()
+        );
+
+        cleanup_artwork_cache(&cache_dir, None);
+        let _ = std::fs::remove_dir(cache_dir);
+    }
+
+    #[test]
+    fn smtc_file_urls_are_accepted_windows_paths() {
+        let cache_dir =
+            std::env::temp_dir().join(format!("resona-smtc-path-{}", fastrand::u64(..)));
+        std::fs::create_dir_all(&cache_dir).expect("create cache directory");
+        let file = cache_dir.join("cover.png");
+        std::fs::write(&file, b"cover").expect("write cover");
+
+        let url = file_url(&file).expect("create file URL");
+        let windows_path = url.trim_start_matches("file://");
+        assert!(!windows_path.starts_with(r"\\?\"));
+        assert!(Path::new(windows_path).is_absolute());
+        assert_eq!(
+            std::fs::read(windows_path).expect("read URL path"),
+            b"cover"
+        );
+
+        let _ = std::fs::remove_dir_all(cache_dir);
     }
 
     #[test]

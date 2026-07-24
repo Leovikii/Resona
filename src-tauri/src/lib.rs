@@ -260,6 +260,9 @@ pub fn run() {
             {
                 if label == compression_window::LABEL {
                     compression_window::persist_geometry(app_handle);
+                    app_handle
+                        .state::<Arc<CompressionService>>()
+                        .discard_scan_inputs();
                 } else if label == "main" {
                     api.prevent_close();
                     app_handle
@@ -329,10 +332,18 @@ pub fn run() {
                                             .join("icons")
                                             .join("128x128.png")
                                     });
+                                let artwork_cache_dir = app_handle
+                                    .path()
+                                    .app_cache_dir()
+                                    .unwrap_or_else(|_| {
+                                        std::env::temp_dir().join("Resona")
+                                    })
+                                    .join("smtc-artwork");
                                 match platform::media_session::MediaSessionAdapter::start(
                                     hwnd.0 as isize,
                                     Arc::clone(&playback),
                                     &logo_path,
+                                    artwork_cache_dir,
                                     app_handle
                                         .state::<Arc<NativePlaybackProjection>>()
                                         .subscribe(),
