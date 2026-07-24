@@ -5,11 +5,12 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use lofty::file::{AudioFile, FileType, TaggedFileExt};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
@@ -38,6 +39,9 @@ pub struct CompressionItem {
     pub status: String,
     pub message: Option<String>,
     pub source_deleted: bool,
+    pub progress: f32,
+    pub source_bytes: u64,
+    pub output_bytes: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -47,7 +51,6 @@ pub struct CompressionSnapshot {
     pub status: String,
     pub completed: usize,
     pub total: usize,
-    pub current_progress: f32,
     pub items: Vec<CompressionItem>,
 }
 
@@ -59,6 +62,7 @@ pub struct CompressionScanNode {
     pub kind: String,
     pub ready: bool,
     pub issue_code: Option<String>,
+    pub source_bytes: u64,
     pub children: Vec<CompressionScanNode>,
 }
 
@@ -117,7 +121,6 @@ impl CompressionFailure {
 
 pub struct CompressionService {
     ffmpeg: PathBuf,
-    ffprobe: PathBuf,
     next_task_id: AtomicU64,
     next_scan_id: AtomicU64,
     cancel: Arc<AtomicBool>,
@@ -135,10 +138,9 @@ struct ScanWorkspace {
 
 impl Default for CompressionService {
     fn default() -> Self {
-        let (ffmpeg, ffprobe) = resolve_binaries();
+        let ffmpeg = resolve_ffmpeg_binary();
         Self {
             ffmpeg,
-            ffprobe,
             next_task_id: AtomicU64::new(1),
             next_scan_id: AtomicU64::new(1),
             cancel: Arc::new(AtomicBool::new(false)),
@@ -148,7 +150,6 @@ impl Default for CompressionService {
                 status: "idle".to_owned(),
                 completed: 0,
                 total: 0,
-                current_progress: 0.0,
                 items: Vec::new(),
             })),
             scan_snapshot: Arc::new(Mutex::new(CompressionScanSnapshot::idle())),
@@ -158,10 +159,9 @@ impl Default for CompressionService {
 }
 
 impl CompressionService {
-    pub fn with_binaries(ffmpeg: PathBuf, ffprobe: PathBuf) -> Self {
+    pub fn with_binaries(ffmpeg: PathBuf, _ffprobe: PathBuf) -> Self {
         Self {
             ffmpeg,
-            ffprobe,
             ..Self::default()
         }
     }
@@ -410,10 +410,10 @@ impl CompressionService {
                 "no WAV files selected",
             ));
         }
-        if !self.ffmpeg.is_file() || !self.ffprobe.is_file() {
+        if !self.ffmpeg.is_file() {
             return Err(CompressionFailure::new(
                 "compression_binary_missing",
-                "bundled FFmpeg or ffprobe is unavailable",
+                "bundled FFmpeg is unavailable",
             ));
         }
         let mut state = self
@@ -435,6 +435,9 @@ impl CompressionService {
                 status: "pending".to_owned(),
                 message: None,
                 source_deleted: false,
+                progress: 0.0,
+                source_bytes: fs::metadata(source).map_or(0, |value| value.len()),
+                output_bytes: 0,
             })
             .collect::<Vec<_>>();
         *state = CompressionSnapshot {
@@ -442,7 +445,6 @@ impl CompressionService {
             status: "running".to_owned(),
             completed: 0,
             total: items.len(),
-            current_progress: 0.0,
             items,
         };
         let initial = state.clone();
@@ -478,7 +480,7 @@ impl CompressionService {
             paths,
             preset,
             delete_source,
-            |task_id, source, preset| self.convert_one(task_id, source, preset),
+            |task_id, index, source, preset| self.convert_one(task_id, index, source, preset),
         );
     }
 
@@ -490,48 +492,72 @@ impl CompressionService {
         delete_source: bool,
         convert: F,
     ) where
-        F: Fn(u64, &Path, CompressionPreset) -> Result<(), String>,
+        F: Fn(u64, usize, &Path, CompressionPreset) -> Result<u64, String> + Sync,
     {
-        for (index, source) in paths.iter().enumerate() {
-            if self.cancel.load(Ordering::Acquire) {
-                self.finish_cancelled(index);
-                return;
-            }
-            self.update_item(index, "running", None, false);
-            match convert(task_id, source, preset) {
-                Ok(()) => {
-                    let mut message = None;
-                    let mut deleted = false;
-                    if delete_source {
-                        match fs::remove_file(source) {
-                            Ok(()) => deleted = true,
-                            Err(error) => {
-                                message = Some(format!(
-                                    "FLAC created, but source deletion failed: {error}"
-                                ))
+        let next = AtomicUsize::new(0);
+        let workers = compression_worker_count(paths.len());
+        thread::scope(|scope| {
+            for _ in 0..workers {
+                scope.spawn(|| loop {
+                    let index = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(source) = paths.get(index) else {
+                        return;
+                    };
+                    if self.cancel.load(Ordering::Acquire) {
+                        self.update_item(index, "cancelled", None, false, None);
+                        continue;
+                    }
+                    self.update_item(index, "running", None, false, None);
+                    match convert(task_id, index, source, preset) {
+                        Ok(output_bytes) => {
+                            let mut message = None;
+                            let mut deleted = false;
+                            if delete_source {
+                                match fs::remove_file(source) {
+                                    Ok(()) => deleted = true,
+                                    Err(error) => {
+                                        message = Some(format!(
+                                            "FLAC created, but source deletion failed: {error}"
+                                        ))
+                                    }
+                                }
                             }
+                            self.update_item(
+                                index,
+                                "completed",
+                                message,
+                                deleted,
+                                Some(output_bytes),
+                            );
+                        }
+                        Err(_) if self.cancel.load(Ordering::Acquire) => {
+                            self.update_item(index, "cancelled", None, false, None);
+                        }
+                        Err(message) => {
+                            self.update_item(index, "failed", Some(message), false, None)
                         }
                     }
-                    self.update_item(index, "completed", message, deleted);
-                }
-                Err(_) if self.cancel.load(Ordering::Acquire) => {
-                    self.update_item(index, "cancelled", None, false);
-                    self.finish_cancelled(index + 1);
-                    return;
-                }
-                Err(message) => self.update_item(index, "failed", Some(message), false),
+                });
             }
-            let mut state = self
-                .snapshot
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            state.completed = index + 1;
-            state.current_progress = 0.0;
-        }
+        });
         let mut state = self
             .snapshot
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.cancel.load(Ordering::Acquire) {
+            state.status = "cancelled".to_owned();
+            for item in &mut state.items {
+                if item.status == "pending" {
+                    item.status = "cancelled".to_owned();
+                }
+            }
+            state.completed = state
+                .items
+                .iter()
+                .filter(|item| item.status != "pending")
+                .count();
+            return;
+        }
         state.status = if state
             .items
             .iter()
@@ -547,9 +573,10 @@ impl CompressionService {
     fn convert_one(
         &self,
         task_id: u64,
+        index: usize,
         source: &Path,
         preset: CompressionPreset,
-    ) -> Result<(), String> {
+    ) -> Result<u64, String> {
         if source
             .extension()
             .and_then(|value| value.to_str())
@@ -563,12 +590,9 @@ impl CompressionService {
         if output.exists() {
             return Err("output FLAC already exists".to_owned());
         }
-        let input = probe_audio(&self.ffprobe, source)?;
-        if !input.codec_name.starts_with("pcm_") {
-            return Err(format!("WAV codec {} is not PCM", input.codec_name));
-        }
+        let input = inspect_wav(source)?;
         let temp = source.with_file_name(format!(
-            ".{}.resona-{task_id}.tmp.flac",
+            ".{}.resona-{task_id}-{index}.tmp.flac",
             source
                 .file_stem()
                 .and_then(|value| value.to_str())
@@ -608,10 +632,7 @@ impl CompressionService {
             .take()
             .ok_or_else(|| "FFmpeg progress stream unavailable".to_owned())?;
         let progress_state = Arc::clone(&self.snapshot);
-        let duration_us = input
-            .duration_seconds
-            .map(|value| (value * 1_000_000.0) as f32)
-            .unwrap_or(0.0);
+        let duration_us = input.duration_seconds * 1_000_000.0;
         let progress_reader = thread::spawn(move || {
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
                 if let Some(value) = line
@@ -622,7 +643,10 @@ impl CompressionService {
                         let mut state = progress_state
                             .lock()
                             .unwrap_or_else(std::sync::PoisonError::into_inner);
-                        state.current_progress = (value / duration_us).clamp(0.0, 1.0);
+                        if let Some(item) = state.items.get_mut(index) {
+                            item.progress =
+                                item.progress.max((value / duration_us).clamp(0.0, 1.0));
+                        }
                     }
                 }
             }
@@ -668,11 +692,10 @@ impl CompressionService {
                 }
             }
         }
-        let verified = probe_audio(&self.ffprobe, &temp).inspect_err(|_| {
+        let verified = inspect_flac(&temp).inspect_err(|_| {
             let _ = fs::remove_file(&temp);
         })?;
-        if verified.codec_name != "flac"
-            || verified.sample_rate != input.sample_rate
+        if verified.sample_rate != input.sample_rate
             || verified.channels != input.channels
             || verified.bits_per_sample != target_bits
         {
@@ -685,13 +708,11 @@ impl CompressionService {
             let _ = fs::remove_file(&temp);
             format!("failed to commit FLAC output: {error}")
         })?;
-        let mut state = self
-            .snapshot
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        state.current_progress = 1.0;
-        drop(state);
-        Ok(())
+        let output_bytes = fs::metadata(&output)
+            .map_err(|error| format!("failed to read FLAC output size: {error}"))?
+            .len();
+        self.update_progress(index, 1.0);
+        Ok(output_bytes)
     }
 
     fn update_item(
@@ -700,6 +721,7 @@ impl CompressionService {
         status: &str,
         message: Option<String>,
         source_deleted: bool,
+        output_bytes: Option<u64>,
     ) {
         let mut state = self
             .snapshot
@@ -709,22 +731,77 @@ impl CompressionService {
             item.status = status.to_owned();
             item.message = message;
             item.source_deleted = source_deleted;
+            if let Some(output_bytes) = output_bytes {
+                item.output_bytes = output_bytes;
+                item.progress = 1.0;
+            }
         }
+        state.completed = state
+            .items
+            .iter()
+            .filter(|item| matches!(item.status.as_str(), "completed" | "failed" | "cancelled"))
+            .count();
     }
 
-    fn finish_cancelled(&self, from_index: usize) {
+    fn update_progress(&self, index: usize, progress: f32) {
         let mut state = self
             .snapshot
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        state.status = "cancelled".to_owned();
-        state.current_progress = 0.0;
-        for item in state.items.iter_mut().skip(from_index) {
-            if item.status == "pending" {
-                item.status = "cancelled".to_owned();
-            }
+        if let Some(item) = state.items.get_mut(index) {
+            item.progress = item.progress.max(progress.clamp(0.0, 1.0));
         }
     }
+}
+
+fn compression_worker_count(item_count: usize) -> usize {
+    let available = thread::available_parallelism().map_or(1, usize::from);
+    available
+        .saturating_sub(1)
+        .clamp(1, 4)
+        .min(item_count.max(1))
+}
+
+#[derive(Debug)]
+struct AudioProperties {
+    sample_rate: u32,
+    channels: u8,
+    bits_per_sample: u8,
+    duration_seconds: f32,
+}
+
+fn inspect_wav(path: &Path) -> Result<AudioProperties, String> {
+    let reader =
+        hound::WavReader::open(path).map_err(|error| format!("invalid WAV header: {error}"))?;
+    let spec = reader.spec();
+    validate_wav_spec(spec)?;
+    Ok(AudioProperties {
+        sample_rate: spec.sample_rate,
+        channels: spec.channels as u8,
+        bits_per_sample: spec.bits_per_sample as u8,
+        duration_seconds: reader.duration() as f32 / spec.sample_rate as f32,
+    })
+}
+
+fn inspect_flac(path: &Path) -> Result<AudioProperties, String> {
+    let tagged =
+        lofty::read_from_path(path).map_err(|error| format!("invalid FLAC output: {error}"))?;
+    if tagged.file_type() != FileType::Flac {
+        return Err("output is not a FLAC file".to_owned());
+    }
+    let properties = tagged.properties();
+    Ok(AudioProperties {
+        sample_rate: properties
+            .sample_rate()
+            .ok_or("FLAC sample rate is unavailable")?,
+        channels: properties
+            .channels()
+            .ok_or("FLAC channel count is unavailable")?,
+        bits_per_sample: properties
+            .bit_depth()
+            .ok_or("FLAC bit depth is unavailable")?,
+        duration_seconds: properties.duration().as_secs_f32(),
+    })
 }
 
 #[derive(Debug)]
@@ -934,7 +1011,10 @@ fn validate_scan_candidates(
 fn validate_wav_header(path: &Path) -> Result<(), String> {
     let reader =
         hound::WavReader::open(path).map_err(|error| format!("invalid WAV header: {error}"))?;
-    let spec = reader.spec();
+    validate_wav_spec(reader.spec())
+}
+
+fn validate_wav_spec(spec: hound::WavSpec) -> Result<(), String> {
     if spec.channels == 0 || spec.sample_rate == 0 {
         return Err("WAV channel count or sample rate is invalid".to_owned());
     }
@@ -1052,12 +1132,18 @@ impl ScanTreeBuilder {
     fn finish(self, directory_kind: &str) -> CompressionScanNode {
         let is_file = self.file.is_some();
         let (ready, issue_code) = self.file.unwrap_or((false, None));
+        let source_bytes = if is_file {
+            fs::metadata(&self.path).map_or(0, |value| value.len())
+        } else {
+            0
+        };
         CompressionScanNode {
             path: self.path.to_string_lossy().into_owned(),
             name: self.name,
             kind: if is_file { "file" } else { directory_kind }.to_owned(),
             ready,
             issue_code,
+            source_bytes,
             children: self
                 .children
                 .into_values()
@@ -1079,6 +1165,7 @@ fn file_scan_node(
         kind: "file".to_owned(),
         ready,
         issue_code,
+        source_bytes: fs::metadata(path).map_or(0, |value| value.len()),
         children: Vec::new(),
     }
 }
@@ -1170,77 +1257,6 @@ fn is_link_like(metadata: &fs::Metadata) -> bool {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct ProbeOutput {
-    streams: Vec<ProbeStream>,
-    format: Option<ProbeFormat>,
-}
-#[derive(Debug, Deserialize)]
-struct ProbeStream {
-    codec_name: Option<String>,
-    sample_rate: Option<String>,
-    channels: Option<u8>,
-    bits_per_raw_sample: Option<String>,
-    bits_per_sample: Option<u8>,
-    sample_fmt: Option<String>,
-}
-#[derive(Debug, Deserialize)]
-struct ProbeFormat {
-    duration: Option<String>,
-}
-#[derive(Debug)]
-struct AudioProbe {
-    codec_name: String,
-    sample_rate: u32,
-    channels: u8,
-    bits_per_sample: u8,
-    duration_seconds: Option<f64>,
-}
-
-fn probe_audio(ffprobe: &Path, path: &Path) -> Result<AudioProbe, String> {
-    let mut command = background_command(ffprobe);
-    let output = command
-        .args(["-v", "error", "-select_streams", "a:0", "-show_entries", "stream=codec_name,sample_rate,channels,bits_per_raw_sample,bits_per_sample,sample_fmt:format=duration", "-of", "json"])
-        .arg(path)
-        .output()
-        .map_err(|error| format!("failed to start ffprobe: {error}"))?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
-    }
-    let parsed: ProbeOutput = serde_json::from_slice(&output.stdout)
-        .map_err(|error| format!("invalid ffprobe output: {error}"))?;
-    let stream = parsed
-        .streams
-        .first()
-        .ok_or_else(|| "no audio stream found".to_owned())?;
-    let bits = stream
-        .bits_per_raw_sample
-        .as_deref()
-        .and_then(|v| v.parse().ok())
-        .or(stream.bits_per_sample)
-        .or_else(|| stream.sample_fmt.as_deref().and_then(sample_format_bits))
-        .ok_or_else(|| "audio bit depth is unavailable".to_owned())?;
-    Ok(AudioProbe {
-        codec_name: stream
-            .codec_name
-            .clone()
-            .ok_or_else(|| "audio codec is unavailable".to_owned())?,
-        sample_rate: stream
-            .sample_rate
-            .as_deref()
-            .and_then(|v| v.parse().ok())
-            .ok_or_else(|| "sample rate is unavailable".to_owned())?,
-        channels: stream
-            .channels
-            .ok_or_else(|| "channel count is unavailable".to_owned())?,
-        bits_per_sample: bits,
-        duration_seconds: parsed
-            .format
-            .and_then(|value| value.duration)
-            .and_then(|value| value.parse().ok()),
-    })
-}
-
 fn background_command(program: &Path) -> Command {
     let mut command = Command::new(program);
     #[cfg(target_os = "windows")]
@@ -1252,38 +1268,21 @@ fn background_command(program: &Path) -> Command {
     command
 }
 
-fn sample_format_bits(value: &str) -> Option<u8> {
-    if value.contains("s16") {
-        Some(16)
-    } else if value.contains("s32") || value.contains("flt") {
-        Some(32)
-    } else {
-        None
-    }
-}
-
-fn resolve_binaries() -> (PathBuf, PathBuf) {
-    if let (Ok(ffmpeg), Ok(ffprobe)) = (
-        std::env::var("RESONA_FFMPEG_PATH"),
-        std::env::var("RESONA_FFPROBE_PATH"),
-    ) {
-        return (ffmpeg.into(), ffprobe.into());
+fn resolve_ffmpeg_binary() -> PathBuf {
+    if let Ok(ffmpeg) = std::env::var("RESONA_FFMPEG_PATH") {
+        return ffmpeg.into();
     }
     let release_dir = std::env::current_exe()
         .ok()
         .and_then(|path| path.parent().map(Path::to_path_buf));
     if let Some(directory) = release_dir {
         let ffmpeg = directory.join("ffmpeg.exe");
-        let ffprobe = directory.join("ffprobe.exe");
-        if ffmpeg.is_file() && ffprobe.is_file() {
-            return (ffmpeg, ffprobe);
+        if ffmpeg.is_file() {
+            return ffmpeg;
         }
     }
     let binaries = Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries");
-    (
-        binaries.join("ffmpeg-x86_64-pc-windows-msvc.exe"),
-        binaries.join("ffprobe-x86_64-pc-windows-msvc.exe"),
-    )
+    binaries.join("ffmpeg-x86_64-pc-windows-msvc.exe")
 }
 
 #[cfg(test)]
@@ -1296,13 +1295,6 @@ mod tests {
         assert_eq!(CompressionPreset::Balanced.level(), "5");
         assert_eq!(CompressionPreset::Smallest.level(), "12");
     }
-    #[test]
-    fn detects_input_sample_widths() {
-        assert_eq!(sample_format_bits("s16"), Some(16));
-        assert_eq!(sample_format_bits("s32"), Some(32));
-        assert_eq!(sample_format_bits("flt"), Some(32));
-    }
-
     #[test]
     fn requires_explicit_confirmation_before_source_deletion() {
         let service = Arc::new(CompressionService::default());
@@ -1341,7 +1333,6 @@ mod tests {
     fn pinned_ffmpeg_test_tools_preserve_matrix_and_quantize_32_bit_to_24() {
         let service = CompressionService::default();
         assert!(service.ffmpeg.is_file(), "bundled ffmpeg is required");
-        assert!(service.ffprobe.is_file(), "bundled ffprobe is required");
         let directory = test_directory("matrix");
         fs::create_dir_all(&directory).expect("create compression test directory");
         let fixtures = [
@@ -1359,11 +1350,10 @@ mod tests {
                 _ => CompressionPreset::Smallest,
             };
             service
-                .convert_one(100 + index as u64, &source, preset)
+                .convert_one(100 + index as u64, index, &source, preset)
                 .expect("convert fixture");
             let output = source.with_extension("flac");
-            let probe = probe_audio(&service.ffprobe, &output).expect("probe converted FLAC");
-            assert_eq!(probe.codec_name, "flac");
+            let probe = inspect_flac(&output).expect("inspect converted FLAC");
             assert_eq!(probe.sample_rate, *expected_rate);
             assert_eq!(probe.channels, 2);
             assert_eq!(probe.bits_per_sample, *expected_bits);
@@ -1384,9 +1374,12 @@ mod tests {
             vec![source.clone()],
             CompressionPreset::Balanced,
             true,
-            |_, input, _| {
-                fs::write(input.with_extension("flac"), b"committed FLAC")
-                    .map_err(|error| error.to_string())
+            |_, _, input, _| {
+                let output = input.with_extension("flac");
+                fs::write(&output, b"committed FLAC").map_err(|error| error.to_string())?;
+                Ok(fs::metadata(output)
+                    .map_err(|error| error.to_string())?
+                    .len())
             },
         );
         let snapshot = service.snapshot();
@@ -1395,6 +1388,68 @@ mod tests {
         assert!(source.with_extension("flac").is_file());
         assert!(snapshot.items[0].source_deleted);
         fs::remove_dir_all(directory).expect("remove compression test directory");
+    }
+
+    #[test]
+    fn batch_tracks_partial_results_and_output_sizes() {
+        let service = CompressionService::default();
+        let sources = [PathBuf::from("first.wav"), PathBuf::from("second.wav")];
+        prime_batch_snapshots(&service, 8, &sources);
+        service.run_batch_with(
+            8,
+            sources.to_vec(),
+            CompressionPreset::Fast,
+            false,
+            |_, index, _, _| {
+                if index == 0 {
+                    Ok(240)
+                } else {
+                    Err("conversion failed".to_owned())
+                }
+            },
+        );
+        let snapshot = service.snapshot();
+        assert_eq!(snapshot.status, "completed_with_errors");
+        assert_eq!(snapshot.completed, 2);
+        assert_eq!(snapshot.items[0].output_bytes, 240);
+        assert_eq!(snapshot.items[0].progress, 1.0);
+        assert_eq!(snapshot.items[1].status, "failed");
+        assert_eq!(snapshot.items[1].output_bytes, 0);
+    }
+
+    #[test]
+    fn item_progress_never_moves_backwards() {
+        let service = CompressionService::default();
+        prime_batch_snapshot(&service, 9, Path::new("progress.wav"));
+        service.update_progress(0, 0.75);
+        service.update_progress(0, 0.25);
+        assert_eq!(service.snapshot().items[0].progress, 0.75);
+    }
+
+    #[test]
+    fn batch_uses_bounded_parallel_workers_when_available() {
+        let workers = compression_worker_count(8);
+        assert!((1..=4).contains(&workers));
+        if workers == 1 {
+            return;
+        }
+        let service = CompressionService::default();
+        let sources = (0..8)
+            .map(|index| PathBuf::from(format!("parallel-{index}.wav")))
+            .collect::<Vec<_>>();
+        prime_batch_snapshots(&service, 10, &sources);
+        let active = AtomicUsize::new(0);
+        let maximum = AtomicUsize::new(0);
+        service.run_batch_with(10, sources, CompressionPreset::Fast, false, |_, _, _, _| {
+            let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+            maximum.fetch_max(now, Ordering::SeqCst);
+            thread::sleep(Duration::from_millis(30));
+            active.fetch_sub(1, Ordering::SeqCst);
+            Ok(1)
+        });
+        assert!(maximum.load(Ordering::SeqCst) > 1);
+        assert!(maximum.load(Ordering::SeqCst) <= workers);
+        assert_eq!(service.snapshot().completed, 8);
     }
 
     #[test]
@@ -1434,13 +1489,15 @@ mod tests {
             status: "running".to_owned(),
             completed: 0,
             total: 1,
-            current_progress: 0.0,
             items: vec![CompressionItem {
                 source: source.to_string_lossy().into_owned(),
                 output: source.with_extension("flac").to_string_lossy().into_owned(),
                 status: "pending".to_owned(),
                 message: None,
                 source_deleted: false,
+                progress: 0.0,
+                source_bytes: 0,
+                output_bytes: 0,
             }],
         };
         service.cancel.store(true, Ordering::Release);
@@ -1531,11 +1588,7 @@ mod tests {
 
     #[test]
     fn scan_many_wavs_does_not_depend_on_ffprobe_processes() {
-        let service = CompressionService {
-            ffprobe: PathBuf::from("ffprobe-must-not-run-during-scan.exe"),
-            ..CompressionService::default()
-        };
-        let service = Arc::new(service);
+        let service = Arc::new(CompressionService::default());
         let directory = test_directory("scan-many");
         fs::create_dir_all(&directory).expect("create bulk scan directory");
         let fixture = fixture_directory().join("wav_44100_16_stereo.wav");
@@ -1609,6 +1662,10 @@ mod tests {
     }
 
     fn prime_batch_snapshot(service: &CompressionService, task_id: u64, source: &Path) {
+        prime_batch_snapshots(service, task_id, &[source.to_path_buf()]);
+    }
+
+    fn prime_batch_snapshots(service: &CompressionService, task_id: u64, sources: &[PathBuf]) {
         *service
             .snapshot
             .lock()
@@ -1616,15 +1673,20 @@ mod tests {
             task_id,
             status: "running".to_owned(),
             completed: 0,
-            total: 1,
-            current_progress: 0.0,
-            items: vec![CompressionItem {
-                source: source.to_string_lossy().into_owned(),
-                output: source.with_extension("flac").to_string_lossy().into_owned(),
-                status: "pending".to_owned(),
-                message: None,
-                source_deleted: false,
-            }],
+            total: sources.len(),
+            items: sources
+                .iter()
+                .map(|source| CompressionItem {
+                    source: source.to_string_lossy().into_owned(),
+                    output: source.with_extension("flac").to_string_lossy().into_owned(),
+                    status: "pending".to_owned(),
+                    message: None,
+                    source_deleted: false,
+                    progress: 0.0,
+                    source_bytes: fs::metadata(source).map_or(0, |value| value.len()),
+                    output_bytes: 0,
+                })
+                .collect(),
         };
     }
 

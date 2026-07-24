@@ -13,8 +13,8 @@ Resona does not bundle FFmpeg. After an explicit user action, the installed appl
 - Binary details and hashes: [`src-tauri/binaries/README.md`](../src-tauri/binaries/README.md)
 - FFmpeg license and source information: `https://ffmpeg.org/legal.html`
 
-- Rust packages: 592
-- npm packages: 114
+- Rust packages: 598
+- npm packages: 214
 - Unknown license declarations: 0
 
 ## Rust
@@ -64,6 +64,7 @@ Resona does not bundle FFmpeg. After an explicit user action, the installed appl
 | bumpalo | 3.20.3 | MIT OR Apache-2.0 |
 | bytemuck | 1.25.1 | Zlib OR Apache-2.0 OR MIT |
 | byteorder | 1.5.0 | Unlicense OR MIT |
+| byteorder-lite | 0.1.0 | Unlicense OR MIT |
 | bytes | 1.12.1 | MIT |
 | cairo-rs | 0.18.5 | MIT |
 | cairo-sys-rs | 0.18.2 | MIT |
@@ -222,6 +223,7 @@ Resona does not bundle FFmpeg. After an explicit user action, the installed appl
 | ident_case | 1.0.1 | MIT/Apache-2.0 |
 | idna | 1.1.0 | MIT OR Apache-2.0 |
 | idna_adapter | 1.2.2 | Apache-2.0 OR MIT |
+| image | 0.25.10 | MIT OR Apache-2.0 |
 | indexmap | 1.9.3 | Apache-2.0 OR MIT |
 | indexmap | 2.14.0 | Apache-2.0 OR MIT |
 | infer | 0.19.0 | MIT |
@@ -265,6 +267,7 @@ Resona does not bundle FFmpeg. After an explicit user action, the installed appl
 | minisign-verify | 0.2.5 | MIT |
 | miniz_oxide | 0.8.9 | MIT OR Zlib OR Apache-2.0 |
 | mio | 1.2.2 | MIT |
+| moxcms | 0.8.1 | BSD-3-Clause OR Apache-2.0 |
 | muda | 0.19.3 | Apache-2.0 OR MIT |
 | ndk | 0.9.0 | MIT OR Apache-2.0 |
 | ndk-context | 0.1.1 | MIT OR Apache-2.0 |
@@ -340,6 +343,7 @@ Resona does not bundle FFmpeg. After an explicit user action, the installed appl
 | proc-macro-error | 1.0.4 | MIT OR Apache-2.0 |
 | proc-macro-error-attr | 1.0.4 | MIT OR Apache-2.0 |
 | proc-macro2 | 1.0.106 | MIT OR Apache-2.0 |
+| pxfm | 0.1.30 | BSD-3-Clause OR Apache-2.0 |
 | quick-xml | 0.41.0 | MIT |
 | quote | 1.0.46 | MIT OR Apache-2.0 |
 | r-efi | 5.3.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later |
@@ -610,6 +614,8 @@ Resona does not bundle FFmpeg. After an explicit user action, the installed appl
 | zip | 8.6.0 | MIT |
 | zlib-rs | 0.6.6 | Zlib |
 | zmij | 1.0.23 | MIT |
+| zune-core | 0.5.1 | MIT OR Apache-2.0 OR Zlib |
+| zune-jpeg | 0.5.15 | MIT OR Apache-2.0 OR Zlib |
 | zvariant | 5.13.1 | MIT |
 | zvariant_derive | 5.13.1 | MIT |
 | zvariant_utils | 3.5.0 | MIT |
@@ -662,8 +668,16 @@ Resona does not bundle FFmpeg. After an explicit user action, the installed appl
 | @tauri-apps/cli-win32-x64-msvc | 2.11.4 | Apache-2.0 OR MIT |
 | @tauri-apps/plugin-dialog | 2.7.1 | MIT OR Apache-2.0 |
 | @tybys/wasm-util | 0.10.3 | MIT |
+| @types/debug | 4.1.13 | MIT |
+| @types/estree | 1.0.9 | MIT |
+| @types/estree-jsx | 1.0.5 | MIT |
+| @types/hast | 3.0.5 | MIT |
+| @types/mdast | 4.0.4 | MIT |
+| @types/ms | 2.1.0 | MIT |
 | @types/react | 19.2.17 | MIT |
 | @types/react-dom | 19.2.3 | MIT |
+| @types/unist | 2.0.11 | MIT |
+| @types/unist | 3.0.3 | MIT |
 | @typescript/typescript-aix-ppc64 | 7.0.2 | Apache-2.0 |
 | @typescript/typescript-darwin-arm64 | 7.0.2 | Apache-2.0 |
 | @typescript/typescript-darwin-x64 | 7.0.2 | Apache-2.0 |
@@ -684,16 +698,40 @@ Resona does not bundle FFmpeg. After an explicit user action, the installed appl
 | @typescript/typescript-sunos-x64 | 7.0.2 | Apache-2.0 |
 | @typescript/typescript-win32-arm64 | 7.0.2 | Apache-2.0 |
 | @typescript/typescript-win32-x64 | 7.0.2 | Apache-2.0 |
+| @ungap/structured-clone | 1.3.3 | ISC |
 | @vitejs/plugin-react | 6.0.3 | MIT |
+| bail | 2.0.2 | MIT |
+| ccount | 2.0.1 | MIT |
+| character-entities | 2.0.2 | MIT |
+| character-entities-html4 | 2.1.0 | MIT |
+| character-entities-legacy | 3.0.0 | MIT |
+| character-reference-invalid | 2.0.1 | MIT |
 | clsx | 2.1.1 | MIT |
+| comma-separated-tokens | 2.0.3 | MIT |
 | csstype | 3.2.3 | MIT |
+| debug | 4.4.3 | MIT |
+| decode-named-character-reference | 1.3.0 | MIT |
+| dequal | 2.0.3 | MIT |
 | detect-libc | 2.1.2 | Apache-2.0 |
 | detect-node-es | 1.1.0 | MIT |
+| devlop | 1.1.0 | MIT |
+| escape-string-regexp | 5.0.0 | MIT |
+| estree-util-is-identifier-name | 3.0.0 | MIT |
+| extend | 3.0.2 | MIT |
 | fdir | 6.5.0 | MIT |
 | fsevents | 2.3.3 | MIT |
 | get-nonce | 1.0.1 | MIT |
+| hast-util-to-jsx-runtime | 2.3.6 | MIT |
+| hast-util-whitespace | 3.0.0 | MIT |
 | html-parse-stringify | 3.0.1 | MIT |
+| html-url-attributes | 3.0.1 | MIT |
 | i18next | 26.3.6 | MIT |
+| inline-style-parser | 0.2.7 | MIT |
+| is-alphabetical | 2.0.1 | MIT |
+| is-alphanumerical | 2.0.1 | MIT |
+| is-decimal | 2.0.1 | MIT |
+| is-hexadecimal | 2.0.1 | MIT |
+| is-plain-obj | 4.1.0 | MIT |
 | lightningcss | 1.32.0 | MPL-2.0 |
 | lightningcss-android-arm64 | 1.32.0 | MPL-2.0 |
 | lightningcss-darwin-arm64 | 1.32.0 | MPL-2.0 |
@@ -706,29 +744,97 @@ Resona does not bundle FFmpeg. After an explicit user action, the installed appl
 | lightningcss-linux-x64-musl | 1.32.0 | MPL-2.0 |
 | lightningcss-win32-arm64-msvc | 1.32.0 | MPL-2.0 |
 | lightningcss-win32-x64-msvc | 1.32.0 | MPL-2.0 |
+| longest-streak | 3.1.0 | MIT |
 | lucide-react | 1.24.0 | ISC |
+| markdown-table | 3.0.4 | MIT |
+| mdast-util-find-and-replace | 3.0.2 | MIT |
+| mdast-util-from-markdown | 2.0.3 | MIT |
+| mdast-util-gfm | 3.1.0 | MIT |
+| mdast-util-gfm-autolink-literal | 2.0.1 | MIT |
+| mdast-util-gfm-footnote | 2.1.0 | MIT |
+| mdast-util-gfm-strikethrough | 2.0.0 | MIT |
+| mdast-util-gfm-table | 2.0.0 | MIT |
+| mdast-util-gfm-task-list-item | 2.0.0 | MIT |
+| mdast-util-mdx-expression | 2.0.1 | MIT |
+| mdast-util-mdx-jsx | 3.2.0 | MIT |
+| mdast-util-mdxjs-esm | 2.0.1 | MIT |
+| mdast-util-phrasing | 4.1.0 | MIT |
+| mdast-util-to-hast | 13.2.1 | MIT |
+| mdast-util-to-markdown | 2.1.2 | MIT |
+| mdast-util-to-string | 4.0.0 | MIT |
+| micromark | 4.0.2 | MIT |
+| micromark-core-commonmark | 2.0.3 | MIT |
+| micromark-extension-gfm | 3.0.0 | MIT |
+| micromark-extension-gfm-autolink-literal | 2.1.0 | MIT |
+| micromark-extension-gfm-footnote | 2.1.0 | MIT |
+| micromark-extension-gfm-strikethrough | 2.1.0 | MIT |
+| micromark-extension-gfm-table | 2.1.1 | MIT |
+| micromark-extension-gfm-tagfilter | 2.0.0 | MIT |
+| micromark-extension-gfm-task-list-item | 2.1.0 | MIT |
+| micromark-factory-destination | 2.0.1 | MIT |
+| micromark-factory-label | 2.0.1 | MIT |
+| micromark-factory-space | 2.0.1 | MIT |
+| micromark-factory-title | 2.0.1 | MIT |
+| micromark-factory-whitespace | 2.0.1 | MIT |
+| micromark-util-character | 2.1.1 | MIT |
+| micromark-util-chunked | 2.0.1 | MIT |
+| micromark-util-classify-character | 2.0.1 | MIT |
+| micromark-util-combine-extensions | 2.0.1 | MIT |
+| micromark-util-decode-numeric-character-reference | 2.0.2 | MIT |
+| micromark-util-decode-string | 2.0.1 | MIT |
+| micromark-util-encode | 2.0.1 | MIT |
+| micromark-util-html-tag-name | 2.0.1 | MIT |
+| micromark-util-normalize-identifier | 2.0.1 | MIT |
+| micromark-util-resolve-all | 2.0.1 | MIT |
+| micromark-util-sanitize-uri | 2.0.1 | MIT |
+| micromark-util-subtokenize | 2.1.0 | MIT |
+| micromark-util-symbol | 2.0.1 | MIT |
+| micromark-util-types | 2.0.2 | MIT |
+| ms | 2.1.3 | MIT |
 | nanoid | 3.3.16 | MIT |
+| parse-entities | 4.0.2 | MIT |
 | picocolors | 1.1.1 | ISC |
 | picomatch | 4.0.5 | MIT |
 | postcss | 8.5.19 | MIT |
+| property-information | 7.2.0 | MIT |
 | react | 19.2.7 | MIT |
 | react-dom | 19.2.7 | MIT |
 | react-i18next | 17.0.10 | MIT |
+| react-markdown | 10.1.0 | MIT |
 | react-number-format | 5.4.5 | MIT |
 | react-remove-scroll | 2.7.2 | MIT |
 | react-remove-scroll-bar | 2.3.8 | MIT |
 | react-style-singleton | 2.2.3 | MIT |
+| remark-gfm | 4.0.1 | MIT |
+| remark-parse | 11.0.0 | MIT |
+| remark-rehype | 11.1.2 | MIT |
+| remark-stringify | 11.0.0 | MIT |
 | rolldown | 1.1.5 | MIT |
 | scheduler | 0.27.0 | MIT |
 | source-map-js | 1.2.1 | BSD-3-Clause |
+| space-separated-tokens | 2.0.2 | MIT |
+| stringify-entities | 4.0.4 | MIT |
+| style-to-js | 1.1.21 | MIT |
+| style-to-object | 1.0.14 | MIT |
 | tabbable | 6.5.0 | MIT |
 | tagged-tag | 1.0.0 | MIT |
 | tinyglobby | 0.2.17 | MIT |
+| trim-lines | 3.0.1 | MIT |
+| trough | 2.2.0 | MIT |
 | tslib | 2.8.1 | 0BSD |
 | type-fest | 5.8.0 | (MIT OR CC0-1.0) |
 | typescript | 7.0.2 | Apache-2.0 |
+| unified | 11.0.5 | MIT |
+| unist-util-is | 6.0.1 | MIT |
+| unist-util-position | 5.0.0 | MIT |
+| unist-util-stringify-position | 4.0.0 | MIT |
+| unist-util-visit | 5.1.0 | MIT |
+| unist-util-visit-parents | 6.0.2 | MIT |
 | use-callback-ref | 1.3.3 | MIT |
 | use-sidecar | 1.1.3 | MIT |
 | use-sync-external-store | 1.6.0 | MIT |
+| vfile | 6.0.3 | MIT |
+| vfile-message | 4.0.3 | MIT |
 | vite | 8.1.5 | MIT |
 | void-elements | 3.1.0 | MIT |
+| zwitch | 2.0.4 | MIT |

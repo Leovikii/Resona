@@ -1,154 +1,83 @@
-# 计划目录结构
+# 目录与所有权
 
-该结构在初始化应用时逐步创建；当前不为尚未存在的模块添加空目录。
-
-## 当前实际结构（截至 0.1.0-rc.1）
-
-应用已按实际变化边界拆分前端与 Rust 模块：
-
-```text
-assets/
-├─ resona-icon.svg             # 透明单 R 应用图标源
-├─ resona-r-mark.svg           # 紧裁画布的标准单 R 设计源
-├─ resona-gothic-wordmark.svg  # 主界面横向字标
-├─ resona-file-flac.svg        # FLAC 文件关联图标源（待注册）
-├─ resona-file-wav.svg         # WAV 文件关联图标源（待注册）
-├─ resona-file-mp3.svg         # MP3 文件关联图标源（待注册）
-└─ FILE_ICONS.md               # 格式图标映射和栅格化约定
-
-src/
-├─ App.tsx                     # 应用入口兼容转发，不承载页面逻辑
-├─ main.tsx                    # React 启动、provider 和 i18n 初始化
-├─ app/
-│  ├─ App.tsx                 # 应用壳、视图组合与 Mantine 局部布局
-│  └─ preferences.tsx         # 主题、主题色和语言 provider
-├─ features/
-│  ├─ lyrics/                 # 桌面歌词窗口状态与权威正在播放快照 hooks
-│  ├─ library/                # 用户播放列表、项目操作与最近播放 hooks
-│  ├─ playback/               # 播放控制与无回跳 seek transaction hooks
-│  ├─ update/                 # GitHub Releases 更新检查、安装和进度 hook
-│  └─ window/                 # 主窗口布局模式 typed hook；不持有原生坐标
-├─ shared/
-│  ├─ bridge/                 # 类型化 Tauri command/event 与单实例文件选择边界
-│  │  └─ windowAppearance.ts  # 当前窗口材质初始化、DOM 语义与原生主题同步
-│  ├─ i18n/                   # zh-CN/en 资源与 i18next 初始化
-│  ├─ model/                  # 播放、播放列表、歌词和桌面窗口共享契约
-│  ├─ ui/
-│  │  ├─ AddMediaMenu.tsx     # 播放列表/压缩窗口统一添加菜单
-│  │  ├─ OverflowMarquee.tsx  # 少量高价值单行文本的按溢出滚动展示
-│  │  ├─ PlaylistTrackList.tsx # 默认/用户列表共享曲目交互
-│  │  └─ usePointerReorder.ts # 不依赖组件库的播放列表指针排序行为
-│  ├─ ui/useDocumentVisibility.ts # 隐藏 WebView 轮询休眠边界
-│  └─ utils/format.ts         # 时间等纯格式化函数
-├─ windows/
-│  └─ DesktopLyricsWindow.tsx # 不加载应用壳的轻量桌面歌词入口
-└─ styles.css                 # 响应式应用壳、语义色与动画
-src-tauri/
-├─ capabilities/default.json  # 主窗口与文件选择权限
-├─ capabilities/desktop-lyrics.json # 桌面歌词 WebView 最小权限
-├─ src/
-│  ├─ commands.rs             # 薄 Tauri command 边界
-│  ├─ application_update.rs   # GitHub 原生 Release 发现、SemVer 通道、签名更新
-│  ├─ filesystem.rs           # 直属音频上下文枚举与拖入路径展开
-│  ├─ lyrics.rs               # LRC/SRT/WebVTT 发现、解码、解析、缓存和同步
-│  ├─ main_window.rs          # 主窗口宽/窄模式、两套几何、可见约束与首帧 ready
-│  ├─ media_import.rs         # 默认列表、当前列表来源、执行序列同步与 external-open 协调
-│  ├─ metadata.rs             # 后续按需元数据 adapter 源文件，当前不编译
-│  ├─ persistence.rs          # 用户列表、最近历史与 schema v3 migration
-│  ├─ playlists.rs            # 播放列表导入、命名和事务编排服务
-│  ├─ platform/
-│  │  ├─ mod.rs              # 平台能力模块入口
-│  │  ├─ desktop_lyrics.rs   # 桌面歌词 capability、状态与跨平台边界
-│  │  ├─ desktop_lyrics/
-│  │  │  └─ windows.rs       # Tauri 歌词窗与 Win32 原生解锁辅助窗
-│  │  ├─ media_session.rs    # SMTC/MPRIS capability 边界
-│  │  ├─ media_session/
-│  │  │  └─ windows.rs       # souvlaki Windows SMTC adapter
-│  │  └─ window_material.rs  # Windows Mica/跨平台实色回退与主题同步
-│  ├─ playback/
-│  │  ├─ mod.rs              # 播放契约、Rodio actor、内部执行序列与测试
-│  │  └─ output.rs           # CPAL 输出枚举、选择与错误回调
-│  ├─ lib.rs                  # Tauri 组装
-│  └─ main.rs                 # 桌面入口
-├─ Cargo.toml
-├─ tauri.conf.json            # 跨平台不透明窗口默认
-└─ tauri.windows.conf.json    # Windows 主窗口透明创建属性
-tests/
-└─ fixtures/
-   ├─ audio/                  # 可再生成的 WAV/FLAC/MP3 与边界样本
-   └─ lyrics/                 # LRC/SRT/WebVTT 文本样本
-scripts/
-├─ generate-audio-fixtures.mjs
-├─ generate-license-report.mjs
-├─ generate-windows-shell-icons.mjs # 调用 Tauri 官方 CLI 生成 Windows shell ICO
-├─ prepare-ffmpeg-test-tools.mjs # 仅为真实转换回归准备被忽略的固定 FFmpeg 测试工具
-└─ release-channel.mjs        # 版本一致性、SemVer prerelease 与发布判定
-```
-
-Mantine 直接导入仍限制在 `src/app` 与 `src/shared/ui`；`AddMediaMenu` 统一跨窗口添加来源行为，`PlaylistTrackList` 统一默认/用户列表选择与排序，`CompactTopNavigation` 负责窄屏顶部全局导航和播放列表 Tabs，`OverflowMarquee` 只负责按尺寸判断的单行展示，`usePointerReorder.ts` 是不导入 Mantine、Tauri 或领域服务的纯 Pointer Events 行为。不为每个 Mantine 组件创建空包装层。
-
-0.0.13 已删除 managed-folder/media-library 运行时代码；`src/features/library` 保持为播放列表与最近历史，不为目录整洁做无收益搬迁。桌面歌词仍通过通用 facade 隔离 Windows 实现。0.0.17 的 `src/windows/AudioCompressionWindow.tsx` 只提供轻量窗口入口，Mantine 组合位于 `src/app/AudioCompressionApp.tsx`；Rust `compression_window.rs` 只管理普通辅助窗口生命周期，扫描和转换仍归 `CompressionService`。
-
-ADR 0020 已由 `main_window.rs` 与 `features/window` 实现：Rust 保存模式和原生几何，React 只消费布局快照。当前 ScrollArea 组合没有形成重复默认值或复杂行为，因此继续在 `src/app` 直接组合 Mantine，不增加无收益包装层。
-
-ADR 0022 由 `platform/window_material.rs`、`shared/bridge/windowAppearance.ts` 和 `styles.css` 的语义表面 token 实现。Windows 版本判断与 Tauri Window Effects 在 Rust 边界终止；React 不出现 Windows 条件分支。Mica 下导航与底栏 token 透明，组成连续外壳；主内容使用唯一 content surface，独立工作单元使用 subtle surface，普通列表行保持无描边透明。完整播放器在主内容内保持透明，桌面歌词继续使用独立透明平台边界。原生材质最终通过 Windows 安装版人工截图验收，浏览器预览不能替代。
-
-## 目标结构
+## 当前结构
 
 ```text
 Resona/
-├─ src/                         # React 前端
-│  ├─ app/                     # 启动、路由、provider、theme
-│  ├─ windows/                 # 主窗口、桌面歌词和音频压缩工作窗口入口
-│  ├─ features/                # playback、playlists、recent、lyrics、compression、settings...
+├─ src/
+│  ├─ app/                         # 窗口入口、壳、路由、跨 feature 编排
+│  │  ├─ App.tsx
+│  │  ├─ AudioCompressionApp.tsx
+│  │  ├─ ApplicationUpdateDialog.tsx
+│  │  ├─ DesktopLyricsApp.tsx
+│  │  └─ preferences.tsx
+│  ├─ features/
+│  │  ├─ playback/                 # 播放快照与控制意图
+│  │  ├─ playlists/                # 用户/默认列表工作流
+│  │  ├─ library/                  # 列表读取与操作编排
+│  │  ├─ lyrics/                   # 歌词和桌面歌词状态
+│  │  ├─ compression/              # 扫描、转换、依赖快照 hooks
+│  │  ├─ metadata/                 # 当前曲目详情
+│  │  ├─ settings/                 # 偏好展示
+│  │  └─ update/                   # 更新协调 hook
 │  ├─ shared/
-│  │  ├─ bridge/               # 类型化 Tauri command/event 客户端
-│  │  ├─ i18n/                 # zh-CN/en 资源、locale 解析与格式化
-│  │  ├─ model/                # 前端共享类型和纯转换
-│  │  ├─ ui/                   # Resona UI 与必要的 Mantine 适配
-│  │  └─ utils/                # 无领域状态的工具
-│  └─ assets/                  # 字体、图像和静态资源
+│  │  ├─ bridge/                   # Tauri、对话框、窗口外观
+│  │  ├─ model/                    # 跨层 TypeScript DTO
+│  │  ├─ i18n/                     # 中英文资源
+│  │  └─ ui/                       # 无业务共享组件
+│  ├─ assets/                      # 品牌与占位资源
+│  └─ styles.css                   # 全局 token 与窗口布局
 ├─ src-tauri/
 │  ├─ src/
-│  │  ├─ app/                  # Tauri 启动、commands、events
-│  │  ├─ domain/               # 模型、错误和核心契约
-│  │  ├─ services/             # 播放、列表、最近历史、歌词、按需元数据、压缩扫描/任务
-│  │  ├─ adapters/             # Rodio、FFmpeg、SQLite、文件系统
-│  │  └─ platform/             # Windows SMTC/桌面歌词；通用辅助窗口在 app 层组装
-│  ├─ migrations/              # SQLite migrations
-│  ├─ binaries/                # 已忽略的 FFmpeg 真实转换测试工具；不进入 bundle
-│  ├─ capabilities/            # Tauri capability 配置
-│  └─ tests/                   # Rust 跨模块集成测试
-├─ tests/
-│  ├─ e2e/                     # 桌面关键流程
-│  └─ fixtures/                # 小型、可再分发的音频和标签样本
-  ├─ docs/
-  │  ├─ decisions/               # ADR
-  │  ├─ performance/             # 版本性能与音频审计证据
-  │  └─ AGENT_GUIDE.md           # AI Agent 完整开发规则
-├─ scripts/                    # 可重复的开发、检查和打包脚本
-├─ AGENTS.md                   # 开发代理入口约束
-├─ README.md
-  └─ LICENSE
-  ```
+│  │  ├─ lib.rs                    # 服务装配、commands 注册、生命周期
+│  │  ├─ commands.rs               # 薄 IPC adapter
+│  │  ├─ playback.rs               # actor 与 Rodio 引擎
+│  │  ├─ playlists.rs              # 用户/默认列表领域逻辑
+│  │  ├─ persistence.rs            # SQLite schema 与事务
+│  │  ├─ metadata.rs               # 按需元数据与有界封面缓存
+│  │  ├─ lyrics.rs                 # 本地歌词解析
+│  │  ├─ compression.rs            # 扫描、并行转换与任务快照
+│  │  ├─ ffmpeg_dependency.rs      # 按需依赖下载与验证
+│  │  ├─ application_update.rs     # Release 选择与 updater
+│  │  ├─ application_lifecycle.rs  # 退出、托盘与辅助窗口协调
+│  │  └─ platform/                 # Windows/非 Windows adapters
+│  │     ├─ media_session/
+│  │     ├─ playback_projection.rs
+│  │     ├─ taskbar.rs
+│  │     ├─ tray.rs
+│  │     ├─ window_material.rs
+│  │     └─ desktop_lyrics/
+│  ├─ capabilities/                # Tauri 最小权限
+│  ├─ icons/                       # 应用、任务栏与文件关联图标
+│  ├─ resources/                   # 运行时占位资源
+│  └─ tauri.conf.json
+├─ scripts/                        # Node 构建/测试工具
+├─ tests/                          # 前端与发布规则测试
+├─ docs/                           # 当前规范、ADR 和活动计划
+└─ .github/workflows/              # PR 门禁与 main 自动交付
+```
 
-`.local-docs/` 是本机忽略目录，可保存与当前依赖版本对应的大型组件参考（当前为 Mantine `llms-full.txt`）；它不参与构建、测试或发布，也不上传 GitHub。
+实际文件以仓库为准；本页只维护职责边界，不列举每个测试或组件。
 
 ## 所有权规则
 
-- `features` 可以依赖 `shared`，不同 feature 不直接读取彼此内部状态。
-- 跨 feature 的稳定概念进入 `shared/model`；不要把所有代码提前提升为共享代码。
-- `commands` 只做输入验证、授权边界和服务调用，不写业务流程。
-- `domain` 不导入 Tauri、数据库、Rodio、CPAL、Symphonia 或平台 crate。
-- `adapters` 实现领域契约，第三方类型在 adapter 内终止。
-- `adapters/playback` 内部包含 audio actor、Rodio engine、设备管理和 decoder 配置，不把音频库类型导出到应用层。
-- `platform` 只放无法由跨平台 API可靠完成的代码。
+- `app` 可以组合多个 feature；feature 不能反向依赖 `app`。
+- feature 通过 `shared/model` DTO 和 `shared/bridge` 与 Rust 通信，不直接使用 `@tauri-apps/api`，窗口入口的生命周期调用除外。
+- Rust command 保持薄；状态机、事务、安全检查和后台任务属于相应 service/module。
+- `platform` 只接收平台无关快照/命令，Win32/COM 类型不得泄漏到播放、列表、压缩或前端。
+- 通用 UI 只有在至少两个真实调用点共享行为时才进入 `shared/ui`；不得为了目录对称创建空抽象。
+- 测试靠近所有者模块；跨模块发布规则留在 `tests/` 或 `scripts/`。
 
-## 文件命名
+## 文档规则
 
-- React component：`PascalCase.tsx`
-- hooks：`useSomething.ts`
-- 普通 TypeScript module：`camelCase.ts`
-- Rust module：`snake_case.rs`
-- 测试与被测模块相邻；跨模块流程放入对应 `tests/`
-- ADR：`NNNN-short-title.md`
+- `STATUS.md` 只记录当前版本、开放门禁和风险，不积累逐日流水。
+- `plans/` 只保留活动 RC、下一个发行门禁及仍直接约束当前工作的计划。
+- `decisions/` 保存仍有效或明确标记 Superseded 的长期决定；实现变化必须同步修订相关 ADR。
+- 大型第三方参考只保存在忽略的 `.local-docs/`，不得提交。
+- 许可证清单由脚本生成，不手工压缩或删除。
+
+## 命名
+
+- React 组件 `PascalCase.tsx`，hook `useXxx.ts`，普通模块 `camelCase.ts`。
+- Rust 模块 `snake_case.rs`，类型 `PascalCase`，函数/字段 `snake_case`。
+- 平台实现放在 `platform/<capability>/` 或带平台条件的 adapter 中，不在文件名散布 UI 术语。

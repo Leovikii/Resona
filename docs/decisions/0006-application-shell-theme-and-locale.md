@@ -1,6 +1,6 @@
 # ADR 0006：应用壳、主题与语言
 
-- 状态：Accepted；导航与“正在播放”视图决定已由 [ADR 0014](0014-player-only-scope-and-transient-default-playlist.md) 部分替代
+- 状态：Accepted；导航与“正在播放”视图由 [ADR 0014](0014-player-only-scope-and-transient-default-playlist.md) 替代，最近播放入口由 rc.2 撤销
 - 日期：2026-07-18
 
 ## 背景

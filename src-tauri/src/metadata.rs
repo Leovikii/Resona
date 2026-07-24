@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::collections::VecDeque;
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
 use base64::Engine;
+use image::{DynamicImage, ImageDecoder, ImageReader};
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::tag::Accessor;
 use serde::Serialize;
@@ -57,31 +62,141 @@ impl TrackDetails {
     }
 }
 
-pub fn read_track_details(path: &Path) -> TrackDetails {
+const MAX_CACHE_ENTRIES: usize = 4;
+const MAX_ARTWORK_BYTES: usize = 16 * 1024 * 1024;
+const MAX_ARTWORK_DIMENSION: u32 = 8_192;
+const MAX_DECODED_ARTWORK_BYTES: u64 = 64 * 1024 * 1024;
+const CACHED_ARTWORK_DIMENSION: u32 = 1_024;
+
+#[derive(Clone, Debug)]
+pub struct Artwork {
+    pub mime_type: String,
+    pub encoded: Arc<[u8]>,
+    pub bgra: Arc<[u8]>,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl Artwork {
+    pub fn data_url(&self) -> String {
+        format!(
+            "data:{};base64,{}",
+            self.mime_type,
+            base64::engine::general_purpose::STANDARD.encode(&self.encoded)
+        )
+    }
+}
+
+#[derive(Clone)]
+pub struct CachedTrackMetadata {
+    pub details: TrackDetails,
+    pub artwork: Option<Arc<Artwork>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct FileRevision {
+    path: PathBuf,
+    size: Option<u64>,
+    modified: Option<SystemTime>,
+}
+
+#[derive(Clone)]
+struct CacheEntry {
+    revision: FileRevision,
+    metadata: CachedTrackMetadata,
+}
+
+#[derive(Default)]
+pub struct MetadataService {
+    cache: Mutex<VecDeque<CacheEntry>>,
+}
+
+impl MetadataService {
+    pub fn load(&self, path: &Path) -> CachedTrackMetadata {
+        let revision = file_revision(path);
+        let mut cache = self
+            .cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(index) = cache.iter().position(|entry| entry.revision == revision) {
+            let entry = cache.remove(index).expect("cache index exists");
+            let metadata = entry.metadata.clone();
+            cache.push_back(entry);
+            return metadata;
+        }
+        drop(cache);
+
+        let metadata = read_uncached_track_metadata(path);
+        let mut cache = self
+            .cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        cache.retain(|entry| entry.revision.path != revision.path);
+        cache.push_back(CacheEntry {
+            revision,
+            metadata: metadata.clone(),
+        });
+        while cache.len() > MAX_CACHE_ENTRIES {
+            cache.pop_front();
+        }
+        metadata
+    }
+}
+
+#[cfg(test)]
+fn read_track_details(path: &Path) -> TrackDetails {
+    MetadataService::default().load(path).details
+}
+
+pub fn read_artwork_file(path: &Path) -> Result<Arc<Artwork>, String> {
+    let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+    decode_artwork("image/png", &bytes)
+}
+
+fn read_uncached_track_metadata(path: &Path) -> CachedTrackMetadata {
     let tagged_file = match lofty::read_from_path(path) {
         Ok(value) => value,
-        Err(error) => return TrackDetails::fallback(path, error.to_string()),
+        Err(error) => {
+            return CachedTrackMetadata {
+                details: TrackDetails::fallback(path, error.to_string()),
+                artwork: None,
+            }
+        }
     };
     let tag = tagged_file
         .primary_tag()
         .or_else(|| tagged_file.tags().first());
     let properties = tagged_file.properties();
-    let artwork_data_url = tag
+    let artwork = tag
         .and_then(|value| value.pictures().first())
-        .map(|picture| {
+        .and_then(|picture| {
+            if picture.data().len() > MAX_ARTWORK_BYTES {
+                eprintln!(
+                    "embedded artwork exceeds the {} byte limit: {}",
+                    MAX_ARTWORK_BYTES,
+                    path.display()
+                );
+                return None;
+            }
             let mime = picture
                 .mime_type()
                 .map_or("application/octet-stream", |value| value.as_str());
-            format!(
-                "data:{mime};base64,{}",
-                base64::engine::general_purpose::STANDARD.encode(picture.data())
-            )
+            match decode_artwork(mime, picture.data()) {
+                Ok(artwork) => Some(artwork),
+                Err(error) => {
+                    eprintln!(
+                        "embedded artwork decode failed for {}: {error}",
+                        path.display()
+                    );
+                    None
+                }
+            }
         });
     let sample_rate = properties.sample_rate();
     let bit_depth = properties.bit_depth();
     let audio_bitrate = properties.audio_bitrate();
     let codec = codec_name(path);
-    TrackDetails {
+    let details = TrackDetails {
         path: path.to_string_lossy().into_owned(),
         file_name: file_name(path),
         title: tag.and_then(|value| value.title().map(|text| text.into_owned())),
@@ -95,8 +210,56 @@ pub fn read_track_details(path: &Path) -> TrackDetails {
         quality: classify_quality(&codec, sample_rate, bit_depth, audio_bitrate),
         codec,
         file_size: std::fs::metadata(path).ok().map(|value| value.len()),
-        artwork_data_url,
+        artwork_data_url: artwork.as_ref().map(|value| value.data_url()),
         metadata_warning: None,
+    };
+    CachedTrackMetadata { details, artwork }
+}
+
+fn decode_artwork(mime_type: &str, bytes: &[u8]) -> Result<Arc<Artwork>, String> {
+    if bytes.len() > MAX_ARTWORK_BYTES {
+        return Err(format!("artwork exceeds {MAX_ARTWORK_BYTES} bytes"));
+    }
+    let reader = ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|error| error.to_string())?;
+    let decoder = reader.into_decoder().map_err(|error| error.to_string())?;
+    let (width, height) = decoder.dimensions();
+    if width == 0
+        || height == 0
+        || width > MAX_ARTWORK_DIMENSION
+        || height > MAX_ARTWORK_DIMENSION
+        || u64::from(width) * u64::from(height) * 4 > MAX_DECODED_ARTWORK_BYTES
+    {
+        return Err(format!("unsupported artwork dimensions {width}x{height}"));
+    }
+    let decoded = DynamicImage::from_decoder(decoder).map_err(|error| error.to_string())?;
+    let decoded = if width > CACHED_ARTWORK_DIMENSION || height > CACHED_ARTWORK_DIMENSION {
+        decoded.thumbnail(CACHED_ARTWORK_DIMENSION, CACHED_ARTWORK_DIMENSION)
+    } else {
+        decoded
+    };
+    let rgba = decoded.into_rgba8();
+    let (width, height) = rgba.dimensions();
+    let mut bgra = rgba.into_raw();
+    for pixel in bgra.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+    }
+    Ok(Arc::new(Artwork {
+        mime_type: mime_type.to_owned(),
+        encoded: Arc::from(bytes),
+        bgra: Arc::from(bgra),
+        width,
+        height,
+    }))
+}
+
+fn file_revision(path: &Path) -> FileRevision {
+    let metadata = std::fs::metadata(path).ok();
+    FileRevision {
+        path: path.to_path_buf(),
+        size: metadata.as_ref().map(std::fs::Metadata::len),
+        modified: metadata.and_then(|value| value.modified().ok()),
     }
 }
 

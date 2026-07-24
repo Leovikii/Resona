@@ -32,6 +32,9 @@ export interface CompressionItem {
   status: "pending" | "running" | "completed" | "failed" | "cancelled";
   message: string | null;
   sourceDeleted: boolean;
+  progress: number;
+  sourceBytes: number;
+  outputBytes: number;
 }
 
 export interface CompressionSnapshot {
@@ -39,7 +42,6 @@ export interface CompressionSnapshot {
   status: CompressionStatus;
   completed: number;
   total: number;
-  currentProgress: number;
   items: CompressionItem[];
 }
 
@@ -51,6 +53,7 @@ export interface CompressionScanNode {
   kind: "root" | "directory" | "file";
   ready: boolean;
   issueCode: string | null;
+  sourceBytes: number;
   children: CompressionScanNode[];
 }
 
@@ -77,7 +80,6 @@ export const emptyCompressionSnapshot: CompressionSnapshot = {
   status: "idle",
   completed: 0,
   total: 0,
-  currentProgress: 0,
   items: [],
 };
 

@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use futures_util::future::{AbortHandle, Abortable};
 use semver::Version;
@@ -104,6 +105,7 @@ struct SelectedRelease {
 pub struct ApplicationUpdateService {
     path: PathBuf,
     state: Mutex<StoredApplicationUpdate>,
+    check_active: Mutex<bool>,
     install_cancel: Mutex<Option<AbortHandle>>,
 }
 
@@ -133,6 +135,7 @@ impl ApplicationUpdateService {
         Self {
             path,
             state: Mutex::new(state),
+            check_active: Mutex::new(false),
             install_cancel: Mutex::new(None),
         }
     }
@@ -167,15 +170,27 @@ impl ApplicationUpdateService {
     pub async fn check(
         self: &Arc<Self>,
     ) -> Result<ApplicationUpdateCheckResult, ApplicationUpdateFailure> {
+        {
+            let mut active = self.lock_check_active()?;
+            if *active {
+                return Err(ApplicationUpdateFailure::new(
+                    "update_check_busy",
+                    "an application update check is already running",
+                ));
+            }
+            *active = true;
+        }
         let service = Arc::clone(self);
-        tauri::async_runtime::spawn_blocking(move || service.discover_update())
+        let result = tauri::async_runtime::spawn_blocking(move || service.discover_update())
             .await
             .map_err(|error| {
                 ApplicationUpdateFailure::new(
                     "update_check_task_failed",
                     format!("update check task failed: {error}"),
                 )
-            })?
+            });
+        *self.lock_check_active()? = false;
+        result?
     }
 
     pub async fn install(
@@ -358,6 +373,17 @@ impl ApplicationUpdateService {
             )
         })
     }
+
+    fn lock_check_active(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, bool>, ApplicationUpdateFailure> {
+        self.check_active.lock().map_err(|_| {
+            ApplicationUpdateFailure::new(
+                "update_check_state_poisoned",
+                "application update check state is unavailable",
+            )
+        })
+    }
 }
 
 fn current_version() -> Result<Version, ApplicationUpdateFailure> {
@@ -370,10 +396,16 @@ fn current_version() -> Result<Version, ApplicationUpdateFailure> {
 }
 
 fn fetch_github_releases() -> Result<Vec<GithubRelease>, ApplicationUpdateFailure> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(5)))
+        .timeout_global(Some(Duration::from_secs(15)))
+        .build()
+        .into();
     let mut releases = Vec::new();
     for page in 1..=10 {
         let url = format!("{GITHUB_RELEASES_URL}{page}");
-        let mut response = ureq::get(&url)
+        let mut response = agent
+            .get(&url)
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", "2022-11-28")
             .header(

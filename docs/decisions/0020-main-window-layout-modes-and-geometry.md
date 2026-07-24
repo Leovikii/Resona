@@ -1,6 +1,6 @@
 # ADR 0020：主窗口宽屏/窄屏模式与几何恢复
 
-- 状态：Accepted
+- 状态：Accepted；窄屏导航细节由 [ADR 0021](0021-compact-top-navigation-and-playlist-tabs.md) 替代，最近播放入口由 rc.2 撤销
 - 日期：2026-07-21
 - 补充：[ADR 0006](0006-application-shell-theme-and-locale.md) 的固定宽屏应用壳
 - 补充：[ADR 0017](0017-full-player-as-main-content-view.md) 的完整播放器布局

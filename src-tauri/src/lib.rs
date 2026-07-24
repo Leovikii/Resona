@@ -35,9 +35,9 @@ use commands::{
     get_default_playlist, get_desktop_lyrics_window_state, get_ffmpeg_dependency_state,
     get_main_window_state, get_now_playing_state, get_playback_state, get_track_details,
     hide_desktop_lyrics_window, install_application_update, install_ffmpeg_dependency,
-    list_playlist_items, list_playlists, list_recent_play, lock_desktop_lyrics_window,
-    main_window_ready, move_default_playlist_item, move_playlist, move_playlist_item,
-    next_playback, open_main_settings, open_media_context, open_project_page, pause_playback,
+    list_playlist_items, list_playlists, lock_desktop_lyrics_window, main_window_ready,
+    move_default_playlist_item, move_playlist, move_playlist_item, next_playback,
+    open_external_url, open_main_settings, open_media_context, open_project_page, pause_playback,
     play_default_playlist_item, play_queue_item, play_user_playlist_item, previous_playback,
     refresh_output_devices, remove_audio_compression_inputs, remove_default_playlist_items,
     remove_playlist_item, remove_playlist_items, rename_playlist, resolve_main_window_close,
@@ -51,6 +51,7 @@ use compression::CompressionService;
 use ffmpeg_dependency::FfmpegDependencyService;
 use lyrics::LyricsService;
 use media_import::MediaImportService;
+use metadata::MetadataService;
 use persistence::{PersistenceService, PlaybackSessionRecord};
 use platform::desktop_lyrics::DesktopLyricsWindowService;
 use platform::playback_projection::NativePlaybackProjection;
@@ -63,6 +64,8 @@ pub fn run() {
     let playback_for_restore = Arc::clone(&playback_engine);
     let lyrics_service = Arc::new(LyricsService::default());
     let desktop_lyrics_service = Arc::new(DesktopLyricsWindowService::default());
+    let metadata_service = Arc::new(MetadataService::default());
+    let metadata_for_projection = Arc::clone(&metadata_service);
     #[cfg(target_os = "windows")]
     let playback_for_smtc = Arc::clone(&playback_engine);
     #[cfg(target_os = "windows")]
@@ -116,6 +119,7 @@ pub fn run() {
         .manage(media_import_service)
         .manage(lyrics_service)
         .manage(desktop_lyrics_service)
+        .manage(metadata_service)
         .setup(move |app| {
             log::info!(
                 "application setup started: version={}",
@@ -152,9 +156,10 @@ pub fn run() {
             }
             app.manage(main_window);
             let native_projection = Arc::new(
-                NativePlaybackProjection::start(Arc::clone(
-                    app.state::<Arc<RodioPlaybackEngine>>().inner(),
-                ))
+                NativePlaybackProjection::start(
+                    Arc::clone(app.state::<Arc<RodioPlaybackEngine>>().inner()),
+                    Arc::clone(&metadata_for_projection),
+                )
                 .map_err(std::io::Error::other)?,
             );
             let tray = platform::tray::TrayService::create(
@@ -204,6 +209,7 @@ pub fn run() {
             install_application_update,
             cancel_application_update,
             open_project_page,
+            open_external_url,
             get_main_window_state,
             set_main_window_layout_mode,
             main_window_ready,
@@ -241,8 +247,7 @@ pub fn run() {
             remove_playlist_item,
             remove_playlist_items,
             clear_playlist_items,
-            move_playlist_item,
-            list_recent_play
+            move_playlist_item
         ])
         .build(tauri::generate_context!())
         .expect("failed to build Resona")
@@ -518,24 +523,16 @@ fn persist_playback_session(app: &tauri::AppHandle) {
 
 fn dispatch_external_media(app: tauri::AppHandle, path: std::path::PathBuf) {
     let media_import = Arc::clone(app.state::<Arc<MediaImportService>>().inner());
-    let persistence = Arc::clone(app.state::<Arc<PersistenceService>>().inner());
     tauri::async_runtime::spawn(async move {
-        let result = tauri::async_runtime::spawn_blocking(move || {
-            let result = media_import.open_media_context(&path)?;
-            if let Some(path) = result.playback.path.as_deref() {
-                if let Err(error) = persistence.record_recent(path) {
-                    eprintln!("recent playback record failed: {error}");
-                }
-            }
-            Ok::<_, crate::playback::PlaybackFailure>(result)
-        })
-        .await
-        .map_err(|error| {
-            crate::playback::PlaybackFailure::task_failed(format!(
-                "external media task failed: {error}"
-            ))
-        })
-        .and_then(|result| result);
+        let result =
+            tauri::async_runtime::spawn_blocking(move || media_import.open_media_context(&path))
+                .await
+                .map_err(|error| {
+                    crate::playback::PlaybackFailure::task_failed(format!(
+                        "external media task failed: {error}"
+                    ))
+                })
+                .and_then(|result| result);
 
         match result {
             Ok(result) => {

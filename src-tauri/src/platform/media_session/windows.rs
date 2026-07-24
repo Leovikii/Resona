@@ -11,6 +11,7 @@ use souvlaki::{
     SeekDirection,
 };
 
+use crate::platform::playback_projection::NativePlaybackSnapshot;
 use crate::playback::{PlaybackEngine, PlaybackStatus, RodioPlaybackEngine};
 
 const COMMAND_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -31,7 +32,7 @@ impl MediaSessionAdapter {
         hwnd: isize,
         engine: Arc<RodioPlaybackEngine>,
         app_logo_path: &Path,
-        projection: Receiver<crate::playback::PlaybackSnapshot>,
+        projection: Receiver<NativePlaybackSnapshot>,
     ) -> Result<Self, String> {
         let (commands, receiver) = mpsc::channel();
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
@@ -88,7 +89,7 @@ fn run_session(
     ready_sender: SyncSender<Result<(), String>>,
     callback_sender: Sender<MediaSessionCommand>,
     app_logo_url: String,
-    projection: Receiver<crate::playback::PlaybackSnapshot>,
+    projection: Receiver<NativePlaybackSnapshot>,
 ) {
     let config = PlatformConfig {
         dbus_name: "io.github.vki.resona",
@@ -117,7 +118,7 @@ fn run_session(
         return;
     }
 
-    let mut last_metadata: Option<(String, Option<u64>)> = None;
+    let mut last_metadata: Option<(String, String, Option<u64>)> = None;
     loop {
         match receiver.recv_timeout(COMMAND_POLL_INTERVAL) {
             Ok(MediaSessionCommand::Event(event)) => {
@@ -126,8 +127,13 @@ fn run_session(
             Ok(MediaSessionCommand::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
             Err(RecvTimeoutError::Timeout) => {}
         }
-        if let Some(snapshot) = projection.try_iter().last() {
-            sync_controls(&snapshot, &mut controls, &mut last_metadata, &app_logo_url);
+        if let Some(projection) = projection.try_iter().last() {
+            sync_controls(
+                &projection,
+                &mut controls,
+                &mut last_metadata,
+                &app_logo_url,
+            );
         }
     }
 }
@@ -194,17 +200,27 @@ fn seek_by(
 }
 
 fn sync_controls(
-    snapshot: &crate::playback::PlaybackSnapshot,
+    projection: &NativePlaybackSnapshot,
     controls: &mut MediaControls,
-    last_metadata: &mut Option<(String, Option<u64>)>,
+    last_metadata: &mut Option<(String, String, Option<u64>)>,
     app_logo_url: &str,
 ) {
+    let snapshot = &projection.playback;
     let title = current_track_title(snapshot);
-    let metadata_key = (title.clone(), snapshot.duration_ms);
+    let metadata_key = (
+        snapshot.path.clone().unwrap_or_default(),
+        title.clone(),
+        snapshot.duration_ms,
+    );
     if last_metadata.as_ref() != Some(&metadata_key) {
+        let cover_url = projection
+            .artwork
+            .as_ref()
+            .map(|artwork| artwork.data_url())
+            .unwrap_or_else(|| app_logo_url.to_owned());
         let metadata = MediaMetadata {
             title: (!title.is_empty()).then_some(title.as_str()),
-            cover_url: Some(app_logo_url),
+            cover_url: Some(cover_url.as_str()),
             duration: snapshot.duration_ms.map(Duration::from_millis),
             ..MediaMetadata::default()
         };

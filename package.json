@@ -1,7 +1,7 @@
 {
   "name": "resona",
   "private": true,
-  "version": "0.1.0-rc.1",
+  "version": "0.1.0-rc.2",
   "type": "module",
   "scripts": {
     "dev": "vite --port 1420",
@@ -26,7 +26,9 @@
     "lucide-react": "^1.24.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-i18next": "^17.0.10"
+    "react-i18next": "^17.0.10",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4",

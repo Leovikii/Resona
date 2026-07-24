@@ -141,6 +141,9 @@ export function useAudioCompression() {
               status: "completed" as const,
               message: null,
               sourceDeleted: deleteSource,
+              progress: 1,
+              sourceBytes: 42_000_000,
+              outputBytes: 24_000_000,
             })),
           };
       setSnapshot(next);
@@ -184,6 +187,7 @@ function previewScan(paths: string[]): CompressionScanSnapshot {
     kind: "root" as const,
     ready: false,
     issueCode: null,
+    sourceBytes: 0,
     children: [
       {
         path: `${path}\\Album ${index + 1}`,
@@ -191,6 +195,7 @@ function previewScan(paths: string[]): CompressionScanSnapshot {
         kind: "directory" as const,
         ready: false,
         issueCode: null,
+        sourceBytes: 0,
         children: [
           {
             path: `${path}\\Album ${index + 1}\\Track 01.wav`,
@@ -198,6 +203,7 @@ function previewScan(paths: string[]): CompressionScanSnapshot {
             kind: "file" as const,
             ready: true,
             issueCode: null,
+            sourceBytes: 42_000_000,
             children: [],
           },
           {
@@ -206,6 +212,7 @@ function previewScan(paths: string[]): CompressionScanSnapshot {
             kind: "file" as const,
             ready: false,
             issueCode: "output_exists",
+            sourceBytes: 38_000_000,
             children: [],
           },
         ],
