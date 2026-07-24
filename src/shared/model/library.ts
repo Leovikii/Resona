@@ -54,13 +54,6 @@ export interface PlaylistItem {
   position: number;
 }
 
-export interface RecentPlayRecord {
-  path: string;
-  displayName: string;
-  lastPlayedAt: number;
-  playCount: number;
-}
-
 export interface RejectedPath {
   path: string;
   reason: "missing" | "unsupported" | "unreadable" | "empty_folder" | "duplicate";

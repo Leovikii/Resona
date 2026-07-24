@@ -1,33 +1,19 @@
-# Resona 文档索引
+# 文档索引
 
-本目录是项目范围、架构、进度和长期决策的权威记录。README 只保留入口信息，具体内容在这里维护。
+| 文档 | 权威内容 |
+| --- | --- |
+| [PRODUCT.md](PRODUCT.md) | 当前产品范围与非目标 |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 分层、所有权和关键数据流 |
+| [STRUCTURE.md](STRUCTURE.md) | 目录职责与文档规则 |
+| [DEVELOPMENT.md](DEVELOPMENT.md) | 环境、实现、安全和测试规范 |
+| [STATUS.md](STATUS.md) | 当前版本、开放门禁与风险 |
+| [ROADMAP.md](ROADMAP.md) | 交付顺序与未来边界 |
+| [KNOWN_ISSUES.md](KNOWN_ISSUES.md) | 仍开放问题及重新调查条件 |
+| [AGENT_GUIDE.md](AGENT_GUIDE.md) | Agent 必读顺序和约束 |
+| [plans/](plans/README.md) | 活动版本计划 |
+| [decisions/](decisions/README.md) | 长期架构决策 |
+| [performance/](performance/) | 当前 RC 性能证据 |
+| [releases/](releases/) | 当前 RC 验收记录 |
+| [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) | 自动生成的依赖许可证 |
 
-## 核心文档
-
-| 文档 | 用途 | 更新时机 |
-| --- | --- | --- |
-| [PRODUCT.md](PRODUCT.md) | 产品目标、首版范围和非目标 | 功能范围变化时 |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 系统分层、边界和关键数据流 | 模块职责或通信方式变化时 |
-| [STRUCTURE.md](STRUCTURE.md) | 计划目录及所有权 | 新增顶层模块或调整边界时 |
-| [DEVELOPMENT.md](DEVELOPMENT.md) | 开发、依赖和质量准则 | 工程规则变化时 |
-| [ROADMAP.md](ROADMAP.md) | 阶段、验收条件和顺序 | 计划调整时 |
-| [STATUS.md](STATUS.md) | 已完成、进行中、下一步和阻塞项 | 每次有效开发后 |
-| [KNOWN_ISSUES.md](KNOWN_ISSUES.md) | 已知缺陷、暂缓理由和重新调查条件 | 发现问题或状态变化时 |
-| [AGENT_GUIDE.md](AGENT_GUIDE.md) | AI Agent 与自动化开发约束 | 工程规则变化时 |
-| [performance/](performance/) | 版本性能、资源与音频审计证据 | 发布候选或性能改动后 |
-| [releases/](releases/) | 各版本范围、验收证据和已知限制 | 每次版本验收时 |
-| [plans/](plans/README.md) | 待确认版本计划及其状态 | 进入新版本前或范围变化时 |
-| [decisions/](decisions/README.md) | 架构决策记录（ADR） | 形成难以从代码看出的长期决定时 |
-| [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) | 当前 Cargo/npm 依赖许可证清单 | 依赖变化时 |
-
-## 权威性
-
-发生冲突时，优先级如下：
-
-1. 当前代码、自动化测试和实际构建结果
-2. 已接受的 ADR
-3. `ARCHITECTURE.md` 与 `DEVELOPMENT.md`
-4. `STATUS.md` 与 `ROADMAP.md`
-5. 其他说明文档
-
-发现文档与代码不一致时，应在同一任务中修正文档，不能让台账长期失真。
+冲突时优先级：当前代码/测试/构建结果 > Accepted ADR > 架构与开发规范 > 状态与路线图 > 其他说明。发现不一致必须在同一任务修正文档，不新增逐日流水或复制同一事实到多处。

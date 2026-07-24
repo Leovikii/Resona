@@ -11,7 +11,8 @@ use tauri::{AppHandle, Manager};
 
 use crate::application_lifetime::show_main_window;
 use crate::platform::desktop_lyrics::DesktopLyricsWindowService;
-use crate::playback::{PlaybackEngine, PlaybackSnapshot, PlaybackStatus, RodioPlaybackEngine};
+use crate::platform::playback_projection::NativePlaybackSnapshot;
+use crate::playback::{PlaybackEngine, PlaybackStatus, RodioPlaybackEngine};
 
 const SHOW_ID: &str = "tray_show";
 const TITLE_ID: &str = "tray_title";
@@ -34,7 +35,10 @@ pub struct TrayService {
 }
 
 impl TrayService {
-    pub fn create(app: &AppHandle, projection: Receiver<PlaybackSnapshot>) -> tauri::Result<Self> {
+    pub fn create(
+        app: &AppHandle,
+        projection: Receiver<NativePlaybackSnapshot>,
+    ) -> tauri::Result<Self> {
         let show = MenuItem::with_id(app, SHOW_ID, "打开 Resona", true, None::<&str>)?;
         let title = MenuItem::with_id(app, TITLE_ID, "未在播放", false, None::<&str>)?;
         let previous = MenuItem::with_id(app, PREVIOUS_ID, "上一曲", false, None::<&str>)?;
@@ -174,7 +178,7 @@ enum TrayProjectionCommand {
 }
 
 fn spawn_projection_refresh(
-    projection: Receiver<PlaybackSnapshot>,
+    projection: Receiver<NativePlaybackSnapshot>,
     title: MenuItem<tauri::Wry>,
     previous: MenuItem<tauri::Wry>,
     play_pause: MenuItem<tauri::Wry>,
@@ -193,7 +197,8 @@ fn spawn_projection_refresh(
                 break;
             }
             match projection.recv_timeout(Duration::from_millis(500)) {
-                Ok(snapshot) => {
+                Ok(projection) => {
+                    let snapshot = projection.playback;
                     let current = snapshot
                         .queue
                         .iter()

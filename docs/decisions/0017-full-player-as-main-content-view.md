@@ -1,6 +1,6 @@
 # ADR 0017：完整播放器作为右侧主内容视图
 
-- 状态：Accepted
+- 状态：Accepted；涉及最近播放 selection 的描述由 rc.2 撤销
 - 日期：2026-07-20
 - 部分替代：[ADR 0014](0014-player-only-scope-and-transient-default-playlist.md) 的完整播放器覆盖层决定
 - 补充：[ADR 0015](0015-playlist-activation-and-single-state-presentation.md) 的单一状态展示决定

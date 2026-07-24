@@ -1,14 +1,13 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { ActionIcon, Paper, Portal, ScrollArea, Tabs, Tooltip } from "@mantine/core";
-import { History, Plus, Settings, Wrench } from "lucide-react";
+import { Plus, Settings, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { ActivePlaylistSnapshot, PlaylistSummary } from "../model/library";
 import { BrandWordmark } from "./BrandWordmark";
 
 export type CompactNavigationSelection =
-  | { kind: "recent" }
   | { kind: "default" }
   | { kind: "user"; playlistId: number }
   | { kind: "tools" }
@@ -66,12 +65,6 @@ export const CompactTopNavigation = memo(function CompactTopNavigation({
       <div className="compact-global-navigation">
         <BrandWordmark className="compact-brand-wordmark" />
         <nav className="compact-global-actions" aria-label={t("app.name")}>
-          <CompactNavButton
-            active={selection.kind === "recent"}
-            icon={<History size={17} />}
-            label={t("nav.recent")}
-            onClick={() => onSelect({ kind: "recent" })}
-          />
           <CompactNavButton
             active={selection.kind === "tools"}
             icon={<Wrench size={17} />}

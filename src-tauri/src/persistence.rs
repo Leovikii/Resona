@@ -8,8 +8,7 @@ use rusqlite::{params, Connection, ErrorCode, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-const SCHEMA_VERSION: i64 = 4;
-const RECENT_PLAY_LIMIT: i64 = 100;
+const SCHEMA_VERSION: i64 = 5;
 
 #[derive(Debug, Error)]
 pub enum PersistenceError {
@@ -80,15 +79,6 @@ pub struct PlaylistItemRecord {
 pub struct PlaylistDetails {
     pub playlist: PlaylistSummary,
     pub items: Vec<PlaylistItemRecord>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RecentPlayRecord {
-    pub path: String,
-    pub display_name: String,
-    pub last_played_at: i64,
-    pub play_count: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -403,57 +393,6 @@ impl PersistenceService {
         list_playlist_items_with_connection(&connection, playlist_id)
     }
 
-    pub fn list_recent(&self, limit: u32) -> Result<Vec<RecentPlayRecord>, PersistenceError> {
-        let connection = self.connection.lock().map_err(|_| poisoned())?;
-        let mut statement = connection
-            .prepare(
-                "SELECT path, display_name, last_played_at, play_count
-                 FROM recent_plays ORDER BY last_played_at DESC, path LIMIT ?1",
-            )
-            .map_err(query_error)?;
-        let rows = statement
-            .query_map(params![limit.clamp(1, RECENT_PLAY_LIMIT as u32)], |row| {
-                Ok(RecentPlayRecord {
-                    path: row.get(0)?,
-                    display_name: row.get(1)?,
-                    last_played_at: row.get(2)?,
-                    play_count: row.get::<_, i64>(3)?.max(0) as u64,
-                })
-            })
-            .map_err(query_error)?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(query_error)
-    }
-
-    pub fn record_recent(&self, path: &str) -> Result<(), PersistenceError> {
-        let display_name = Path::new(path)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or(path);
-        let connection = self.connection.lock().map_err(|_| poisoned())?;
-        let transaction = connection.unchecked_transaction().map_err(query_error)?;
-        transaction
-            .execute(
-                "INSERT INTO recent_plays (path, display_name, last_played_at, play_count)
-                 VALUES (?1, ?2, ?3, 1)
-                 ON CONFLICT(path) DO UPDATE SET display_name = excluded.display_name,
-                 last_played_at = excluded.last_played_at,
-                 play_count = recent_plays.play_count + 1",
-                params![path, display_name, now_seconds()],
-            )
-            .map_err(query_error)?;
-        transaction
-            .execute(
-                "DELETE FROM recent_plays WHERE path IN (
-                   SELECT path FROM recent_plays
-                   ORDER BY last_played_at DESC, path
-                   LIMIT -1 OFFSET ?1
-                 )",
-                params![RECENT_PLAY_LIMIT],
-            )
-            .map_err(query_error)?;
-        transaction.commit().map_err(query_error)
-    }
-
     pub fn load_playback_session(&self) -> Result<Option<PlaybackSessionRecord>, PersistenceError> {
         let connection = self.connection.lock().map_err(|_| poisoned())?;
         let value = connection
@@ -522,17 +461,11 @@ fn migrate(connection: &Connection) -> Result<(), PersistenceError> {
                  );
                  CREATE INDEX idx_playlist_items_order
                    ON playlist_items(playlist_id, position, id);
-                 CREATE TABLE recent_plays (
-                   path TEXT PRIMARY KEY,
-                   display_name TEXT NOT NULL,
-                   last_played_at INTEGER NOT NULL,
-                   play_count INTEGER NOT NULL DEFAULT 0
-                 );
                  CREATE TABLE app_state (
                    key TEXT PRIMARY KEY,
                    value TEXT NOT NULL
                  );
-                 PRAGMA user_version = 4;
+                 PRAGMA user_version = 5;
                  COMMIT;",
             )
             .map_err(|error| PersistenceError::Migration(error.to_string()))?;
@@ -550,6 +483,16 @@ fn migrate(connection: &Connection) -> Result<(), PersistenceError> {
                    value TEXT NOT NULL
                  );
                  PRAGMA user_version = 4;
+                 COMMIT;",
+            )
+            .map_err(|error| PersistenceError::Migration(error.to_string()))?;
+    }
+    if version < 5 {
+        connection
+            .execute_batch(
+                "BEGIN;
+                 DROP TABLE IF EXISTS recent_plays;
+                 PRAGMA user_version = 5;
                  COMMIT;",
             )
             .map_err(|error| PersistenceError::Migration(error.to_string()))?;
@@ -906,7 +849,7 @@ mod tests {
     }
 
     #[test]
-    fn migrates_v2_without_losing_playlists_or_recent_history() {
+    fn migrates_v2_without_losing_playlists() {
         let connection = Connection::open_in_memory().expect("open legacy database");
         connection
             .execute_batch(
@@ -953,7 +896,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read schema version");
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
         let service = PersistenceService {
             connection: Mutex::new(connection),
         };
@@ -972,10 +915,151 @@ mod tests {
                 .len(),
             1
         );
-        assert_eq!(service.list_recent(10).expect("list recent").len(), 1);
         let connection = service.connection.lock().expect("lock database");
         assert!(!table_exists(&connection, "managed_folders"));
         assert!(!table_exists(&connection, "media_records"));
+        assert!(!table_exists(&connection, "recent_plays"));
+    }
+
+    #[test]
+    fn migrates_v4_by_dropping_only_recent_history() {
+        let connection = Connection::open_in_memory().expect("open v4 database");
+        connection
+            .execute_batch(
+                "CREATE TABLE playlists (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   name TEXT NOT NULL UNIQUE,
+                   position INTEGER NOT NULL,
+                   created_at INTEGER NOT NULL,
+                   updated_at INTEGER NOT NULL
+                 );
+                 CREATE INDEX idx_playlists_order ON playlists(position, id);
+                 CREATE TABLE playlist_items (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+                   path TEXT NOT NULL,
+                   display_name TEXT NOT NULL,
+                   position INTEGER NOT NULL
+                 );
+                 CREATE INDEX idx_playlist_items_order
+                   ON playlist_items(playlist_id, position, id);
+                 CREATE TABLE recent_plays (
+                   path TEXT PRIMARY KEY,
+                   display_name TEXT NOT NULL,
+                   last_played_at INTEGER NOT NULL,
+                   play_count INTEGER NOT NULL DEFAULT 0
+                 );
+                 CREATE TABLE app_state (
+                   key TEXT PRIMARY KEY,
+                   value TEXT NOT NULL
+                 );
+                 INSERT INTO playlists (id, name, position, created_at, updated_at)
+                   VALUES (1, 'Keep', 0, 1, 2);
+                 INSERT INTO playlist_items (id, playlist_id, path, display_name, position)
+                   VALUES (1, 1, 'C:\\Music\\keep.wav', 'keep.wav', 0);
+                 INSERT INTO recent_plays (path, display_name, last_played_at, play_count)
+                   VALUES ('C:\\Music\\drop.wav', 'drop.wav', 3, 1);
+                 INSERT INTO app_state (key, value) VALUES ('keep', 'value');
+                 PRAGMA user_version = 4;",
+            )
+            .expect("create v4 schema");
+
+        migrate_for_test(&connection);
+
+        let version: i64 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .expect("read schema version");
+        assert_eq!(version, 5);
+        assert!(!table_exists(&connection, "recent_plays"));
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM playlists", [], |row| row
+                    .get::<_, i64>(0))
+                .expect("playlist count"),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM playlist_items", [], |row| row
+                    .get::<_, i64>(0))
+                .expect("playlist item count"),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT value FROM app_state WHERE key = 'keep'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .expect("app state"),
+            "value"
+        );
+    }
+
+    #[test]
+    fn migrates_v3_by_adding_app_state_and_preserving_playlists() {
+        let connection = Connection::open_in_memory().expect("open v3 database");
+        connection
+            .execute_batch(
+                "CREATE TABLE playlists (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   name TEXT NOT NULL UNIQUE,
+                   position INTEGER NOT NULL,
+                   created_at INTEGER NOT NULL,
+                   updated_at INTEGER NOT NULL
+                 );
+                 CREATE INDEX idx_playlists_order ON playlists(position, id);
+                 CREATE TABLE playlist_items (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+                   path TEXT NOT NULL,
+                   display_name TEXT NOT NULL,
+                   position INTEGER NOT NULL
+                 );
+                 CREATE INDEX idx_playlist_items_order
+                   ON playlist_items(playlist_id, position, id);
+                 CREATE TABLE recent_plays (
+                   path TEXT PRIMARY KEY,
+                   display_name TEXT NOT NULL,
+                   last_played_at INTEGER NOT NULL,
+                   play_count INTEGER NOT NULL DEFAULT 0
+                 );
+                 INSERT INTO playlists (id, name, position, created_at, updated_at)
+                   VALUES (1, 'Keep v3', 0, 1, 2);
+                 INSERT INTO playlist_items (id, playlist_id, path, display_name, position)
+                   VALUES (1, 1, 'C:\\Music\\v3.wav', 'v3.wav', 0);
+                 INSERT INTO recent_plays (path, display_name, last_played_at, play_count)
+                   VALUES ('C:\\Music\\drop.wav', 'drop.wav', 3, 1);
+                 PRAGMA user_version = 3;",
+            )
+            .expect("create v3 schema");
+
+        migrate_for_test(&connection);
+
+        let version: i64 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .expect("read schema version");
+        assert_eq!(version, 5);
+        assert!(table_exists(&connection, "app_state"));
+        assert!(!table_exists(&connection, "recent_plays"));
+        assert_eq!(
+            connection
+                .query_row("SELECT name FROM playlists WHERE id = 1", [], |row| row
+                    .get::<_, String>(
+                    0
+                ))
+                .expect("playlist name"),
+            "Keep v3"
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT path FROM playlist_items WHERE id = 1", [], |row| {
+                    row.get::<_, String>(0)
+                })
+                .expect("playlist item path"),
+            "C:\\Music\\v3.wav"
+        );
     }
 
     #[test]
@@ -1155,30 +1239,6 @@ mod tests {
             service.move_playlist_item(playlist.playlist.id, 404, 0),
             Err(PersistenceError::PlaylistItemNotFound)
         ));
-    }
-
-    #[test]
-    fn recent_play_is_deduplicated_counted_and_bounded() {
-        let service = service();
-        service
-            .record_recent("C:\\Music\\First.wav")
-            .expect("record first play");
-        service
-            .record_recent("C:\\Music\\First.wav")
-            .expect("record second play");
-        for index in 0..105 {
-            service
-                .record_recent(&format!("C:\\Music\\{index:03}.wav"))
-                .expect("record bounded recent item");
-        }
-        let recent = service.list_recent(500).expect("list recent");
-        assert_eq!(recent.len(), RECENT_PLAY_LIMIT as usize);
-        let first = recent
-            .iter()
-            .find(|record| record.path.ends_with("First.wav"));
-        if let Some(first) = first {
-            assert_eq!(first.play_count, 2);
-        }
     }
 
     fn table_exists(connection: &Connection, table: &str) -> bool {

@@ -6,7 +6,6 @@ import type {
   PlaylistItem,
   PlaylistMutationResult,
   PlaylistSummary,
-  RecentPlayRecord,
 } from "../../shared/model/library";
 
 const previewPlaylists: PlaylistSummary[] = [
@@ -23,18 +22,12 @@ const previewItems: Record<number, PlaylistItem[]> = {
   2: [item(4, 2, "C:\\Music\\Afterimage.flac", 0)],
 };
 
-const previewRecent: RecentPlayRecord[] = [
-  { path: "C:\\Music\\Midnight Signal.flac", displayName: "Midnight Signal.flac", lastPlayedAt: 0, playCount: 4 },
-  { path: "C:\\Music\\First Light.wav", displayName: "First Light.wav", lastPlayedAt: 0, playCount: 2 },
-];
-
 export function useLibrary() {
   const preview = import.meta.env.DEV && !isTauriRuntime();
   const [playlists, setPlaylists] = useState<PlaylistSummary[]>(preview ? previewPlaylists : []);
   const [previewItemsByPlaylist, setPreviewItemsByPlaylist] = useState<Record<number, PlaylistItem[]>>(
     () => preview ? clonePreviewItems() : {},
   );
-  const [recent, setRecent] = useState<RecentPlayRecord[]>(preview ? previewRecent : []);
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
   const [selectedItems, setSelectedItems] = useState<PlaylistItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -51,17 +44,13 @@ export function useLibrary() {
     if (preview) return;
     setLoading(true);
     try {
-      const [nextPlaylists, nextRecent] = await Promise.all([
-        invokeTauri<PlaylistSummary[]>("list_playlists"),
-        invokeTauri<RecentPlayRecord[]>("list_recent_play", { limit: 100 }),
-      ]);
+      const nextPlaylists = await invokeTauri<PlaylistSummary[]>("list_playlists");
       setPlaylists(nextPlaylists);
       setSelectedPlaylistId((current) =>
         current !== null && nextPlaylists.some((playlist) => playlist.id === current)
           ? current
           : null,
       );
-      setRecent(nextRecent);
       setError(null);
     } catch (cause) {
       setError(messageFrom(cause));
@@ -389,7 +378,6 @@ export function useLibrary() {
     loading,
     moveItem,
     playlists,
-    recent,
     refresh,
     rejectedCount,
     removeItem,

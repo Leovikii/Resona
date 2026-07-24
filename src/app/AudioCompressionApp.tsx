@@ -22,7 +22,9 @@ import {
 import {
   ChevronDown,
   ChevronRight,
+  Check,
   CircleAlert,
+  CircleX,
   FileAudio,
   Folder,
   FolderOpen,
@@ -37,6 +39,7 @@ import { selectCompressionFolders, selectWavFiles } from "../shared/bridge/audio
 import { isTauriRuntime } from "../shared/bridge/tauri";
 import { initializeCurrentWindowMaterial } from "../shared/bridge/windowAppearance";
 import type {
+  CompressionItem,
   CompressionPreset,
   CompressionScanNode,
 } from "../shared/model/compression";
@@ -55,6 +58,12 @@ export default function AudioCompressionApp() {
   const taskBusy = compression.snapshot.status === "running" || compression.snapshot.status === "cancelling";
   const locked = scanBusy || taskBusy;
   const readyPaths = useMemo(() => collectReadyPaths(compression.scan.roots), [compression.scan.roots]);
+  const readyBytes = useMemo(() => collectReadyBytes(compression.scan.roots), [compression.scan.roots]);
+  const taskItems = useMemo(
+    () => new Map(compression.snapshot.items.map((item) => [item.source, item])),
+    [compression.snapshot.items],
+  );
+  const summary = compressionSummary(compression.snapshot, readyPaths.length, readyBytes, t);
 
   useEffect(() => {
     document.documentElement.dataset.window = "audio-compression";
@@ -201,7 +210,7 @@ export default function AudioCompressionApp() {
         </Group>
       </section>
 
-      {(scanBusy || compression.snapshot.total > 0 || compression.scan.warnings.length > 0 || compression.error) && (
+      {(scanBusy || compression.scan.warnings.length > 0 || compression.error) && (
         <section className="compression-status-band" aria-live="polite">
           {scanBusy && (
             <div className="compression-scan-progress">
@@ -220,7 +229,6 @@ export default function AudioCompressionApp() {
               </Text>
             </div>
           )}
-          <CompressionTaskProgress snapshot={compression.snapshot} />
           {compression.scan.warnings.length > 0 && (
             <div className="compression-warnings">
               <Group gap={6} wrap="nowrap">
@@ -242,8 +250,8 @@ export default function AudioCompressionApp() {
         <section className="compression-tree-panel" aria-label={t("compression.inputs")}>
           <div className="compression-panel-heading">
             <Text fw={650} size="sm">{t("compression.inputs")}</Text>
-            <Text c="dimmed" size="xs">
-              {t("compression.candidateCount", { count: compression.scan.candidateFiles })}
+            <Text c="dimmed" className="compression-summary" lineClamp={1} size="xs" title={summary}>
+              {summary}
             </Text>
           </div>
           <ScrollArea className="compression-tree-scroll" scrollHideDelay={700} type="scroll">
@@ -258,6 +266,7 @@ export default function AudioCompressionApp() {
                     key={node.path}
                     level={0}
                     node={node}
+                    taskItems={taskItems}
                     onRemove={(path) => void compression.removeInputs([path])}
                     onToggle={(path) => setExpanded((current) => {
                       const next = new Set(current);
@@ -297,11 +306,12 @@ export default function AudioCompressionApp() {
   );
 }
 
-function CompressionTreeNode({ disabled, expanded, level, node, onRemove, onToggle }: {
+function CompressionTreeNode({ disabled, expanded, level, node, onRemove, onToggle, taskItems }: {
   disabled: boolean;
   expanded: Set<string>;
   level: number;
   node: CompressionScanNode;
+  taskItems: Map<string, CompressionItem>;
   onRemove: (path: string) => void;
   onToggle: (path: string) => void;
 }) {
@@ -311,9 +321,18 @@ function CompressionTreeNode({ disabled, expanded, level, node, onRemove, onTogg
   const [visibleCount, setVisibleCount] = useState(200);
   const visibleChildren = node.children.slice(0, visibleCount);
   const remaining = node.children.length - visibleChildren.length;
+  const item = directory ? undefined : taskItems.get(node.path);
+  const progress = item ? Math.round(item.progress * 100) : 0;
   return (
     <div role="treeitem" aria-expanded={directory ? open : undefined}>
-      <div className="compression-tree-row" data-unavailable={!node.ready && !directory || undefined} style={{ "--tree-indent": `${level * 18}px` } as CSSProperties}>
+      <div
+        className="compression-tree-row"
+        data-status={item?.status}
+        data-unavailable={!node.ready && !directory || undefined}
+        style={{ "--tree-indent": `${level * 18}px` } as CSSProperties}
+        title={item?.message || undefined}
+      >
+        {item && <span className="compression-tree-progress" style={{ width: `${progress}%` }} />}
         {directory ? (
           <UnstyledButton aria-label={open ? t("common.collapse") : t("common.expand")} className="tree-toggle" onClick={() => onToggle(node.path)}>
             {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
@@ -321,7 +340,20 @@ function CompressionTreeNode({ disabled, expanded, level, node, onRemove, onTogg
         ) : <span className="tree-toggle-spacer" />}
         {directory ? <Folder size={17} /> : <FileAudio size={17} />}
         <Text className="compression-tree-name" lineClamp={1} size="sm" title={node.path}>{node.name}</Text>
-        {node.issueCode && <Badge color="yellow" size="xs" variant="light">{t(`compression.issues.${node.issueCode}`)}</Badge>}
+        <span className="compression-tree-meta">
+          {node.issueCode && <Badge color="yellow" size="xs" variant="light">{t(`compression.issues.${node.issueCode}`)}</Badge>}
+          {item?.status === "running" && <Text c="dimmed" size="xs">{progress}%</Text>}
+          {item?.status === "completed" && (
+            <Tooltip label={item.sourceDeleted ? t("compression.sourceDeleted") : t("compression.completed")}>
+              <span className="compression-item-state compression-item-state-completed"><Check size={14} />{formatBytes(item.outputBytes)}</span>
+            </Tooltip>
+          )}
+          {item?.status === "failed" && (
+            <Tooltip label={item.message || t("compression.failed")}><CircleX className="compression-item-state-failed" size={15} /></Tooltip>
+          )}
+          {item?.status === "cancelled" && <Text c="dimmed" size="xs">{t("compression.cancelled")}</Text>}
+          {!item && node.kind === "file" && <Text c="dimmed" size="xs">{formatBytes(node.sourceBytes)}</Text>}
+        </span>
         <Tooltip label={t("common.remove")}>
           <ActionIcon aria-label={t("common.remove")} disabled={disabled} onClick={() => onRemove(node.path)} size="sm" variant="subtle">
             <X size={14} />
@@ -339,6 +371,7 @@ function CompressionTreeNode({ disabled, expanded, level, node, onRemove, onTogg
               node={child}
               onRemove={onRemove}
               onToggle={onToggle}
+              taskItems={taskItems}
             />
           ))}
           {remaining > 0 && (
@@ -351,29 +384,6 @@ function CompressionTreeNode({ disabled, expanded, level, node, onRemove, onTogg
           )}
         </>
       )}
-    </div>
-  );
-}
-
-function CompressionTaskProgress({ snapshot }: {
-  snapshot: ReturnType<typeof useAudioCompression>["snapshot"];
-}) {
-  const { t } = useTranslation();
-  if (snapshot.total === 0) return null;
-  const value = ((snapshot.completed + snapshot.currentProgress) / snapshot.total) * 100;
-  return (
-    <div className="compression-task-progress">
-      <Progress animated={snapshot.status === "running"} value={value} />
-      <Text c="dimmed" size="xs">{t("compression.progress", { completed: snapshot.completed, total: snapshot.total })}</Text>
-      <ScrollArea.Autosize mah={180} scrollHideDelay={700} type="scroll">
-        <div className="compression-results">
-          {snapshot.items.map((item) => (
-            <Text c={item.status === "failed" || item.message ? "red" : "dimmed"} key={item.source} lineClamp={1} size="xs" title={item.message || item.output}>
-              {item.sourceDeleted ? t("compression.deleted", { path: item.source }) : item.message || item.output}
-            </Text>
-          ))}
-        </div>
-      </ScrollArea.Autosize>
     </div>
   );
 }
@@ -392,4 +402,53 @@ function collectReadyPaths(nodes: CompressionScanNode[]): string[] {
     ...(node.kind === "file" && node.ready ? [node.path] : []),
     ...collectReadyPaths(node.children),
   ]);
+}
+
+function collectReadyBytes(nodes: CompressionScanNode[]): number {
+  return nodes.reduce(
+    (total, node) => total + (node.kind === "file" && node.ready ? node.sourceBytes : 0) + collectReadyBytes(node.children),
+    0,
+  );
+}
+
+function compressionSummary(
+  snapshot: ReturnType<typeof useAudioCompression>["snapshot"],
+  readyCount: number,
+  readyBytes: number,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  if (snapshot.total === 0) {
+    return t("compression.summaryReady", { count: readyCount, size: formatBytes(readyBytes) });
+  }
+  const successful = snapshot.items.filter((item) => item.status === "completed");
+  const sourceBytes = successful.reduce((total, item) => total + item.sourceBytes, 0);
+  const outputBytes = successful.reduce((total, item) => total + item.outputBytes, 0);
+  if (snapshot.status === "running" || snapshot.status === "cancelling") {
+    const allSourceBytes = snapshot.items.reduce((total, item) => total + item.sourceBytes, 0);
+    return t("compression.summaryRunning", {
+      completed: snapshot.completed,
+      size: formatBytes(allSourceBytes),
+      total: snapshot.total,
+    });
+  }
+  const savedBytes = Math.max(0, sourceBytes - outputBytes);
+  const percent = sourceBytes > 0 ? Math.round((savedBytes / sourceBytes) * 100) : 0;
+  const failed = snapshot.items.filter((item) => item.status === "failed").length;
+  const cancelled = snapshot.items.filter((item) => item.status === "cancelled").length;
+  return t("compression.summaryComplete", {
+    cancelled: cancelled > 0 ? ` · ${t("compression.cancelledCount", { count: cancelled })}` : "",
+    failed: failed > 0 ? ` · ${t("compression.failedCount", { count: failed })}` : "",
+    output: formatBytes(outputBytes),
+    percent,
+    saved: formatBytes(savedBytes),
+    source: formatBytes(sourceBytes),
+  });
+}
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const unit = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / 1024 ** unit;
+  return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: unit === 0 ? 0 : 1 }).format(value)} ${units[unit]}`;
 }

@@ -10,7 +10,15 @@ mod windows_impl {
 
     use tauri::AppHandle;
     use windows::core::PCWSTR;
-    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::Foundation::{BOOL, HANDLE, HWND, LPARAM, LRESULT, RECT, WPARAM};
+    use windows::Win32::Graphics::Dwm::{
+        DwmInvalidateIconicBitmaps, DwmSetIconicLivePreviewBitmap, DwmSetIconicThumbnail,
+        DwmSetWindowAttribute, DWMWA_FORCE_ICONIC_REPRESENTATION, DWMWA_HAS_ICONIC_BITMAP,
+    };
+    use windows::Win32::Graphics::Gdi::{
+        CreateDIBSection, DeleteObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+        HBITMAP, HDC,
+    };
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
         COINIT_APARTMENTTHREADED,
@@ -21,10 +29,14 @@ mod windows_impl {
         THUMBBUTTONMASK,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        CallWindowProcW, DestroyIcon, GetWindowLongPtrW, LoadImageW, RegisterWindowMessageW,
-        SetWindowLongPtrW, GWLP_WNDPROC, HICON, IMAGE_ICON, LR_LOADFROMFILE, WM_COMMAND, WNDPROC,
+        CallWindowProcW, DestroyIcon, GetClientRect, GetWindowLongPtrW, LoadImageW,
+        RegisterWindowMessageW, SetWindowLongPtrW, GWLP_WNDPROC, HICON, IMAGE_ICON,
+        LR_LOADFROMFILE, WM_COMMAND, WM_DWMSENDICONICLIVEPREVIEWBITMAP, WM_DWMSENDICONICTHUMBNAIL,
+        WNDPROC,
     };
 
+    use crate::metadata::{read_artwork_file, Artwork};
+    use crate::platform::playback_projection::NativePlaybackSnapshot;
     use crate::playback::{PlaybackEngine, PlaybackSnapshot, PlaybackStatus, RodioPlaybackEngine};
 
     const POLL_INTERVAL: Duration = Duration::from_millis(500);
@@ -32,7 +44,7 @@ mod windows_impl {
     const PLAY_BUTTON_ID: u32 = 4_002;
     const NEXT_BUTTON_ID: u32 = 4_003;
 
-    #[derive(Clone, Copy)]
+    #[derive(Clone)]
     enum TaskbarCommand {
         Previous,
         Toggle,
@@ -54,7 +66,7 @@ mod windows_impl {
             hwnd: isize,
             engine: Arc<RodioPlaybackEngine>,
             resource_dir: PathBuf,
-            projection: Receiver<PlaybackSnapshot>,
+            projection: Receiver<NativePlaybackSnapshot>,
         ) -> Result<Self, String> {
             let (commands, receiver) = mpsc::channel();
             let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
@@ -73,10 +85,14 @@ mod windows_impl {
                 .map_err(|error| format!("failed to start taskbar worker: {error}"))?;
 
             match ready_receiver.recv_timeout(Duration::from_secs(5)) {
-                Ok(Ok(taskbar_created_message)) => {
-                    if let Err(error) =
-                        install_message_hook(app, hwnd, commands.clone(), taskbar_created_message)
-                    {
+                Ok(Ok((taskbar_created_message, placeholder))) => {
+                    if let Err(error) = install_message_hook(
+                        app,
+                        hwnd,
+                        commands.clone(),
+                        taskbar_created_message,
+                        placeholder,
+                    ) {
                         let _ = commands.send(TaskbarCommand::Shutdown);
                         let _ = worker.join();
                         return Err(error);
@@ -119,8 +135,8 @@ mod windows_impl {
         engine: Arc<RodioPlaybackEngine>,
         resource_dir: PathBuf,
         receiver: Receiver<TaskbarCommand>,
-        ready_sender: SyncSender<Result<u32, String>>,
-        projection: Receiver<PlaybackSnapshot>,
+        ready_sender: SyncSender<Result<(u32, Arc<Artwork>), String>>,
+        projection: Receiver<NativePlaybackSnapshot>,
     ) {
         let initialized = match unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) } {
             Ok(_) => true,
@@ -155,6 +171,14 @@ mod windows_impl {
                 return;
             }
         };
+        let placeholder = match load_placeholder(&resource_dir) {
+            Ok(artwork) => artwork,
+            Err(error) => {
+                let _ = ready_sender.send(Err(error));
+                unsafe { CoUninitialize() };
+                return;
+            }
+        };
         let taskbar_created_message =
             unsafe { RegisterWindowMessageW(windows::w!("TaskbarButtonCreated")) };
         if taskbar_created_message == 0 {
@@ -164,7 +188,10 @@ mod windows_impl {
             unsafe { CoUninitialize() };
             return;
         }
-        if ready_sender.send(Ok(taskbar_created_message)).is_err() {
+        if ready_sender
+            .send(Ok((taskbar_created_message, Arc::clone(&placeholder))))
+            .is_err()
+        {
             unsafe { CoUninitialize() };
             return;
         }
@@ -173,6 +200,7 @@ mod windows_impl {
         let mut buttons_registered = false;
         let mut last_projection = None;
         let mut latest_snapshot = None;
+        let mut latest_artwork = Arc::clone(&placeholder);
         loop {
             match receiver.recv_timeout(POLL_INTERVAL) {
                 Ok(TaskbarCommand::Previous) => run_playback_command("previous", engine.previous()),
@@ -202,8 +230,13 @@ mod windows_impl {
                 Err(RecvTimeoutError::Timeout) => {}
             }
 
-            if let Some(snapshot) = projection.try_iter().last() {
-                latest_snapshot = Some(snapshot);
+            if let Some(native) = projection.try_iter().last() {
+                let next_artwork = native.artwork.unwrap_or_else(|| Arc::clone(&placeholder));
+                if !Arc::ptr_eq(&latest_artwork, &next_artwork) {
+                    latest_artwork = next_artwork;
+                    update_hook_artwork(hwnd.0, Arc::clone(&latest_artwork));
+                }
+                latest_snapshot = Some(native.playback);
             }
             let Some(snapshot) = latest_snapshot.as_ref() else {
                 continue;
@@ -374,6 +407,19 @@ mod windows_impl {
         }
     }
 
+    fn load_placeholder(resource_dir: &Path) -> Result<Arc<Artwork>, String> {
+        let bundled = resource_dir.join("icons").join("128x128.png");
+        let path = if bundled.is_file() {
+            bundled
+        } else {
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("icons")
+                .join("128x128.png")
+        };
+        read_artwork_file(&path)
+            .map_err(|error| format!("failed to load taskbar artwork placeholder: {error}"))
+    }
+
     impl Drop for TaskbarIcons {
         fn drop(&mut self) {
             unsafe {
@@ -408,6 +454,7 @@ mod windows_impl {
         previous: isize,
         commands: Sender<TaskbarCommand>,
         taskbar_created_message: u32,
+        artwork: Arc<Artwork>,
     }
 
     fn hook_state() -> &'static Mutex<Option<HookState>> {
@@ -420,10 +467,12 @@ mod windows_impl {
         hwnd: isize,
         commands: Sender<TaskbarCommand>,
         taskbar_created_message: u32,
+        artwork: Arc<Artwork>,
     ) -> Result<(), String> {
         let (sender, receiver) = mpsc::sync_channel(1);
         app.run_on_main_thread(move || {
-            let result = install_message_hook_on_main(hwnd, commands, taskbar_created_message);
+            let result =
+                install_message_hook_on_main(hwnd, commands, taskbar_created_message, artwork);
             let _ = sender.send(result);
         })
         .map_err(|error| format!("failed to dispatch taskbar message hook: {error}"))?;
@@ -436,12 +485,30 @@ mod windows_impl {
         hwnd: isize,
         commands: Sender<TaskbarCommand>,
         taskbar_created_message: u32,
+        artwork: Arc<Artwork>,
     ) -> Result<(), String> {
         let mut state = hook_state()
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if state.is_some() {
             return Err("taskbar message hook is already installed".to_owned());
+        }
+        let enabled = BOOL(1);
+        unsafe {
+            DwmSetWindowAttribute(
+                HWND(hwnd),
+                DWMWA_FORCE_ICONIC_REPRESENTATION,
+                std::ptr::addr_of!(enabled).cast(),
+                std::mem::size_of::<BOOL>() as u32,
+            )
+            .map_err(|error| format!("failed to enable iconic representation: {error}"))?;
+            DwmSetWindowAttribute(
+                HWND(hwnd),
+                DWMWA_HAS_ICONIC_BITMAP,
+                std::ptr::addr_of!(enabled).cast(),
+                std::mem::size_of::<BOOL>() as u32,
+            )
+            .map_err(|error| format!("failed to enable iconic bitmap: {error}"))?;
         }
         let hook_pointer = taskbar_window_proc as *const () as isize;
         let previous = unsafe { SetWindowLongPtrW(HWND(hwnd), GWLP_WNDPROC, hook_pointer) };
@@ -456,8 +523,22 @@ mod windows_impl {
             previous,
             commands,
             taskbar_created_message,
+            artwork,
         });
         Ok(())
+    }
+
+    fn update_hook_artwork(hwnd: isize, artwork: Arc<Artwork>) {
+        {
+            let mut guard = hook_state()
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let Some(state) = guard.as_mut().filter(|state| state.hwnd == hwnd) else {
+                return;
+            };
+            state.artwork = artwork;
+        }
+        let _ = unsafe { DwmInvalidateIconicBitmaps(HWND(hwnd)) };
     }
 
     fn uninstall_message_hook(app: &AppHandle, hwnd: isize) {
@@ -489,7 +570,7 @@ mod windows_impl {
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> LRESULT {
-        let (previous, command) = {
+        let (previous, command, artwork) = {
             let state = hook_state()
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -510,16 +591,137 @@ mod windows_impl {
             } else {
                 None
             };
-            if let Some(command) = command {
-                let _ = state.commands.send(command);
+            if let Some(command) = command.as_ref() {
+                let _ = state.commands.send(command.clone());
             }
-            (state.previous, command.is_some())
+            let artwork = matches!(
+                message,
+                WM_DWMSENDICONICTHUMBNAIL | WM_DWMSENDICONICLIVEPREVIEWBITMAP
+            )
+            .then(|| Arc::clone(&state.artwork));
+            (state.previous, command.is_some(), artwork)
         };
+        if let Some(artwork) = artwork {
+            let result = if message == WM_DWMSENDICONICTHUMBNAIL {
+                let width = ((lparam.0 >> 16) & 0xffff) as u32;
+                let height = (lparam.0 & 0xffff) as u32;
+                submit_iconic_bitmap(hwnd, &artwork, width, height, false)
+            } else {
+                let mut client = RECT::default();
+                if GetClientRect(hwnd, &mut client).as_bool() {
+                    submit_iconic_bitmap(
+                        hwnd,
+                        &artwork,
+                        (client.right - client.left).max(1) as u32,
+                        (client.bottom - client.top).max(1) as u32,
+                        true,
+                    )
+                } else {
+                    Err("failed to read taskbar live preview size".to_owned())
+                }
+            };
+            if result.is_ok() {
+                return LRESULT(0);
+            }
+        }
         if command {
             return LRESULT(0);
         }
         let previous: WNDPROC = std::mem::transmute(previous);
         CallWindowProcW(previous, hwnd, message, wparam, lparam)
+    }
+
+    fn submit_iconic_bitmap(
+        hwnd: HWND,
+        artwork: &Artwork,
+        width: u32,
+        height: u32,
+        live_preview: bool,
+    ) -> Result<(), String> {
+        let width = width.clamp(1, 1_280);
+        let height = height.clamp(1, 800);
+        let bitmap = create_contained_bitmap(artwork, width, height)?;
+        let result = unsafe {
+            if live_preview {
+                DwmSetIconicLivePreviewBitmap(hwnd, bitmap, None, 0)
+            } else {
+                DwmSetIconicThumbnail(hwnd, bitmap, 0)
+            }
+        }
+        .map_err(|error| error.to_string());
+        unsafe { DeleteObject(bitmap) };
+        result
+    }
+
+    fn create_contained_bitmap(
+        artwork: &Artwork,
+        width: u32,
+        height: u32,
+    ) -> Result<HBITMAP, String> {
+        let info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width as i32,
+                biHeight: -(height as i32),
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut bits = std::ptr::null_mut();
+        let bitmap =
+            unsafe { CreateDIBSection(HDC(0), &info, DIB_RGB_COLORS, &mut bits, HANDLE(0), 0) }
+                .map_err(|error| error.to_string())?;
+        if bits.is_null() {
+            unsafe { DeleteObject(bitmap) };
+            return Err("taskbar bitmap has no pixel buffer".to_owned());
+        }
+
+        let pixels = unsafe {
+            std::slice::from_raw_parts_mut(bits.cast::<u8>(), (width * height * 4) as usize)
+        };
+        for pixel in pixels.chunks_exact_mut(4) {
+            pixel.copy_from_slice(&[35, 34, 32, 255]);
+        }
+
+        let source_width = artwork.width.max(1);
+        let source_height = artwork.height.max(1);
+        let (draw_width, draw_height) = if u64::from(width) * u64::from(source_height)
+            <= u64::from(height) * u64::from(source_width)
+        {
+            (
+                width,
+                (u64::from(width) * u64::from(source_height) / u64::from(source_width)) as u32,
+            )
+        } else {
+            (
+                (u64::from(height) * u64::from(source_width) / u64::from(source_height)) as u32,
+                height,
+            )
+        };
+        let offset_x = (width - draw_width) / 2;
+        let offset_y = (height - draw_height) / 2;
+        for y in 0..draw_height {
+            let source_y =
+                (u64::from(y) * u64::from(source_height) / u64::from(draw_height)) as u32;
+            for x in 0..draw_width {
+                let source_x =
+                    (u64::from(x) * u64::from(source_width) / u64::from(draw_width)) as u32;
+                let source_index = ((source_y * source_width + source_x) * 4) as usize;
+                let target_index = (((offset_y + y) * width + offset_x + x) * 4) as usize;
+                let alpha = u16::from(artwork.bgra[source_index + 3]);
+                for channel in 0..3 {
+                    let foreground = u16::from(artwork.bgra[source_index + channel]);
+                    let background = u16::from(pixels[target_index + channel]);
+                    pixels[target_index + channel] =
+                        ((foreground * alpha + background * (255 - alpha)) / 255) as u8;
+                }
+                pixels[target_index + 3] = 255;
+            }
+        }
+        Ok(bitmap)
     }
 
     #[cfg(test)]

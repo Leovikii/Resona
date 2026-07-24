@@ -1,6 +1,6 @@
 # ADR 0015：播放列表激活、队列入口与单一状态展示
 
-- 状态：Accepted；独立队列入口部分已由 [ADR 0018](0018-playlist-as-playback-sequence.md) 替代
+- 状态：Accepted；独立队列入口由 [ADR 0018](0018-playlist-as-playback-sequence.md) 替代，最近播放激活路径由 rc.2 撤销
 - 日期：2026-07-20
 - 补充：[ADR 0014](0014-player-only-scope-and-transient-default-playlist.md)
 

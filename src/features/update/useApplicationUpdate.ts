@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 
 import { invokeTauri, isTauriRuntime } from "../../shared/bridge/tauri";
@@ -21,7 +21,15 @@ const previewUpdateAvailable =
 const previewUpdateRelease: ApplicationUpdateRelease = {
   version: "0.1.0",
   title: "Resona 0.1.0",
-  notes: "Release readiness fixes and final design polish.",
+  notes: [
+    "## Highlights",
+    "",
+    "- Shared artwork across the player and Windows media surfaces",
+    "- Faster WAV to FLAC batches with per-file progress",
+    "- Safer update notes with [release details](https://github.com/Leovikii/Resona)",
+    "",
+    "`0.1.0` keeps playback data local.",
+  ].join("\n"),
   publishedAt: "2026-07-23T12:00:00Z",
   releaseUrl: "https://github.com/Leovikii/Resona/releases/tag/v0.1.0",
   installerSize: 6 * 1024 * 1024,
@@ -29,6 +37,7 @@ const previewUpdateRelease: ApplicationUpdateRelease = {
 };
 
 export function useApplicationUpdate() {
+  const operationRef = useRef<ApplicationUpdateStatus>("idle");
   const [snapshot, setSnapshot] = useState<ApplicationUpdateSnapshot>(() =>
     previewUpdateAvailable
       ? { ...defaultApplicationUpdateSnapshot, updaterConfigured: true }
@@ -90,8 +99,9 @@ export function useApplicationUpdate() {
     }
   }, [snapshot]);
 
-  const check = useCallback(async () => {
-    if (status !== "idle") return null;
+  const check = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+    if (operationRef.current !== "idle") return null;
+    operationRef.current = "checking";
     setStatus("checking");
     setChecked(false);
     setError(null);
@@ -107,15 +117,17 @@ export function useApplicationUpdate() {
       return result.update;
     } catch (nextError) {
       setAvailable(null);
-      setError(normalizeFailure(nextError));
+      if (!silent) setError(normalizeFailure(nextError));
       return null;
     } finally {
+      operationRef.current = "idle";
       setStatus("idle");
     }
-  }, [snapshot.currentVersion, status]);
+  }, [snapshot.currentVersion]);
 
   const install = useCallback(async () => {
-    if (!available || status !== "idle") return false;
+    if (!available || operationRef.current !== "idle") return false;
+    operationRef.current = "installing";
     setStatus("installing");
     setProgress({ downloadedBytes: 0, totalBytes: available.installerSize });
     setError(null);
@@ -129,20 +141,23 @@ export function useApplicationUpdate() {
       if (failure.code !== "update_cancelled") setError(failure);
       return false;
     } finally {
+      operationRef.current = "idle";
       setStatus("idle");
     }
-  }, [available, status]);
+  }, [available]);
 
   const cancel = useCallback(async () => {
-    if (status !== "installing") return;
+    if (operationRef.current !== "installing") return;
+    operationRef.current = "cancelling";
     setStatus("cancelling");
     try {
       if (isTauriRuntime()) await invokeTauri<void>("cancel_application_update");
     } catch (nextError) {
       setError(normalizeFailure(nextError));
+      operationRef.current = "installing";
       setStatus("installing");
     }
-  }, [status]);
+  }, []);
 
   return {
     available,

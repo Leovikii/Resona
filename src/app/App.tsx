@@ -1,6 +1,5 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -36,11 +35,9 @@ import {
   Captions,
   ArrowRight,
   Check,
-  Code2,
   Disc3,
-  ExternalLink,
+  Download,
   FileAudio,
-  History,
   ListMusic,
   Maximize2,
   Minimize2,
@@ -79,12 +76,10 @@ import type {
   DefaultPlaylistSnapshot,
   PlaylistItem,
   PlaylistSummary,
-  RecentPlayRecord,
 } from "../shared/model/library";
 import type { PlaybackFailure, PlaybackSnapshot } from "../shared/model/playback";
 import type { LyricsSnapshot } from "../shared/model/lyrics";
 import type { TrackDetails } from "../shared/model/metadata";
-import { applicationVersion } from "../shared/model/applicationUpdate";
 import { fileNameFromPath, formatBytes, formatDuration } from "../shared/utils/format";
 import { listInsertionPositionAtY } from "../shared/ui/usePointerReorder";
 import { PlaylistTrackList } from "../shared/ui/PlaylistTrackList";
@@ -93,8 +88,12 @@ import { BrandWordmark } from "../shared/ui/BrandWordmark";
 import { CompactTopNavigation, type CompactNavigationSelection } from "../shared/ui/CompactTopNavigation";
 import { OverflowMarquee } from "../shared/ui/OverflowMarquee";
 import { accentColors, type AccentColor, usePreferences } from "./preferences";
+import artworkPlaceholder from "../../assets/resona-icon.svg";
 
 type Selection = CompactNavigationSelection;
+
+let startupUpdateCheckStarted = false;
+const ApplicationUpdateDialog = lazy(() => import("./ApplicationUpdateDialog"));
 
 type DropTarget =
   | { kind: "default" }
@@ -109,6 +108,7 @@ export default function App() {
   const library = useLibrary();
   const desktopLyrics = useDesktopLyricsWindow();
   const applicationLifetime = useApplicationLifetime();
+  const applicationUpdate = useApplicationUpdate();
   const { desktopLyrics: lyricsPreferences, setDesktopLyrics } = usePreferences();
   const mainWindow = useMainWindowLayout();
   const [selection, setSelection] = useState<Selection>({ kind: "default" });
@@ -118,6 +118,7 @@ export default function App() {
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const [externalDragActive, setExternalDragActive] = useState(false);
   const [playerExpanded, setPlayerExpanded] = useState(false);
+  const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
   const dropActionsRef = useRef({ library, playback, t });
   const autoLyricsPathRef = useRef<string | null>(null);
   dropActionsRef.current = { library, playback, t };
@@ -125,6 +126,23 @@ export default function App() {
   useEffect(() => {
     if (applicationLifetime.closePromptOpen) setRememberCloseDecision(false);
   }, [applicationLifetime.closePromptOpen]);
+
+  useEffect(() => {
+    let timer = 0;
+    const frame = window.requestAnimationFrame(() => {
+      if (startupUpdateCheckStarted) return;
+      startupUpdateCheckStarted = true;
+      timer = window.setTimeout(() => {
+        void applicationUpdate.check({ silent: true }).then((release) => {
+          if (release) setUpdateDialogOpen(true);
+        });
+      }, 600);
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [applicationUpdate.check]);
 
   const hasCurrentTrack = playback.snapshot.currentItemId !== null
     && playback.selectedPath !== null;
@@ -393,14 +411,6 @@ export default function App() {
         ) : (
           <section className="content-viewport">
           <div className="view-transition" key={`${selection.kind}-${selectedPlaylist?.id ?? ""}`}>
-            {selection.kind === "recent" && (
-              <MemoRecentView
-                error={library.error}
-                loading={library.loading}
-                onPlay={playback.openPath}
-                records={library.recent}
-              />
-            )}
             {selection.kind === "default" && (
               <MemoDefaultPlaylistView
                 busy={playback.busy}
@@ -438,11 +448,13 @@ export default function App() {
             {selection.kind === "settings" && (
               <MemoSettingsView
                 applicationLifetime={applicationLifetime}
+                applicationUpdate={applicationUpdate}
                 busy={playback.busy}
                 desktopLyrics={desktopLyrics}
                 layoutBusy={mainWindow.busy}
                 layoutMode={mainWindow.snapshot.layoutMode}
                 onRefresh={refreshOutputs}
+                onOpenUpdate={() => setUpdateDialogOpen(true)}
                 onSetLayoutMode={mainWindow.setLayoutMode}
                 onSelectOutput={selectOutput}
                 output={playback.snapshot.output}
@@ -590,6 +602,15 @@ export default function App() {
           </Group>
         </Stack>
       </Modal>
+      {updateDialogOpen && (
+        <Suspense fallback={null}>
+          <ApplicationUpdateDialog
+            applicationUpdate={applicationUpdate}
+            onClose={() => setUpdateDialogOpen(false)}
+            opened
+          />
+        </Suspense>
+      )}
     </main>
   );
 }
@@ -633,12 +654,6 @@ function Sidebar({
       <BrandLockup />
 
       <nav className="sidebar-primary" aria-label={t("app.name")}>
-        <NavButton
-          active={selection.kind === "recent"}
-          icon={<History />}
-          label={t("nav.recent")}
-          onClick={() => onSelect({ kind: "recent" })}
-        />
         <div className="playlist-nav-heading">
           <Text c="dimmed" fw={650} size="xs">{t("nav.playlists")}</Text>
           <Tooltip label={t("library.create")}>
@@ -965,46 +980,6 @@ function UserPlaylistView({
   );
 }
 
-function RecentView({ error, loading, onPlay, records }: {
-  error: string | null;
-  loading: boolean;
-  onPlay: (path: string) => Promise<PlaybackSnapshot | null>;
-  records: RecentPlayRecord[];
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="page-content list-page">
-      <Group className="page-heading" justify="space-between">
-        <div>
-          <Title order={2}>{t("recent.title")}</Title>
-          <Text c="dimmed" size="sm">{t("common.tracks", { count: records.length })}</Text>
-        </div>
-        {loading && <Loader size="xs" />}
-      </Group>
-      {error ? (
-        <EmptyView icon={<History />} label={error} />
-      ) : records.length === 0 ? (
-        <EmptyView icon={<History />} label={t("recent.empty")} />
-      ) : (
-        <ScrollArea className="track-scroll" scrollHideDelay={700} type="scroll">
-          <div className="recent-list">
-            {records.map((record) => (
-              <UnstyledButton className="recent-row" key={record.path} onClick={() => void onPlay(record.path)}>
-                <ThemeIcon size={34} variant="light"><History size={17} /></ThemeIcon>
-                <div className="track-copy">
-                  <Text fw={600} lineClamp={1} size="sm">{record.displayName}</Text>
-                  <Text c="dimmed" lineClamp={1} size="xs">{record.path}</Text>
-                </div>
-                <Text c="dimmed" size="xs">{t("library.playedAt", { count: record.playCount })}</Text>
-              </UnstyledButton>
-            ))}
-          </div>
-        </ScrollArea>
-      )}
-    </div>
-  );
-}
-
 function ToolsView() {
   const { t } = useTranslation();
   const compression = useAudioCompression();
@@ -1012,7 +987,8 @@ function ToolsView() {
   const [openError, setOpenError] = useState<string | null>(null);
   const running = compression.snapshot.status === "running" || compression.snapshot.status === "cancelling";
   const progress = compression.snapshot.total > 0
-    ? ((compression.snapshot.completed + compression.snapshot.currentProgress) / compression.snapshot.total) * 100
+    ? (compression.snapshot.items.reduce((total, item) => total + item.progress, 0)
+      / compression.snapshot.total) * 100
     : 0;
   const dependencyBusy = ["downloading", "installing", "cancelling"].includes(
     dependency.snapshot.status,
@@ -1099,19 +1075,20 @@ function ToolsView() {
   );
 }
 
-function SettingsView({ applicationLifetime, busy, desktopLyrics, layoutBusy, layoutMode, onRefresh, onSetLayoutMode, onSelectOutput, output }: {
+function SettingsView({ applicationLifetime, applicationUpdate, busy, desktopLyrics, layoutBusy, layoutMode, onOpenUpdate, onRefresh, onSetLayoutMode, onSelectOutput, output }: {
   applicationLifetime: ReturnType<typeof useApplicationLifetime>;
+  applicationUpdate: ReturnType<typeof useApplicationUpdate>;
   busy: boolean;
   desktopLyrics: ReturnType<typeof useDesktopLyricsWindow>;
   layoutBusy: boolean;
   layoutMode: "wide" | "compact";
+  onOpenUpdate: () => void;
   onRefresh: () => void;
   onSetLayoutMode: (mode: "wide" | "compact") => Promise<boolean>;
   onSelectOutput: (id: string | null) => void;
   output: PlaybackSnapshot["output"];
 }) {
   const { t } = useTranslation();
-  const applicationUpdate = useApplicationUpdate();
   const { colorScheme, setColorScheme } = useMantineColorScheme({ keepTransitions: true });
   const {
     accentColor,
@@ -1123,19 +1100,9 @@ function SettingsView({ applicationLifetime, busy, desktopLyrics, layoutBusy, la
   } = usePreferences();
   const [backgroundOpacity, setBackgroundOpacity] = useState(lyricsPreferences.backgroundOpacity);
   const [fontDraft, setFontDraft] = useState(String(lyricsPreferences.fontSize));
-  const [appVersion, setAppVersion] = useState(applicationVersion);
   const [aboutError, setAboutError] = useState<string | null>(null);
-  const [updateConfirmationOpen, setUpdateConfirmationOpen] = useState(false);
   useEffect(() => setBackgroundOpacity(lyricsPreferences.backgroundOpacity), [lyricsPreferences.backgroundOpacity]);
   useEffect(() => setFontDraft(String(lyricsPreferences.fontSize)), [lyricsPreferences.fontSize]);
-  useEffect(() => {
-    if (!isTauriRuntime()) return;
-    void getVersion()
-      .then(setAppVersion)
-      .catch((error) => {
-        console.warn("Unable to read application version", error);
-      });
-  }, []);
   const openProjectPage = useCallback(async (page: "repository" | "releases") => {
     try {
       if (isTauriRuntime()) {
@@ -1168,10 +1135,71 @@ function SettingsView({ applicationLifetime, busy, desktopLyrics, layoutBusy, la
     }
     setDesktopLyrics({ fontSize: value });
   }, [desktopLyrics, lyricsPreferences.fontSize, setDesktopLyrics]);
+  const updateButtonLabel = applicationUpdate.available
+    ? `v${applicationUpdate.snapshot.currentVersion} -> v${applicationUpdate.available.version}`
+    : applicationUpdate.status === "checking"
+      ? t("settings.versionChecking", { version: applicationUpdate.snapshot.currentVersion })
+      : applicationUpdate.checked
+        ? t("settings.versionCurrent", { version: applicationUpdate.snapshot.currentVersion })
+        : t("settings.versionCheck", { version: applicationUpdate.snapshot.currentVersion });
+  const handleUpdateAction = useCallback(async () => {
+    if (applicationUpdate.available) {
+      onOpenUpdate();
+      return;
+    }
+    const release = await applicationUpdate.check();
+    if (release) onOpenUpdate();
+  }, [applicationUpdate.available, applicationUpdate.check, onOpenUpdate]);
   return (
     <ScrollArea className="settings-scroll" scrollHideDelay={700} type="scroll">
     <div className="page-content settings-page">
       <Title className="page-heading" order={2}>{t("settings.title")}</Title>
+      <section className="settings-section settings-about-section">
+        <Text className="settings-section-title" fw={650}>{t("settings.about")}</Text>
+        <SettingRow label={t("settings.version")}>
+          <Button
+            leftSection={applicationUpdate.available ? <Download size={15} /> : <RefreshCw size={15} />}
+            loading={applicationUpdate.status === "checking"}
+            onClick={() => void handleUpdateAction()}
+            size="xs"
+            variant={applicationUpdate.available ? "filled" : "light"}
+          >
+            {updateButtonLabel}
+          </Button>
+        </SettingRow>
+        <SettingRow label={t("settings.prereleaseUpdates")}>
+          <Switch
+            aria-label={t("settings.prereleaseUpdates")}
+            checked={applicationUpdate.snapshot.receivePrereleaseUpdates}
+            disabled={applicationUpdate.status !== "idle"}
+            onChange={(event) => {
+              void applicationUpdate.setReceivePrereleaseUpdates(event.currentTarget.checked);
+            }}
+            size="sm"
+          />
+        </SettingRow>
+        <div className="about-footer-row">
+          <Text c="dimmed" size="xs">{t("settings.copyright")}</Text>
+          <Tooltip label={t("settings.repository")}>
+            <ActionIcon
+              aria-label={t("settings.repository")}
+              onClick={() => void openProjectPage("repository")}
+              size="sm"
+              variant="subtle"
+            >
+              <GitHubMark />
+            </ActionIcon>
+          </Tooltip>
+        </div>
+        {aboutError && <Text c="red" role="alert" size="xs">{aboutError}</Text>}
+        {applicationUpdate.error && (
+          <Text c="red" role="alert" size="xs">
+            {t(`settings.updateErrors.${applicationUpdate.error.code}`, {
+              defaultValue: applicationUpdate.error.message,
+            })}
+          </Text>
+        )}
+      </section>
       <section className="settings-section">
         <Text className="settings-section-title" fw={650}>{t("settings.appearance")}</Text>
         <SettingRow label={t("settings.colorScheme")}>
@@ -1349,168 +1377,16 @@ function SettingsView({ applicationLifetime, busy, desktopLyrics, layoutBusy, la
               : t("settings.outputClosed")}
         </Text>
       </section>
-
-      <section className="settings-section">
-        <Text className="settings-section-title" fw={650}>{t("settings.about")}</Text>
-        <SettingRow label={t("settings.version")}>
-          <Text fw={600} size="sm">{appVersion}</Text>
-        </SettingRow>
-        <SettingRow label={t("settings.prereleaseUpdates")}>
-          <Switch
-            aria-label={t("settings.prereleaseUpdates")}
-            checked={applicationUpdate.snapshot.receivePrereleaseUpdates}
-            disabled={applicationUpdate.status !== "idle"}
-            onChange={(event) => {
-              void applicationUpdate.setReceivePrereleaseUpdates(event.currentTarget.checked);
-            }}
-            size="sm"
-          />
-        </SettingRow>
-        <SettingRow label={t("settings.project")}>
-          <Group gap="xs">
-            <Button
-              leftSection={<RefreshCw size={14} />}
-              loading={applicationUpdate.status === "checking"}
-              onClick={() => void applicationUpdate.check()}
-              size="xs"
-              variant="light"
-            >
-              {t("settings.checkUpdates")}
-            </Button>
-            <Button
-              leftSection={<Code2 size={14} />}
-              onClick={() => void openProjectPage("repository")}
-              rightSection={<ExternalLink size={12} />}
-              size="xs"
-              variant="default"
-            >
-              {t("settings.repository")}
-            </Button>
-          </Group>
-        </SettingRow>
-        {applicationUpdate.checked && !applicationUpdate.available && (
-          <Text c="dimmed" size="xs">{t("settings.noUpdates")}</Text>
-        )}
-        {applicationUpdate.available && (
-          <Paper className="application-update-card" p="sm" withBorder>
-            <Group align="flex-start" justify="space-between" wrap="nowrap">
-              <div className="application-update-summary">
-                <Group gap={6}>
-                  <Text fw={650} size="sm">
-                    {t("settings.updateAvailable", {
-                      version: applicationUpdate.available.version,
-                    })}
-                  </Text>
-                  {applicationUpdate.available.prerelease && (
-                    <Badge color="orange" size="xs" variant="light">
-                      {t("settings.prerelease")}
-                    </Badge>
-                  )}
-                </Group>
-                {applicationUpdate.available.installerSize !== null && (
-                  <Text c="dimmed" size="xs">
-                    {formatBytes(applicationUpdate.available.installerSize)}
-                  </Text>
-                )}
-              </div>
-              <Button
-                disabled={
-                  applicationUpdate.status !== "idle"
-                  || !applicationUpdate.snapshot.updaterConfigured
-                }
-                onClick={() => setUpdateConfirmationOpen(true)}
-                size="xs"
-              >
-                {t("settings.installUpdate")}
-              </Button>
-            </Group>
-            {applicationUpdate.available.notes && (
-              <Text c="dimmed" className="application-update-notes" size="xs">
-                {applicationUpdate.available.notes}
-              </Text>
-            )}
-            {!applicationUpdate.snapshot.updaterConfigured && (
-              <Text c="orange" size="xs">{t("settings.updaterNotConfigured")}</Text>
-            )}
-            {applicationUpdate.status !== "idle" && applicationUpdate.status !== "checking" && (
-              <Stack gap={6}>
-                <Progress
-                  animated
-                  value={
-                    applicationUpdate.progress.totalBytes
-                      ? Math.min(
-                          100,
-                          (applicationUpdate.progress.downloadedBytes
-                            / applicationUpdate.progress.totalBytes) * 100,
-                        )
-                      : 100
-                  }
-                />
-                <Group justify="space-between">
-                  <Text c="dimmed" size="xs">
-                    {applicationUpdate.progress.totalBytes
-                      ? t("settings.updateProgress", {
-                          downloaded: formatBytes(applicationUpdate.progress.downloadedBytes),
-                          total: formatBytes(applicationUpdate.progress.totalBytes),
-                        })
-                      : t("settings.preparingUpdate")}
-                  </Text>
-                  <Button
-                    disabled={applicationUpdate.status === "cancelling"}
-                    onClick={() => void applicationUpdate.cancel()}
-                    size="compact-xs"
-                    variant="subtle"
-                  >
-                    {applicationUpdate.status === "cancelling"
-                      ? t("common.cancelling")
-                      : t("common.cancel")}
-                  </Button>
-                </Group>
-              </Stack>
-            )}
-          </Paper>
-        )}
-        <Text c="dimmed" className="about-copyright" size="xs">
-          {t("settings.copyright")}
-        </Text>
-        {aboutError && <Text c="red" role="alert" size="xs">{aboutError}</Text>}
-        {applicationUpdate.error && (
-          <Text c="red" role="alert" size="xs">
-            {t(`settings.updateErrors.${applicationUpdate.error.code}`, {
-              defaultValue: applicationUpdate.error.message,
-            })}
-          </Text>
-        )}
-      </section>
-      <Modal
-        centered
-        onClose={() => setUpdateConfirmationOpen(false)}
-        opened={updateConfirmationOpen}
-        title={t("settings.confirmUpdateTitle")}
-      >
-        <Stack gap="md">
-          <Text size="sm">
-            {t("settings.confirmUpdateBody", {
-              version: applicationUpdate.available?.version ?? "",
-            })}
-          </Text>
-          <Group justify="flex-end">
-            <Button onClick={() => setUpdateConfirmationOpen(false)} variant="default">
-              {t("common.cancel")}
-            </Button>
-            <Button
-              onClick={() => {
-                setUpdateConfirmationOpen(false);
-                void applicationUpdate.install();
-              }}
-            >
-              {t("settings.downloadAndInstall")}
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
     </div>
     </ScrollArea>
+  );
+}
+
+function GitHubMark() {
+  return (
+    <svg aria-hidden="true" fill="currentColor" height="17" viewBox="0 0 16 16" width="17">
+      <path d="M8 0C3.58 0 0 3.64 0 8.13c0 3.59 2.29 6.64 5.47 7.71.4.08.55-.18.55-.39 0-.2-.01-.84-.01-1.53-2.01.38-2.53-.5-2.69-.96-.09-.24-.48-.97-.82-1.17-.28-.16-.68-.56-.01-.57.63-.01 1.08.59 1.23.83.72 1.22 1.87.88 2.33.67.07-.53.28-.88.51-1.08-1.78-.21-3.64-.91-3.64-4.02 0-.89.31-1.63.82-2.2-.08-.2-.36-1.04.08-2.17 0 0 .67-.22 2.2.84A7.4 7.4 0 0 1 8 3.82a7.4 7.4 0 0 1 2 .27c1.53-1.06 2.2-.84 2.2-.84.44 1.13.16 1.97.08 2.17.51.57.82 1.3.82 2.2 0 3.12-1.87 3.81-3.65 4.02.29.25.54.74.54 1.5 0 1.08-.01 1.95-.01 2.22 0 .22.15.47.55.39A8.12 8.12 0 0 0 16 8.13C16 3.64 12.42 0 8 0Z" />
+    </svg>
   );
 }
 
@@ -1572,7 +1448,13 @@ function PlayerBar({ busy, compact, desktopLyrics, details, expanded, hasCurrent
           disabled={!hasCurrentTrack}
           onClick={onToggleExpanded}
         >
-          <Disc3 className="mini-artwork-disc" size={23} />
+          <img
+            alt=""
+            className="mini-artwork-image"
+            data-placeholder={!details?.artworkDataUrl || undefined}
+            draggable={false}
+            src={details?.artworkDataUrl ?? artworkPlaceholder}
+          />
           <span className="mini-artwork-action">
             {expanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
           </span>
@@ -2056,7 +1938,6 @@ function dropTargetsEqual(left: DropTarget | null, right: DropTarget | null) {
 const MemoSidebar = memo(Sidebar);
 const MemoDefaultPlaylistView = memo(DefaultPlaylistView);
 const MemoUserPlaylistView = memo(UserPlaylistView);
-const MemoRecentView = memo(RecentView);
 const MemoToolsView = memo(ToolsView);
 const MemoSettingsView = memo(SettingsView);
 const MemoFullPlayerView = memo(FullPlayerView);
