@@ -215,7 +215,7 @@ mod windows_impl {
         let mut buttons_registered = false;
         let mut last_projection = None;
         let mut latest_snapshot = None;
-        let mut latest_artwork = Arc::clone(&placeholder);
+        let mut latest_artwork_fingerprint = placeholder.fingerprint;
         loop {
             match receiver.recv_timeout(POLL_INTERVAL) {
                 Ok(TaskbarCommand::Previous) => run_playback_command("previous", engine.previous()),
@@ -247,11 +247,11 @@ mod windows_impl {
 
             if let Some(native) = projection.try_iter().last() {
                 let next_artwork = native.artwork.unwrap_or_else(|| Arc::clone(&placeholder));
-                if !Arc::ptr_eq(&latest_artwork, &next_artwork) {
+                if latest_artwork_fingerprint != next_artwork.fingerprint {
                     match create_iconic_bitmaps(&next_artwork) {
                         Ok(bitmaps) => {
                             if update_hook_bitmaps(hwnd.0, bitmaps) {
-                                latest_artwork = next_artwork;
+                                latest_artwork_fingerprint = next_artwork.fingerprint;
                             }
                         }
                         Err(error) => {

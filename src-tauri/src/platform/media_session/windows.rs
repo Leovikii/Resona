@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::fmt::Write as _;
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use sha2::{Digest, Sha256};
 use souvlaki::{
     MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig,
     SeekDirection,
@@ -21,6 +20,7 @@ use crate::playback::{PlaybackEngine, PlaybackStatus, RodioPlaybackEngine};
 const COMMAND_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const SEEK_STEP: Duration = Duration::from_secs(10);
 const TIMELINE_SYNC_INTERVAL_MS: u64 = 5_000;
+const MAX_RETAINED_ARTWORK_FILES: usize = 16;
 
 fn playback_sync_key(status: PlaybackStatus, position_ms: u64) -> (PlaybackStatus, u64) {
     let position_key = match status {
@@ -44,6 +44,39 @@ pub struct MediaSessionAdapter {
 struct MediaSessionArtwork {
     app_logo_url: String,
     cache_dir: PathBuf,
+}
+
+#[derive(Default)]
+struct ArtworkFileCache {
+    paths: VecDeque<PathBuf>,
+}
+
+#[derive(Eq, PartialEq)]
+struct MetadataSyncKey {
+    path: String,
+    title: String,
+    duration_ms: Option<u64>,
+    artwork_fingerprint: Option<[u8; 32]>,
+}
+
+impl ArtworkFileCache {
+    fn remember(&mut self, path: PathBuf) {
+        self.paths.retain(|current| current != &path);
+        self.paths.push_back(path);
+        while self.paths.len() > MAX_RETAINED_ARTWORK_FILES {
+            let Some(expired) = self.paths.pop_front() else {
+                break;
+            };
+            if let Err(error) = std::fs::remove_file(&expired) {
+                if expired.exists() {
+                    eprintln!(
+                        "Windows SMTC artwork cache cleanup failed for {}: {error}",
+                        expired.display()
+                    );
+                }
+            }
+        }
+    }
 }
 
 impl MediaSessionAdapter {
@@ -151,8 +184,9 @@ fn run_session(
         return;
     }
 
-    let mut last_metadata: Option<(String, String, Option<u64>, Option<usize>)> = None;
+    let mut last_metadata: Option<MetadataSyncKey> = None;
     let mut last_playback: Option<(PlaybackStatus, u64)> = None;
+    let mut artwork_files = ArtworkFileCache::default();
     loop {
         match receiver.recv_timeout(COMMAND_POLL_INTERVAL) {
             Ok(MediaSessionCommand::Event(event)) => {
@@ -169,6 +203,7 @@ fn run_session(
                 &mut last_playback,
                 &artwork.app_logo_url,
                 &artwork.cache_dir,
+                &mut artwork_files,
             );
         }
     }
@@ -241,35 +276,36 @@ fn seek_by(
 fn sync_controls(
     projection: &NativePlaybackSnapshot,
     controls: &mut MediaControls,
-    last_metadata: &mut Option<(String, String, Option<u64>, Option<usize>)>,
+    last_metadata: &mut Option<MetadataSyncKey>,
     last_playback: &mut Option<(PlaybackStatus, u64)>,
     app_logo_url: &str,
     artwork_cache_dir: &Path,
+    artwork_files: &mut ArtworkFileCache,
 ) {
     let snapshot = &projection.playback;
     let title = current_track_title(snapshot);
-    let metadata_key = (
-        snapshot.path.clone().unwrap_or_default(),
-        title.clone(),
-        snapshot.duration_ms,
-        projection
+    let metadata_key = MetadataSyncKey {
+        path: snapshot.path.clone().unwrap_or_default(),
+        title: title.clone(),
+        duration_ms: snapshot.duration_ms,
+        artwork_fingerprint: projection
             .artwork
             .as_ref()
-            .map(|artwork| Arc::as_ptr(artwork) as usize),
-    );
+            .map(|artwork| artwork.fingerprint),
+    };
     if last_metadata.as_ref() != Some(&metadata_key) {
         let cover_url = projection
             .artwork
             .as_ref()
-            .and_then(
-                |artwork| match materialize_artwork(artwork_cache_dir, artwork) {
+            .and_then(|artwork| {
+                match materialize_artwork(artwork_cache_dir, artwork, artwork_files) {
                     Ok(url) => Some(url),
                     Err(error) => {
                         eprintln!("Windows SMTC artwork cache failed; using placeholder: {error}");
                         None
                     }
-                },
-            )
+                }
+            })
             .unwrap_or_else(|| app_logo_url.to_owned());
         let metadata = MediaMetadata {
             title: (!title.is_empty()).then_some(title.as_str()),
@@ -337,14 +373,13 @@ fn sync_controls(
     }
 }
 
-fn materialize_artwork(cache_dir: &Path, artwork: &Artwork) -> Result<String, String> {
+fn materialize_artwork(
+    cache_dir: &Path,
+    artwork: &Artwork,
+    retained: &mut ArtworkFileCache,
+) -> Result<String, String> {
     std::fs::create_dir_all(cache_dir).map_err(|error| error.to_string())?;
-    let digest = Sha256::digest(artwork.encoded.as_ref());
-    let mut fingerprint = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        write!(&mut fingerprint, "{byte:02x}").expect("writing to a string cannot fail");
-    }
-    let path = cache_dir.join(format!("{fingerprint}.png"));
+    let path = cache_dir.join(format!("{}.png", artwork.fingerprint_hex()));
     if !path.is_file() {
         let temporary = cache_dir.join(format!(".{}.tmp", fastrand::u64(..)));
         std::fs::write(&temporary, artwork.encoded.as_ref()).map_err(|error| error.to_string())?;
@@ -355,6 +390,7 @@ fn materialize_artwork(cache_dir: &Path, artwork: &Artwork) -> Result<String, St
             }
         }
     }
+    retained.remember(path.clone());
     file_url(&path)
 }
 
@@ -404,6 +440,17 @@ fn current_track_title(snapshot: &crate::playback::PlaybackSnapshot) -> String {
 mod tests {
     use super::*;
 
+    fn artwork(encoded: &[u8], fingerprint: u8) -> Artwork {
+        Artwork {
+            fingerprint: [fingerprint; 32],
+            mime_type: "image/png".to_owned(),
+            encoded: Arc::from(encoded),
+            bgra: Arc::from(&b"\0\0\0\xff"[..]),
+            width: 1,
+            height: 1,
+        }
+    }
+
     #[test]
     fn current_track_title_prefers_the_authoritative_queue_item() {
         let snapshot = crate::playback::PlaybackSnapshot {
@@ -427,18 +474,16 @@ mod tests {
     fn smtc_artwork_is_materialized_as_a_reusable_file_url() {
         let cache_dir =
             std::env::temp_dir().join(format!("resona-smtc-artwork-{}", fastrand::u64(..)));
-        let artwork = Artwork {
-            mime_type: "image/png".to_owned(),
-            encoded: Arc::from(&b"encoded artwork"[..]),
-            bgra: Arc::from(&b"\0\0\0\xff"[..]),
-            width: 1,
-            height: 1,
-        };
+        let artwork = artwork(b"encoded artwork", 7);
+        let mut retained = ArtworkFileCache::default();
 
-        let first = materialize_artwork(&cache_dir, &artwork).expect("materialize artwork");
-        let second = materialize_artwork(&cache_dir, &artwork).expect("reuse artwork");
+        let first =
+            materialize_artwork(&cache_dir, &artwork, &mut retained).expect("materialize artwork");
+        let second =
+            materialize_artwork(&cache_dir, &artwork, &mut retained).expect("reuse artwork");
         assert_eq!(first, second);
         assert!(first.ends_with(".png"));
+        assert_eq!(retained.paths.len(), 1);
         assert_eq!(
             std::fs::read(first.trim_start_matches("file://")).expect("read cached artwork"),
             artwork.encoded.as_ref()
@@ -452,17 +497,11 @@ mod tests {
     fn smtc_artwork_files_remain_available_until_adapter_shutdown() {
         let cache_dir =
             std::env::temp_dir().join(format!("resona-smtc-retain-{}", fastrand::u64(..)));
-        let artwork = |encoded: &'static [u8]| Artwork {
-            mime_type: "image/png".to_owned(),
-            encoded: Arc::from(encoded),
-            bgra: Arc::from(&b"\0\0\0\xff"[..]),
-            width: 1,
-            height: 1,
-        };
+        let mut retained = ArtworkFileCache::default();
 
-        let first =
-            materialize_artwork(&cache_dir, &artwork(b"first")).expect("materialize first artwork");
-        let second = materialize_artwork(&cache_dir, &artwork(b"second"))
+        let first = materialize_artwork(&cache_dir, &artwork(b"first", 1), &mut retained)
+            .expect("materialize first artwork");
+        let second = materialize_artwork(&cache_dir, &artwork(b"second", 2), &mut retained)
             .expect("materialize second artwork");
 
         assert_ne!(first, second);
@@ -472,6 +511,27 @@ mod tests {
         clear_artwork_cache(&cache_dir);
         assert!(!Path::new(first.trim_start_matches("file://")).exists());
         assert!(!Path::new(second.trim_start_matches("file://")).exists());
+        let _ = std::fs::remove_dir(cache_dir);
+    }
+
+    #[test]
+    fn smtc_artwork_cache_retains_only_the_most_recent_distinct_files() {
+        let cache_dir =
+            std::env::temp_dir().join(format!("resona-smtc-bounded-{}", fastrand::u64(..)));
+        let mut retained = ArtworkFileCache::default();
+        let mut urls = Vec::new();
+        for index in 0..=MAX_RETAINED_ARTWORK_FILES as u8 {
+            urls.push(
+                materialize_artwork(&cache_dir, &artwork(&[index], index), &mut retained)
+                    .expect("materialize bounded artwork"),
+            );
+        }
+
+        assert_eq!(retained.paths.len(), MAX_RETAINED_ARTWORK_FILES);
+        assert!(!Path::new(urls[0].trim_start_matches("file://")).exists());
+        assert!(Path::new(urls.last().expect("latest").trim_start_matches("file://")).is_file());
+
+        clear_artwork_cache(&cache_dir);
         let _ = std::fs::remove_dir(cache_dir);
     }
 
