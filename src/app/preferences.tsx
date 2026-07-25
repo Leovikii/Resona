@@ -5,6 +5,7 @@ import {
   createTheme,
   localStorageColorSchemeManager,
   MantineProvider,
+  Modal,
   useMantineColorScheme,
 } from "@mantine/core";
 import "@mantine/core/styles.css";
@@ -82,6 +83,13 @@ export function AppProvider({ children }: PropsWithChildren) {
         defaultRadius: "sm",
         fontFamily: "Segoe UI, system-ui, sans-serif",
         headings: { fontFamily: "Segoe UI, system-ui, sans-serif" },
+        components: {
+          Modal: Modal.extend({
+            defaultProps: {
+              transitionProps: { duration: 180, transition: "pop" },
+            },
+          }),
+        },
       }),
     [accentColor],
   );

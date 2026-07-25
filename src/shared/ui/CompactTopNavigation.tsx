@@ -1,11 +1,12 @@
-import { memo, useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import { Fragment, memo, useEffect, useRef, useState } from "react";
+import type { ReactNode, WheelEvent } from "react";
 import { ActionIcon, Paper, Portal, ScrollArea, Tabs, Tooltip } from "@mantine/core";
-import { Plus, Settings, Wrench } from "lucide-react";
+import { ArrowDown, ArrowUp, Plus, Settings, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { ActivePlaylistSnapshot, PlaylistSummary } from "../model/library";
 import { BrandWordmark } from "./BrandWordmark";
+import { usePointerReorder } from "./usePointerReorder";
 
 export type CompactNavigationSelection =
   | { kind: "default" }
@@ -15,9 +16,15 @@ export type CompactNavigationSelection =
 
 interface CompactTopNavigationProps {
   activePlaylist: ActivePlaylistSnapshot | null;
+  defaultDropActive: boolean;
+  dropPlaylistPosition: number | null;
+  dropPlaylistId: number | null;
+  externalDragActive: boolean;
+  moveDisabled: boolean;
   onClearDefault: () => void;
   onCreatePlaylist: () => void;
   onDeletePlaylist: (playlistId: number) => void;
+  onMovePlaylist: (playlistId: number, toPosition: number) => Promise<boolean>;
   onRenamePlaylist: (playlistId: number) => void;
   onSelect: (selection: CompactNavigationSelection) => void;
   playlists: PlaylistSummary[];
@@ -30,9 +37,15 @@ type TabMenu =
 
 export const CompactTopNavigation = memo(function CompactTopNavigation({
   activePlaylist,
+  defaultDropActive,
+  dropPlaylistPosition,
+  dropPlaylistId,
+  externalDragActive,
+  moveDisabled,
   onClearDefault,
   onCreatePlaylist,
   onDeletePlaylist,
+  onMovePlaylist,
   onRenamePlaylist,
   onSelect,
   playlists,
@@ -41,11 +54,27 @@ export const CompactTopNavigation = memo(function CompactTopNavigation({
   const { t } = useTranslation();
   const [contextMenu, setContextMenu] = useState<TabMenu | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  const playlistViewportRef = useRef<HTMLDivElement | null>(null);
+  const reorder = usePointerReorder({
+    axis: "horizontal",
+    disabled: externalDragActive || moveDisabled,
+    items: playlists,
+    onMove: (playlistId, toPosition) => void onMovePlaylist(playlistId, toPosition),
+    scrollViewportRef: playlistViewportRef,
+  });
   const activeTab = selection.kind === "default"
     ? "default"
     : selection.kind === "user"
       ? `user:${selection.playlistId}`
       : null;
+  const handlePlaylistWheel = (event: WheelEvent<HTMLDivElement>) => {
+    const viewport = playlistViewportRef.current;
+    if (!viewport || viewport.scrollWidth <= viewport.clientWidth) return;
+    const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+    if (delta === 0) return;
+    event.preventDefault();
+    viewport.scrollLeft += delta;
+  };
 
   useEffect(() => {
     const dismiss = (event: Event) => {
@@ -81,10 +110,21 @@ export const CompactTopNavigation = memo(function CompactTopNavigation({
       </div>
 
       <div className="compact-playlist-navigation">
-        <ScrollArea className="compact-playlist-scroll" scrollbars="x" scrollbarSize={4} scrollHideDelay={700} type="scroll">
+        <ScrollArea
+          className="compact-playlist-scroll"
+          data-drag-scroll-axis="horizontal"
+          onWheel={handlePlaylistWheel}
+          offsetScrollbars="x"
+          scrollbars="x"
+          scrollbarSize={4}
+          scrollHideDelay={700}
+          type="scroll"
+          viewportRef={playlistViewportRef}
+        >
           <Tabs
             className="compact-playlist-tabs"
             onChange={(value) => {
+              if (reorder.consumeClick()) return;
               if (value === "default") onSelect({ kind: "default" });
               else if (value?.startsWith("user:")) {
                 const playlistId = Number(value.slice(5));
@@ -94,8 +134,14 @@ export const CompactTopNavigation = memo(function CompactTopNavigation({
             value={activeTab}
             variant="pills"
           >
-            <Tabs.List>
+            <Tabs.List
+              data-external-drag={externalDragActive || undefined}
+              data-internal-drag={reorder.draggedId !== null || undefined}
+              ref={reorder.listRef}
+            >
               <Tabs.Tab
+                data-drop-active={defaultDropActive || undefined}
+                data-drop-kind="default"
                 data-playing={activePlaylist?.kind === "default" || undefined}
                 onContextMenu={(event) => {
                   event.preventDefault();
@@ -103,28 +149,40 @@ export const CompactTopNavigation = memo(function CompactTopNavigation({
                 }}
                 value="default"
               >
-                <PlaylistTabLabel label={t("library.default")} playing={activePlaylist?.kind === "default"} />
+                <PlaylistTabLabel label={t("library.default")} order={1} playing={activePlaylist?.kind === "default"} />
               </Tabs.Tab>
-              {playlists.map((playlist) => {
+              <CompactPlaylistGap active={dropPlaylistPosition === 0 || reorder.insertionPosition === 0} position={0} />
+              {playlists.map((playlist, index) => {
                 const playing = activePlaylist?.kind === "user" && activePlaylist.playlistId === playlist.id;
                 return (
-                  <Tabs.Tab
-                    data-playing={playing || undefined}
-                    key={playlist.id}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      setContextMenu({
-                        x: event.clientX,
-                        y: event.clientY,
-                        kind: "user",
-                        playlistId: playlist.id,
-                      });
-                    }}
-                    title={playlist.name}
-                    value={`user:${playlist.id}`}
-                  >
-                    <PlaylistTabLabel label={playlist.name} playing={playing} />
-                  </Tabs.Tab>
+                  <Fragment key={playlist.id}>
+                    <Tabs.Tab
+                      data-drop-active={dropPlaylistId === playlist.id || undefined}
+                      data-dragging={reorder.draggedId === playlist.id || undefined}
+                      data-drop-kind="playlist"
+                      data-playlist-id={playlist.id}
+                      data-playing={playing || undefined}
+                      data-reorder-position={index}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        setContextMenu({
+                          x: event.clientX,
+                          y: event.clientY,
+                          kind: "user",
+                          playlistId: playlist.id,
+                        });
+                      }}
+                      onPointerCancel={reorder.onPointerCancel}
+                      onPointerDown={(event) => reorder.onPointerDown(event, playlist.id)}
+                      onPointerMove={reorder.onPointerMove}
+                      onPointerUp={reorder.onPointerUp}
+                      title={playlist.name}
+                      value={`user:${playlist.id}`}
+                    >
+                      <PlaylistTabLabel label={playlist.name} order={index + 2} playing={playing} />
+                    </Tabs.Tab>
+                    <CompactPlaylistGap active={dropPlaylistPosition === index + 1 || reorder.insertionPosition === index + 1} position={index + 1} />
+                  </Fragment>
                 );
               })}
             </Tabs.List>
@@ -142,6 +200,24 @@ export const CompactTopNavigation = memo(function CompactTopNavigation({
           {contextMenu.kind === "default" ? (
             <button onClick={() => { onClearDefault(); setContextMenu(null); }} type="button">{t("common.clear")}</button>
           ) : <>
+            <button
+              disabled={playlists.findIndex((playlist) => playlist.id === contextMenu.playlistId) <= 0}
+              onClick={() => {
+                const position = playlists.findIndex((playlist) => playlist.id === contextMenu.playlistId);
+                if (position > 0) void onMovePlaylist(contextMenu.playlistId, position - 1);
+                setContextMenu(null);
+              }}
+              type="button"
+            ><ArrowUp size={14} />{t("library.moveUp")}</button>
+            <button
+              disabled={playlists.findIndex((playlist) => playlist.id === contextMenu.playlistId) >= playlists.length - 1}
+              onClick={() => {
+                const position = playlists.findIndex((playlist) => playlist.id === contextMenu.playlistId);
+                if (position >= 0 && position < playlists.length - 1) void onMovePlaylist(contextMenu.playlistId, position + 1);
+                setContextMenu(null);
+              }}
+              type="button"
+            ><ArrowDown size={14} />{t("library.moveDown")}</button>
             <button onClick={() => { onRenamePlaylist(contextMenu.playlistId); setContextMenu(null); }} type="button">{t("library.rename")}</button>
             <button onClick={() => { onDeletePlaylist(contextMenu.playlistId); setContextMenu(null); }} type="button">{t("library.delete")}</button>
           </>}
@@ -150,6 +226,20 @@ export const CompactTopNavigation = memo(function CompactTopNavigation({
     </header>
   );
 });
+
+function CompactPlaylistGap({ active, position }: { active: boolean; position: number }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="compact-playlist-gap"
+      data-active={active || undefined}
+      data-drop-kind="playlist-gap"
+      data-position={position}
+    >
+      <i />
+    </span>
+  );
+}
 
 function CompactNavButton({ active, icon, label, onClick }: {
   active: boolean;
@@ -162,10 +252,11 @@ function CompactNavButton({ active, icon, label, onClick }: {
       <ActionIcon
         aria-current={active ? "page" : undefined}
         aria-label={label}
-        color={active ? undefined : "gray"}
+        className="compact-global-action"
+        data-active={active || undefined}
         onClick={onClick}
         size="sm"
-        variant={active ? "light" : "subtle"}
+        variant="subtle"
       >
         {icon}
       </ActionIcon>
@@ -173,10 +264,14 @@ function CompactNavButton({ active, icon, label, onClick }: {
   );
 }
 
-function PlaylistTabLabel({ label, playing }: { label: string; playing: boolean }) {
+function PlaylistTabLabel({ label, order, playing }: { label: string; order: number; playing: boolean }) {
+  const { t } = useTranslation();
   return (
     <span className="compact-playlist-tab-label">
-      {playing && <span aria-label="Playing" className="playlist-playing-indicator"><i /><i /><i /></span>}
+      <span className="compact-playlist-order-slot">{playing
+        ? <span aria-label={t("playback.playing")} className="playlist-playing-indicator"><i /><i /><i /></span>
+        : <span className="playlist-order">{order}</span>}
+      </span>
       <span>{label}</span>
     </span>
   );

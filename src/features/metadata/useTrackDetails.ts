@@ -17,15 +17,17 @@ export function useTrackDetails(path: string | null) {
       return;
     }
     if (!isTauriRuntime()) {
+      const fileName = fileNameFromPath(path);
+      const featured = fileName === "Midnight Signal.flac";
       setState({
         loading: false,
         error: null,
         details: {
           path,
-          fileName: fileNameFromPath(path),
-          title: "Midnight Signal",
-          artist: "Resona",
-          album: "Local Sessions",
+          fileName,
+          title: featured ? "Midnight Signal" : fileName,
+          artist: featured ? "Resona" : null,
+          album: featured ? "Local Sessions" : null,
           durationMs: 247_000,
           sampleRate: 96_000,
           bitDepth: 24,

@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::collections::VecDeque;
+use std::fmt::Write as _;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use base64::Engine;
-use image::{DynamicImage, ImageDecoder, ImageReader};
+use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader};
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::tag::Accessor;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -63,13 +65,15 @@ impl TrackDetails {
 }
 
 const MAX_CACHE_ENTRIES: usize = 4;
+const MAX_ARTWORK_CACHE_ENTRIES: usize = 8;
 const MAX_ARTWORK_BYTES: usize = 16 * 1024 * 1024;
 const MAX_ARTWORK_DIMENSION: u32 = 8_192;
 const MAX_DECODED_ARTWORK_BYTES: u64 = 64 * 1024 * 1024;
-const CACHED_ARTWORK_DIMENSION: u32 = 1_024;
+const CACHED_ARTWORK_DIMENSION: u32 = 512;
 
 #[derive(Clone, Debug)]
 pub struct Artwork {
+    pub fingerprint: [u8; 32],
     pub mime_type: String,
     pub encoded: Arc<[u8]>,
     pub bgra: Arc<[u8]>,
@@ -84,6 +88,14 @@ impl Artwork {
             self.mime_type,
             base64::engine::general_purpose::STANDARD.encode(&self.encoded)
         )
+    }
+
+    pub fn fingerprint_hex(&self) -> String {
+        let mut value = String::with_capacity(self.fingerprint.len() * 2);
+        for byte in self.fingerprint {
+            write!(&mut value, "{byte:02x}").expect("writing to a string cannot fail");
+        }
+        value
     }
 }
 
@@ -106,9 +118,16 @@ struct CacheEntry {
     metadata: CachedTrackMetadata,
 }
 
+#[derive(Clone)]
+struct ArtworkCacheEntry {
+    source_fingerprint: [u8; 32],
+    artwork: Arc<Artwork>,
+}
+
 #[derive(Default)]
 pub struct MetadataService {
     cache: Mutex<VecDeque<CacheEntry>>,
+    artwork_cache: Mutex<VecDeque<ArtworkCacheEntry>>,
 }
 
 impl MetadataService {
@@ -126,7 +145,7 @@ impl MetadataService {
         }
         drop(cache);
 
-        let metadata = read_uncached_track_metadata(path);
+        let metadata = read_uncached_track_metadata(self, path);
         let mut cache = self
             .cache
             .lock()
@@ -141,6 +160,51 @@ impl MetadataService {
         }
         metadata
     }
+
+    fn load_artwork(&self, mime_type: &str, bytes: &[u8]) -> Result<Arc<Artwork>, String> {
+        if bytes.len() > MAX_ARTWORK_BYTES {
+            return Err(format!("artwork exceeds {MAX_ARTWORK_BYTES} bytes"));
+        }
+        let source_fingerprint = fingerprint(bytes);
+        let mut cache = self
+            .artwork_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(artwork) = cached_artwork(&mut cache, source_fingerprint) {
+            return Ok(artwork);
+        }
+        drop(cache);
+
+        let artwork = decode_artwork(mime_type, bytes)?;
+        let mut cache = self
+            .artwork_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(shared) = cached_artwork(&mut cache, source_fingerprint) {
+            return Ok(shared);
+        }
+        cache.push_back(ArtworkCacheEntry {
+            source_fingerprint,
+            artwork: Arc::clone(&artwork),
+        });
+        while cache.len() > MAX_ARTWORK_CACHE_ENTRIES {
+            cache.pop_front();
+        }
+        Ok(artwork)
+    }
+}
+
+fn cached_artwork(
+    cache: &mut VecDeque<ArtworkCacheEntry>,
+    source_fingerprint: [u8; 32],
+) -> Option<Arc<Artwork>> {
+    let index = cache
+        .iter()
+        .position(|entry| entry.source_fingerprint == source_fingerprint)?;
+    let entry = cache.remove(index).expect("artwork cache index exists");
+    let artwork = Arc::clone(&entry.artwork);
+    cache.push_back(entry);
+    Some(artwork)
 }
 
 #[cfg(test)]
@@ -153,7 +217,7 @@ pub fn read_artwork_file(path: &Path) -> Result<Arc<Artwork>, String> {
     decode_artwork("image/png", &bytes)
 }
 
-fn read_uncached_track_metadata(path: &Path) -> CachedTrackMetadata {
+fn read_uncached_track_metadata(service: &MetadataService, path: &Path) -> CachedTrackMetadata {
     let tagged_file = match lofty::read_from_path(path) {
         Ok(value) => value,
         Err(error) => {
@@ -181,7 +245,7 @@ fn read_uncached_track_metadata(path: &Path) -> CachedTrackMetadata {
             let mime = picture
                 .mime_type()
                 .map_or("application/octet-stream", |value| value.as_str());
-            match decode_artwork(mime, picture.data()) {
+            match service.load_artwork(mime, picture.data()) {
                 Ok(artwork) => Some(artwork),
                 Err(error) => {
                     eprintln!(
@@ -216,7 +280,7 @@ fn read_uncached_track_metadata(path: &Path) -> CachedTrackMetadata {
     CachedTrackMetadata { details, artwork }
 }
 
-fn decode_artwork(mime_type: &str, bytes: &[u8]) -> Result<Arc<Artwork>, String> {
+fn decode_artwork(_mime_type: &str, bytes: &[u8]) -> Result<Arc<Artwork>, String> {
     if bytes.len() > MAX_ARTWORK_BYTES {
         return Err(format!("artwork exceeds {MAX_ARTWORK_BYTES} bytes"));
     }
@@ -241,17 +305,26 @@ fn decode_artwork(mime_type: &str, bytes: &[u8]) -> Result<Arc<Artwork>, String>
     };
     let rgba = decoded.into_rgba8();
     let (width, height) = rgba.dimensions();
+    let mut encoded = Vec::new();
+    DynamicImage::ImageRgba8(rgba.clone())
+        .write_to(&mut Cursor::new(&mut encoded), ImageFormat::Png)
+        .map_err(|error| error.to_string())?;
     let mut bgra = rgba.into_raw();
     for pixel in bgra.chunks_exact_mut(4) {
         pixel.swap(0, 2);
     }
     Ok(Arc::new(Artwork {
-        mime_type: mime_type.to_owned(),
-        encoded: Arc::from(bytes),
+        fingerprint: fingerprint(&encoded),
+        mime_type: "image/png".to_owned(),
+        encoded: Arc::from(encoded),
         bgra: Arc::from(bgra),
         width,
         height,
     }))
+}
+
+fn fingerprint(bytes: &[u8]) -> [u8; 32] {
+    Sha256::digest(bytes).into()
 }
 
 fn file_revision(path: &Path) -> FileRevision {
@@ -302,6 +375,15 @@ pub fn normalized_path(path: String) -> PathBuf {
 mod tests {
     use super::*;
 
+    fn png_with_color(color: u8) -> Vec<u8> {
+        let source = image::RgbaImage::from_pixel(2, 2, image::Rgba([color, 0, 0, 255]));
+        let mut bytes = Vec::new();
+        DynamicImage::ImageRgba8(source)
+            .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
+            .expect("encode test artwork");
+        bytes
+    }
+
     #[test]
     fn reads_supported_fixture_properties() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -336,5 +418,65 @@ mod tests {
             Some(AudioQuality::Hq)
         );
         assert_eq!(classify_quality("MP3", Some(44_100), None, Some(192)), None);
+    }
+
+    #[test]
+    fn artwork_is_normalized_to_a_bounded_png() {
+        let source = DynamicImage::new_rgb8(1_024, 768);
+        let mut bytes = Vec::new();
+        source
+            .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
+            .expect("encode source image");
+
+        let artwork = decode_artwork("image/jpeg", &bytes).expect("decode artwork");
+
+        assert_eq!(artwork.mime_type, "image/png");
+        assert!(artwork.encoded.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(artwork.width <= CACHED_ARTWORK_DIMENSION);
+        assert!(artwork.height <= CACHED_ARTWORK_DIMENSION);
+        assert_eq!(
+            artwork.bgra.len(),
+            (artwork.width * artwork.height * 4) as usize
+        );
+        assert_eq!(artwork.fingerprint, fingerprint(&artwork.encoded));
+    }
+
+    #[test]
+    fn identical_source_artwork_reuses_the_normalized_result() {
+        let service = MetadataService::default();
+        let bytes = png_with_color(42);
+
+        let first = service
+            .load_artwork("image/png", &bytes)
+            .expect("decode first artwork");
+        let second = service
+            .load_artwork("image/png", &bytes)
+            .expect("reuse artwork");
+
+        assert!(Arc::ptr_eq(&first, &second));
+        assert_eq!(service.artwork_cache.lock().expect("cache").len(), 1);
+    }
+
+    #[test]
+    fn source_artwork_cache_is_bounded_and_evicts_least_recently_used() {
+        let service = MetadataService::default();
+        let first_bytes = png_with_color(0);
+        let first = service
+            .load_artwork("image/png", &first_bytes)
+            .expect("decode first artwork");
+        for color in 1..=MAX_ARTWORK_CACHE_ENTRIES as u8 {
+            service
+                .load_artwork("image/png", &png_with_color(color))
+                .expect("decode unique artwork");
+        }
+
+        assert_eq!(
+            service.artwork_cache.lock().expect("cache").len(),
+            MAX_ARTWORK_CACHE_ENTRIES
+        );
+        let reloaded = service
+            .load_artwork("image/png", &first_bytes)
+            .expect("reload evicted artwork");
+        assert!(!Arc::ptr_eq(&first, &reloaded));
     }
 }
