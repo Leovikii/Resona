@@ -6,11 +6,17 @@ import type {
   PlaylistItem,
   PlaylistMutationResult,
   PlaylistSummary,
+  RejectedPath,
 } from "../../shared/model/library";
+import { movePlaylistSummary } from "./playlistOrdering";
 
 const previewPlaylists: PlaylistSummary[] = [
   { id: 1, name: "Resona demo", position: 0, itemCount: 3, createdAt: 0, updatedAt: 0 },
   { id: 2, name: "Late night", position: 1, itemCount: 1, createdAt: 0, updatedAt: 0 },
+  { id: 3, name: "Focus", position: 2, itemCount: 0, createdAt: 0, updatedAt: 0 },
+  { id: 4, name: "Archive", position: 3, itemCount: 0, createdAt: 0, updatedAt: 0 },
+  { id: 5, name: "A very long playlist name", position: 4, itemCount: 0, createdAt: 0, updatedAt: 0 },
+  { id: 6, name: "Weekend", position: 5, itemCount: 0, createdAt: 0, updatedAt: 0 },
 ];
 
 const previewItems: Record<number, PlaylistItem[]> = {
@@ -32,7 +38,7 @@ export function useLibrary() {
   const [selectedItems, setSelectedItems] = useState<PlaylistItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [itemsLoading, setItemsLoading] = useState(false);
-  const [rejectedCount, setRejectedCount] = useState(0);
+  const [rejectedPaths, setRejectedPaths] = useState<RejectedPath[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const selectedPlaylist = useMemo(
@@ -98,6 +104,7 @@ export function useLibrary() {
     position?: number | null;
     requireItems?: boolean;
   }) => {
+    if (paths.length > 0) setRejectedPaths([]);
     setLoading(true);
     try {
       let result: PlaylistMutationResult;
@@ -135,7 +142,7 @@ export function useLibrary() {
       }
       setSelectedPlaylistId(result.playlist.id);
       setSelectedItems(result.items);
-      setRejectedCount(result.rejected.length);
+      setRejectedPaths(result.rejected);
       setError(null);
       return result;
     } catch (cause) {
@@ -194,12 +201,31 @@ export function useLibrary() {
     }
   }, [preview, refresh, selectedPlaylistId]);
 
+  const movePlaylist = useCallback(async (id: number, toPosition: number) => {
+    setLoading(true);
+    try {
+      if (preview) {
+        setPlaylists((current) => movePlaylistSummary(current, id, toPosition));
+      } else {
+        setPlaylists(await invokeTauri<PlaylistSummary[]>("move_playlist", { id, toPosition }));
+      }
+      setError(null);
+      return true;
+    } catch (cause) {
+      setError(messageFrom(cause));
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, [preview]);
+
   const addItems = useCallback(async (
     playlistId: number,
     paths: string[],
     position: number | null = null,
   ) => {
     if (paths.length === 0) return null;
+    setRejectedPaths([]);
     setItemsLoading(true);
     try {
       let result: PlaylistMutationResult;
@@ -229,7 +255,7 @@ export function useLibrary() {
       }
       setSelectedPlaylistId(playlistId);
       setSelectedItems(result.items);
-      setRejectedCount(result.rejected.length);
+      setRejectedPaths(result.rejected);
       setError(null);
       return result;
     } catch (cause) {
@@ -366,6 +392,8 @@ export function useLibrary() {
     }
   }, [preview, previewItemsByPlaylist]);
 
+  const dismissRejected = useCallback(() => setRejectedPaths([]), []);
+
   return {
     addItems,
     chooseAndAddFolders,
@@ -373,13 +401,16 @@ export function useLibrary() {
     clearItems,
     createPlaylist,
     deletePlaylist,
+    dismissRejected,
     error,
     itemsLoading,
     loading,
     moveItem,
+    movePlaylist,
     playlists,
     refresh,
-    rejectedCount,
+    rejectedCount: rejectedPaths.length,
+    rejectedPaths,
     removeItem,
     removeItems,
     renamePlaylist,

@@ -871,6 +871,37 @@ input {
   height: 14px;
 }
 
+.playlist-nav-list[data-internal-drag] .playlist-nav-gap {
+  height: 14px;
+}
+
+.playlist-nav-item[data-dragging] {
+  opacity: 0.5;
+}
+
+.playlist-nav-item[data-reorder-position] {
+  cursor: grab;
+  touch-action: none;
+}
+
+.playlist-nav-list[data-internal-drag] .playlist-nav-item[data-reorder-position] {
+  cursor: grabbing;
+}
+
+.playlist-order-slot {
+  font-variant-numeric: tabular-nums;
+}
+
+.playlist-order {
+  min-width: 18px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1;
+  color: currentColor;
+  opacity: 0.72;
+}
+
 .playlist-nav-gap > span {
   width: 100%;
   height: 2px;
@@ -890,6 +921,8 @@ input {
   width: 20px;
   height: 20px;
   flex: 0 0 20px;
+  display: grid;
+  place-items: center;
 }
 
 .nav-icon svg {
@@ -991,8 +1024,19 @@ input {
   gap: 10px;
 }
 
+.full-player-compact-header {
+  min-width: 0;
+  min-height: 54px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  align-items: start;
+  gap: 10px;
+}
+
 .full-player-compact-copy {
-  display: none;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
 }
 
 .full-player-artwork {
@@ -1012,30 +1056,110 @@ input {
   object-fit: cover;
 }
 
+.full-player-artwork img[data-placeholder] {
+  object-fit: contain;
+}
+
 .full-player-copy {
   margin-top: 18px;
 }
 
-.full-player-right {
+.full-player-pager {
   min-width: 0;
   min-height: 0;
+  height: 100%;
+  padding-top: 32px;
   display: grid;
-  grid-template-rows: 30px minmax(0, 1fr);
-  gap: 18px;
+  grid-template-rows: minmax(0, 1fr) 32px;
+  gap: 10px;
 }
 
-.full-player-view-switch {
-  height: 30px;
-  margin-right: 52px;
+.full-player-pages,
+.full-player-page {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
 }
 
-.full-player-view-switch .mantine-SegmentedControl-root {
-  height: 30px;
+.full-player-artwork-page {
+  container-type: size;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.full-player-artwork-page .full-player-artwork {
+  width: min(100cqw, 100cqh, 430px);
+}
+
+.full-player-page-controls {
+  min-width: 0;
+  height: 32px;
+  display: grid;
+  grid-template-columns: 30px auto 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+
+.full-player:hover .full-player-page-controls,
+.full-player:focus-within .full-player-page-controls {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.full-player-page-arrow[data-hidden] {
+  visibility: hidden;
+}
+
+.full-player-page-dots {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: 0;
+}
+
+.full-player-page-dot {
+  width: 24px;
+  height: 28px;
+  min-width: 24px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+}
+
+.full-player-page-dot > span {
+  width: 6px;
+  height: 6px;
+  display: block;
+  border-radius: 50%;
+  background: var(--mantine-color-dimmed);
+  opacity: 0.52;
+  transition: width 150ms ease, background-color 150ms ease, opacity 150ms ease;
+}
+
+.full-player-page-dot:hover > span,
+.full-player-page-dot:focus-visible > span {
+  opacity: 0.85;
+}
+
+.full-player-page-dot[data-active] > span {
+  width: 16px;
+  border-radius: 999px;
+  background: var(--mantine-primary-color-filled);
+  opacity: 1;
 }
 
 .full-player-panel {
   width: 100%;
-  height: min(68vh, 560px);
+  height: 100%;
   min-height: 0;
 }
 
@@ -1846,8 +1970,7 @@ h2.page-heading {
   min-height: 0;
 }
 
-.error-banner,
-.import-notice {
+.error-banner {
   max-width: calc(100% - 32px);
   padding: 9px 12px;
   position: absolute;
@@ -1863,12 +1986,16 @@ h2.page-heading {
 }
 
 .import-notice {
-  background: var(--mantine-color-gray-8);
+  width: max-content;
+  max-width: calc(100% - 32px);
+  position: absolute;
+  right: 16px;
+  bottom: 14px;
+  z-index: 5;
 }
 
-@keyframes notice-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
+.main-region[data-player-expanded] .import-notice {
+  bottom: 58px;
 }
 
 @media (max-width: 840px) {
@@ -1922,6 +2049,23 @@ h2.page-heading {
   gap: 6px;
 }
 
+.compact-global-action {
+  color: var(--mantine-color-dimmed);
+  background: transparent;
+  box-shadow: none;
+}
+
+.compact-global-action:hover:not([data-active]),
+.compact-global-action:focus-visible:not([data-active]) {
+  color: var(--mantine-color-text);
+  background: var(--mantine-color-default-hover);
+}
+
+.compact-global-action[data-active] {
+  color: var(--mantine-primary-color-filled);
+  background: var(--mantine-primary-color-light);
+}
+
 .compact-playlist-navigation {
   min-width: 0;
   padding: 0 8px;
@@ -1936,9 +2080,40 @@ h2.page-heading {
   min-width: 0;
 }
 
+.compact-playlist-scroll {
+  align-self: stretch;
+}
+
 .compact-playlist-tabs .mantine-Tabs-list {
   min-width: max-content;
   flex-wrap: nowrap;
+  gap: 0;
+}
+
+.compact-playlist-gap {
+  width: 4px;
+  height: 30px;
+  flex: 0 0 4px;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  transition: width 120ms ease, flex-basis 120ms ease;
+}
+
+.compact-playlist-tabs .mantine-Tabs-list[data-external-drag] .compact-playlist-gap,
+.compact-playlist-tabs .mantine-Tabs-list[data-internal-drag] .compact-playlist-gap {
+  width: 16px;
+  flex-basis: 16px;
+}
+
+.compact-playlist-gap > i {
+  width: 2px;
+  border-radius: var(--mantine-radius-xl);
+  background: transparent;
+}
+
+.compact-playlist-gap[data-active] > i {
+  background: var(--mantine-primary-color-filled);
 }
 
 .compact-playlist-tabs .mantine-Tabs-tab {
@@ -1947,6 +2122,36 @@ h2.page-heading {
   height: 30px;
   padding: 0 10px;
   overflow: hidden;
+  box-shadow: none;
+}
+
+.compact-playlist-tabs .mantine-Tabs-tab[data-reorder-position] {
+  cursor: grab;
+  touch-action: none;
+}
+
+.compact-playlist-tabs .mantine-Tabs-list[data-internal-drag] .mantine-Tabs-tab[data-reorder-position] {
+  cursor: grabbing;
+}
+
+.compact-playlist-tabs .mantine-Tabs-tab[data-dragging] {
+  opacity: 0.5;
+}
+
+.compact-playlist-tabs .mantine-Tabs-tab:hover:not([data-active]),
+.compact-playlist-tabs .mantine-Tabs-tab:focus-visible:not([data-active]) {
+  color: var(--mantine-color-text);
+  background: var(--mantine-color-default-hover);
+}
+
+.compact-playlist-tabs .mantine-Tabs-tab[data-active] {
+  color: var(--mantine-primary-color-filled);
+  background: var(--mantine-primary-color-light);
+}
+
+.compact-playlist-tabs .mantine-Tabs-tab[data-drop-active] {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: -2px;
 }
 
 .compact-playlist-tabs .mantine-Tabs-tabLabel {
@@ -1968,6 +2173,15 @@ h2.page-heading {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.compact-playlist-order-slot {
+  width: 18px;
+  height: 16px;
+  flex: 0 0 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .compact-playlist-tab-label .playlist-playing-indicator {
@@ -2051,12 +2265,20 @@ h2.page-heading {
 }
 
 .app-shell[data-layout="compact"] .playlist-detail-heading {
-  align-items: flex-start;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
 }
 
 .app-shell[data-layout="compact"] .path-heading {
-  flex-basis: 100%;
+  min-width: 0;
+  flex-basis: auto;
+}
+
+.app-shell[data-layout="compact"] .playlist-name-input {
+  width: 100%;
+  min-width: 0;
 }
 
 .app-shell[data-layout="compact"] .setting-row {
@@ -2103,30 +2325,20 @@ h2.page-heading {
 }
 
 .app-shell[data-layout="compact"] .full-player {
-  padding: 44px 16px 14px;
+  padding: 14px 16px;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
   align-items: stretch;
-  gap: 12px;
+  gap: 16px;
 }
 
-.app-shell[data-layout="compact"] .full-player-summary {
-  display: none;
+.app-shell[data-layout="compact"] .full-player-close {
+  position: static;
+  justify-self: end;
 }
 
-.app-shell[data-layout="compact"] .full-player-compact-copy {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.app-shell[data-layout="compact"] .full-player-right {
-  grid-template-rows: 30px minmax(0, 1fr);
-  gap: 10px;
-}
-
-.app-shell[data-layout="compact"] .full-player-view-switch {
-  margin-right: 44px;
+.app-shell[data-layout="compact"] .full-player-pager {
+  padding-top: 0;
 }
 
 .app-shell[data-layout="compact"] .full-player-panel {

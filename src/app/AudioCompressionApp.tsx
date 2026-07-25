@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent, ReactNode } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -44,6 +44,7 @@ import type {
   CompressionScanNode,
 } from "../shared/model/compression";
 import { AddMediaMenu } from "../shared/ui/AddMediaMenu";
+import { reconcileCompressionRootExpansion } from "./compressionRootExpansion";
 import { usePreferences } from "./preferences";
 
 export default function AudioCompressionApp() {
@@ -54,6 +55,7 @@ export default function AudioCompressionApp() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const expandedRootsRef = useRef({ scanId: 0, seenRoots: new Set<string>() });
   const scanBusy = compression.scan.status === "scanning" || compression.scan.status === "cancelling";
   const taskBusy = compression.snapshot.status === "running" || compression.snapshot.status === "cancelling";
   const locked = scanBusy || taskBusy;
@@ -82,12 +84,23 @@ export default function AudioCompressionApp() {
   }, [t]);
 
   useEffect(() => {
+    const result = reconcileCompressionRootExpansion(
+      expandedRootsRef.current.scanId,
+      expandedRootsRef.current.seenRoots,
+      compression.scan.scanId,
+      compression.scan.roots.map((root) => root.path),
+    );
+    expandedRootsRef.current = {
+      scanId: result.scanId,
+      seenRoots: result.seenRoots,
+    };
+    if (!result.reset && result.pathsToExpand.length === 0) return;
     setExpanded((current) => {
-      const next = new Set(current);
-      compression.scan.roots.forEach((root) => next.add(root.path));
+      const next = result.reset ? new Set<string>() : new Set(current);
+      result.pathsToExpand.forEach((path) => next.add(path));
       return next;
     });
-  }, [compression.scan.scanId]);
+  }, [compression.scan.roots, compression.scan.scanId]);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;

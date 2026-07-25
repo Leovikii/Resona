@@ -14,9 +14,9 @@
 - 0.0.6 使用 `souvlaki 0.8.3`，Cargo 中关闭默认 feature，不引入 D-Bus 依赖。
 - 进程启动时设置固定 AppUserModelID `io.github.vki.resona`，用于 Windows 媒体浮层和任务栏识别；该调用只存在于 Windows platform adapter。
 - `souvlaki` 只存在于 `platform/media_session` adapter；`PlaybackEngine`、队列模型、Tauri command 和前端不依赖其类型。
-- adapter 在主窗口首个可用窗口事件后取得 HWND，并在独立线程注册 `MediaControls`。
+- adapter 在主窗口首个可用窗口事件后取得 HWND，在独立线程以 MTA 初始化 Windows Runtime，再注册 `MediaControls`；退出时在同一线程释放 controls 并反初始化。
 - 系统回调只发送内部 `MediaSessionCommand`；adapter 线程再调用现有 `PlaybackEngine`，不在系统回调中持有 UI 或播放 actor 锁。
-- 播放状态以 500 ms 低频读取 Rust 权威快照并同步到 SMTC；元数据仅在标题或时长变化时更新。
+- 原生投影以 500 ms 读取 Rust 权威快照。SMTC 在状态变化时立即同步，播放中的时间轴按 5 秒位置桶更新，暂停位置保持精确；元数据仅在曲目、时长或共享封面变化时更新。共享封面是最大 512 px 的归一化 PNG，缓存文件保留到 adapter 退出，避免 WinRT 延迟读取与切歌清理竞争。
 - SMTC 初始化失败只记录可诊断错误并降级为普通播放器，不影响音频播放。
 - 0.0.6 不实现 Toast、系统托盘、Jump List、全局快捷键或 Linux MPRIS。
 
@@ -26,11 +26,11 @@
 - Windows 后端直接封装 `SystemMediaTransportControls`，能覆盖当前需求，且保留未来 MPRIS adapter 方向。
 - 显式 AppUserModelID 避免 Windows 将未打包的本地 Release 程序显示为“未知应用”。
 - 独立线程和 adapter 边界避免系统回调阻塞 Tauri 主线程或音频 actor。
-- 低频快照同步实现简单、可诊断，且不增加高频 WebView IPC；后续可替换为合并事件通道。
+- 低频快照同步实现简单、可诊断，且不增加高频 WebView IPC；时间轴节流避免每个投影 tick 都进入 WinRT。
 
 ## 后果与验证
 
 - Cargo.lock 增加 `souvlaki 0.8.3` 及其 Windows 依赖；依赖报告确认无未知许可证。
-- 13 个普通 Rust 测试、8 个默认设备/SMTC 命令测试、format 和 Clippy 已通过。
+- 自动测试覆盖 SMTC 命令、封面文件路径、缓存生命周期与时间轴节流键；format、Clippy 和 Rust 全量测试通过。
 - 当前自动化环境没有可用桌面 HWND，因此 Windows 系统媒体浮层、真实媒体键和蓝牙耳机回调仍必须在桌面 Windows 实机验收。
 - 若实机暴露 souvlaki 的平台缺陷，再新增 ADR 评估 `windows` crate；不预装第二套实现。

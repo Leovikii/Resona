@@ -13,6 +13,7 @@
 npm run dev
 npm test
 npm run build
+npm run build:exe
 npm run licenses
 npm run lint:workflow
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
@@ -20,6 +21,8 @@ cargo test --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 npm run release:windows
 ```
+
+可直接运行的测试 EXE 只能用 `npm run build:exe` 生成；裸 `cargo build` 不启用 Tauri `custom-protocol`，产物仍会访问开发服务器，不能交付测试。
 
 真实转换矩阵：
 
@@ -36,6 +39,7 @@ cargo test --manifest-path src-tauri/Cargo.toml pinned_ffmpeg_test_tools_preserv
 - Rust 是领域状态权威。前端不推演播放、列表、更新、依赖或压缩终态；Tauri command 不承载业务状态机。
 - 跨层 DTO 必须类型化并使用稳定 camelCase 序列化。不要暴露 Rodio、CPAL、数据库行或 Win32 类型。
 - Mantine 用于组件行为和可访问性，应用 token/CSS 负责布局与材质。不得加入第二套组件库、全局 Acrylic/blur 或自绘标题栏。
+- 短时通知使用 Mantine `Notification` 及其原生图标插槽；文案按“结果：实际原因”组织，在无歧义前提下尽量简短。只有无需持续处理的临时反馈才自动消失，持续错误保留在对应工作流中。
 - 平台能力放入 `platform` adapter。Win32/COM 回调只读缓存或发 typed command，不能做文件 I/O、图片解码、等待播放锁或直接控制 Rodio。
 - 不增加第二播放引擎、mpv fallback、DSP、隐式重采样或未经测量的高频轮询。
 

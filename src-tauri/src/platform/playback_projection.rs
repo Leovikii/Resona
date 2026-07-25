@@ -36,26 +36,35 @@ impl NativePlaybackProjection {
         let (commands, receiver) = mpsc::channel();
         let worker = thread::Builder::new()
             .name("resona-native-playback-projection".to_owned())
-            .spawn(move || loop {
-                match receiver.recv_timeout(PUBLISH_INTERVAL) {
-                    Ok(ProjectionCommand::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
-                    Err(RecvTimeoutError::Timeout) => {}
+            .spawn(move || {
+                let mut artwork_path = None;
+                let mut artwork = None;
+                loop {
+                    match receiver.recv_timeout(PUBLISH_INTERVAL) {
+                        Ok(ProjectionCommand::Shutdown) | Err(RecvTimeoutError::Disconnected) => {
+                            break
+                        }
+                        Err(RecvTimeoutError::Timeout) => {}
+                    }
+                    let Ok(snapshot) = engine.snapshot() else {
+                        continue;
+                    };
+                    if snapshot.path != artwork_path {
+                        artwork_path.clone_from(&snapshot.path);
+                        artwork = snapshot
+                            .path
+                            .as_deref()
+                            .and_then(|path| metadata.load(std::path::Path::new(path)).artwork);
+                    }
+                    let projection = NativePlaybackSnapshot {
+                        playback: snapshot,
+                        artwork: artwork.clone(),
+                    };
+                    subscribers_for_worker
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .retain(|subscriber| subscriber.send(projection.clone()).is_ok());
                 }
-                let Ok(snapshot) = engine.snapshot() else {
-                    continue;
-                };
-                let artwork = snapshot
-                    .path
-                    .as_deref()
-                    .and_then(|path| metadata.load(std::path::Path::new(path)).artwork);
-                let projection = NativePlaybackSnapshot {
-                    playback: snapshot,
-                    artwork,
-                };
-                subscribers_for_worker
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .retain(|subscriber| subscriber.send(projection.clone()).is_ok());
             })
             .map_err(|error| format!("failed to start native playback projection: {error}"))?;
         Ok(Self {

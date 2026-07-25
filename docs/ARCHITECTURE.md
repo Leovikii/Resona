@@ -41,13 +41,13 @@ Tauri commands 负责 DTO 转换和服务调用，不包含领域分支。长任
 
 ## 元数据与封面
 
-`MetadataService` 按路径、文件大小和修改时间缓存最多 4 首曲目。单次读取生成共享的 `TrackDetails` 与可选 `Artwork`：编码字节供 SMTC，data URL 供 React，限制尺寸的 BGRA 供 DWM。源封面、解码内存和缓存尺寸均有上限；失败返回无封面元数据并使用统一占位图。
+`MetadataService` 按路径、文件大小和修改时间缓存最多 4 首曲目。单次读取把源封面归一化为最大 512 px 的 PNG 与 BGRA，并生成共享的 `TrackDetails` 与可选 `Artwork`：PNG 供 SMTC 和 React，BGRA 供 DWM。源封面、解码内存和缓存尺寸均有上限；失败返回无封面元数据并使用统一占位图。
 
 `NativePlaybackProjection` 合并权威播放快照和共享封面，低频发布给 SMTC、任务栏和托盘：
 
-- SMTC 使用标题、艺术家、专辑、时长、时间轴、可用动作和真实封面；带封面提交失败时重试无封面元数据。
+- SMTC 使用标题、艺术家、专辑、时长、时间轴、可用动作和真实封面；封面 PNG 在 adapter 自有缓存中保留到退出，带封面提交失败时重试占位图和无封面元数据。
 - 任务栏工具栏固定上一首、播放/暂停、下一首；进度只在时长确定且可定位时显示。
-- DWM iconic thumbnail/live preview 只绘制等比居中的封面或占位图。窗口消息回调只读取缓存 BGRA，不解析标签、文件或图片。
+- DWM iconic thumbnail/live preview 只绘制等比居中的封面或占位图。平台工作线程预生成有界固定尺寸的 GDI 位图组，新组完整后才替换旧组；窗口消息回调只选择不超过系统请求的最近缓存并立即提交，不在 Explorer 同步等待的回调内缩放、创建位图、读文件或投递补偿渲染。
 
 ## 歌词与窗口
 

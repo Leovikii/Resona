@@ -12,6 +12,7 @@ import {
   Loader,
   Menu,
   Modal,
+  Notification,
   NumberInput,
   Paper,
   Popover,
@@ -23,18 +24,25 @@ import {
   Slider,
   Stack,
   Switch,
+  Tabs,
   Text,
   TextInput,
   ThemeIcon,
   Title,
   Tooltip,
+  Transition,
   UnstyledButton,
   useMantineColorScheme,
 } from "@mantine/core";
 import {
   Captions,
+  ArrowDown,
   ArrowRight,
+  ArrowUp,
   Check,
+  CircleAlert,
+  ChevronLeft,
+  ChevronRight,
   Disc3,
   Download,
   FileAudio,
@@ -83,16 +91,29 @@ import type { PlaybackFailure, PlaybackSnapshot } from "../shared/model/playback
 import type { LyricsSnapshot } from "../shared/model/lyrics";
 import type { TrackDetails } from "../shared/model/metadata";
 import { fileNameFromPath, formatBytes, formatDuration } from "../shared/utils/format";
-import { listInsertionPositionAtY } from "../shared/ui/usePointerReorder";
+import { listInsertionPositionAtY, usePointerReorder } from "../shared/ui/usePointerReorder";
+import { scrollViewportAtPointer, type ScrollAxis } from "../shared/ui/edgeAutoScroll";
 import { PlaylistTrackList } from "../shared/ui/PlaylistTrackList";
 import { AddMediaMenu } from "../shared/ui/AddMediaMenu";
 import { BrandWordmark } from "../shared/ui/BrandWordmark";
 import { CompactTopNavigation, type CompactNavigationSelection } from "../shared/ui/CompactTopNavigation";
 import { OverflowMarquee } from "../shared/ui/OverflowMarquee";
 import { accentColors, type AccentColor, usePreferences } from "./preferences";
+import {
+  adjacentFullPlayerPage,
+  createFullPlayerPagingState,
+  fullPlayerPages,
+  reconcileFullPlayerPaging,
+  selectFullPlayerPage,
+  type FullPlayerPage,
+} from "./fullPlayerPaging";
 import artworkPlaceholder from "../../assets/resona-icon.svg";
 
 type Selection = CompactNavigationSelection;
+
+type PlaylistDialog =
+  | { kind: "clear"; playlistId: number | null }
+  | { kind: "rename"; name: string; playlistId: number };
 
 let startupUpdateCheckStarted = false;
 const ApplicationUpdateDialog = lazy(() => import("./ApplicationUpdateDialog"));
@@ -115,15 +136,25 @@ export default function App() {
   const mainWindow = useMainWindowLayout();
   const [selection, setSelection] = useState<Selection>({ kind: "default" });
   const [createPlaylistOpen, setCreatePlaylistOpen] = useState(false);
+  const [playlistDialog, setPlaylistDialog] = useState<PlaylistDialog | null>(null);
+  const [playlistDialogOpen, setPlaylistDialogOpen] = useState(false);
   const [rememberCloseDecision, setRememberCloseDecision] = useState(false);
   const [playlistName, setPlaylistName] = useState("");
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const [externalDragActive, setExternalDragActive] = useState(false);
   const [playerExpanded, setPlayerExpanded] = useState(false);
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
+  const [updateDialogMounted, setUpdateDialogMounted] = useState(false);
+  const [importNoticeCount, setImportNoticeCount] = useState(0);
+  const [importNoticeReasons, setImportNoticeReasons] = useState("");
   const dropActionsRef = useRef({ library, playback, t });
   const autoLyricsPathRef = useRef<string | null>(null);
   dropActionsRef.current = { library, playback, t };
+
+  const openUpdateDialog = useCallback(() => {
+    setUpdateDialogMounted(true);
+    setUpdateDialogOpen(true);
+  }, []);
 
   useEffect(() => {
     if (applicationLifetime.closePromptOpen) setRememberCloseDecision(false);
@@ -136,7 +167,7 @@ export default function App() {
       startupUpdateCheckStarted = true;
       timer = window.setTimeout(() => {
         void applicationUpdate.check({ silent: true }).then((release) => {
-          if (release) setUpdateDialogOpen(true);
+          if (release) openUpdateDialog();
         });
       }, 600);
     });
@@ -144,7 +175,28 @@ export default function App() {
       window.cancelAnimationFrame(frame);
       window.clearTimeout(timer);
     };
-  }, [applicationUpdate.check]);
+  }, [applicationUpdate.check, openUpdateDialog]);
+
+  const rejectedImportCount = library.rejectedCount + playback.defaultRejectedCount;
+  const rejectedImportReasons = useMemo(() => [...new Set([
+    ...library.rejectedPaths,
+    ...playback.defaultRejectedPaths,
+  ].map(({ reason }) => t(`import.reasons.${reason}`)))].join(t("import.reasonSeparator")), [
+    library.rejectedPaths,
+    playback.defaultRejectedPaths,
+    t,
+  ]);
+  const dismissImportNotice = useCallback(() => {
+    library.dismissRejected();
+    playback.dismissDefaultRejected();
+  }, [library.dismissRejected, playback.dismissDefaultRejected]);
+  useEffect(() => {
+    if (rejectedImportCount <= 0) return;
+    setImportNoticeCount(rejectedImportCount);
+    setImportNoticeReasons(rejectedImportReasons);
+    const timer = window.setTimeout(dismissImportNotice, 4_000);
+    return () => window.clearTimeout(timer);
+  }, [dismissImportNotice, rejectedImportCount, rejectedImportReasons]);
 
   const hasCurrentTrack = playback.snapshot.currentItemId !== null
     && playback.selectedPath !== null;
@@ -211,7 +263,38 @@ export default function App() {
     let disposed = false;
     let unlistenDrop: (() => void) | undefined;
     let unlistenScale: (() => void) | undefined;
+    let edgeScrollFrame: number | null = null;
+    let dragPointer: { x: number; y: number } | null = null;
     let scaleFactor = window.devicePixelRatio || 1;
+    const stopEdgeScroll = () => {
+      dragPointer = null;
+      if (edgeScrollFrame !== null) {
+        window.cancelAnimationFrame(edgeScrollFrame);
+        edgeScrollFrame = null;
+      }
+    };
+    const updateDropTarget = (clientX: number, clientY: number) => {
+      const target = dropTargetAtPosition(clientX, clientY);
+      setDropTarget((current) => dropTargetsEqual(current, target) ? current : target);
+    };
+    const scheduleEdgeScroll = () => {
+      if (edgeScrollFrame !== null) return;
+      const tick = () => {
+        edgeScrollFrame = null;
+        if (!dragPointer) return;
+        const scrollTarget = dragScrollTargetAtPosition(dragPointer.x, dragPointer.y);
+        if (!scrollTarget) return;
+        if (!scrollViewportAtPointer(
+          scrollTarget.viewport,
+          scrollTarget.axis,
+          dragPointer.x,
+          dragPointer.y,
+        )) return;
+        updateDropTarget(dragPointer.x, dragPointer.y);
+        edgeScrollFrame = window.requestAnimationFrame(tick);
+      };
+      edgeScrollFrame = window.requestAnimationFrame(tick);
+    };
     const currentWindow = getCurrentWindow();
     void currentWindow.scaleFactor().then((factor) => {
       scaleFactor = factor;
@@ -228,19 +311,22 @@ export default function App() {
     });
     void getCurrentWebview().onDragDropEvent((event) => {
       if (event.payload.type === "leave") {
+        stopEdgeScroll();
         setDropTarget(null);
         setExternalDragActive(false);
         return;
       }
-      const target = dropTargetAtPosition(
-        event.payload.position.x / scaleFactor,
-        event.payload.position.y / scaleFactor,
-      );
+      const clientX = event.payload.position.x / scaleFactor;
+      const clientY = event.payload.position.y / scaleFactor;
+      const target = dropTargetAtPosition(clientX, clientY);
       if (event.payload.type === "enter" || event.payload.type === "over") {
+        dragPointer = { x: clientX, y: clientY };
         setExternalDragActive(true);
         setDropTarget((current) => dropTargetsEqual(current, target) ? current : target);
+        scheduleEdgeScroll();
         return;
       }
+      stopEdgeScroll();
       setDropTarget(null);
       setExternalDragActive(false);
       if (!target || event.payload.paths.length === 0) return;
@@ -277,6 +363,7 @@ export default function App() {
     });
     return () => {
       disposed = true;
+      stopEdgeScroll();
       unlistenDrop?.();
       unlistenScale?.();
     };
@@ -336,15 +423,14 @@ export default function App() {
     });
   }, [library.removeItems, playback.refresh, selectedUserId]);
   const clearUserItems = useCallback(() => {
-    if (selectedUserId === null || !window.confirm(t("library.clearConfirm"))) return;
-    void library.clearItems(selectedUserId).then((cleared) => {
-      if (cleared) void playback.refresh();
-    });
-  }, [library.clearItems, playback.refresh, selectedUserId, t]);
+    if (selectedUserId === null) return;
+    setPlaylistDialog({ kind: "clear", playlistId: selectedUserId });
+    setPlaylistDialogOpen(true);
+  }, [selectedUserId]);
   const clearDefaultItems = useCallback(() => {
-    if (!window.confirm(t("library.clearConfirm"))) return;
-    void playback.clearDefaultPlaylist();
-  }, [playback.clearDefaultPlaylist, t]);
+    setPlaylistDialog({ kind: "clear", playlistId: null });
+    setPlaylistDialogOpen(true);
+  }, []);
   const renameUserPlaylist = useCallback((name: string) => selectedUserId === null
     ? Promise.resolve(false)
     : library.renamePlaylist(selectedUserId, name), [library.renamePlaylist, selectedUserId]);
@@ -353,9 +439,10 @@ export default function App() {
   }, [library.renamePlaylist]);
   const requestRenamePlaylist = useCallback((playlistId: number) => {
     const playlist = library.playlists.find((candidate) => candidate.id === playlistId);
-    const name = window.prompt(t("library.name"), playlist?.name ?? "")?.trim();
-    if (name) renamePlaylistById(playlistId, name);
-  }, [library.playlists, renamePlaylistById, t]);
+    if (!playlist) return;
+    setPlaylistDialog({ kind: "rename", name: playlist.name, playlistId });
+    setPlaylistDialogOpen(true);
+  }, [library.playlists]);
   const refreshOutputs = useCallback(() => {
     void playback.run("refresh_output_devices");
   }, [playback.run]);
@@ -371,10 +458,12 @@ export default function App() {
       activePlaylist={playback.activePlaylist}
       dropTarget={dropTarget}
       externalDragActive={externalDragActive}
+      moveDisabled={library.loading}
       onCreate={openCreatePlaylist}
       onClearDefault={clearDefaultItems}
       onDeletePlaylist={deleteUserPlaylist}
-      onRenamePlaylist={renamePlaylistById}
+      onMovePlaylist={library.movePlaylist}
+      onRenamePlaylist={requestRenamePlaylist}
       onSelect={selectNavigation}
       playlists={library.playlists}
       selection={selection}
@@ -386,9 +475,15 @@ export default function App() {
         <>
           <CompactTopNavigation
             activePlaylist={playback.activePlaylist}
+            defaultDropActive={dropTarget?.kind === "default"}
+            dropPlaylistId={dropTarget?.kind === "playlist" ? dropTarget.playlistId : null}
+            dropPlaylistPosition={dropTarget?.kind === "playlist-gap" ? dropTarget.position : null}
+            externalDragActive={externalDragActive}
+            moveDisabled={library.loading}
             onClearDefault={clearDefaultItems}
             onCreatePlaylist={openCreatePlaylist}
             onDeletePlaylist={deleteUserPlaylist}
+            onMovePlaylist={library.movePlaylist}
             onRenamePlaylist={requestRenamePlaylist}
             onSelect={selectNavigation}
             playlists={library.playlists}
@@ -400,6 +495,7 @@ export default function App() {
       <section className="main-region" data-player-expanded={playerExpanded || undefined}>
         {playerExpanded && hasCurrentTrack ? (
           <MemoFullPlayerView
+            compact={compact}
             details={trackDetails.details}
             error={trackDetails.error}
             loading={trackDetails.loading}
@@ -409,6 +505,7 @@ export default function App() {
             output={playback.snapshot.output}
             seekable={playback.snapshot.seekable && (playback.snapshot.status === "playing" || playback.snapshot.status === "paused")}
             title={currentTitle}
+            trackKey={playback.selectedPath}
           />
         ) : (
           <section className="content-viewport">
@@ -456,7 +553,7 @@ export default function App() {
                 layoutBusy={mainWindow.busy}
                 layoutMode={mainWindow.snapshot.layoutMode}
                 onRefresh={refreshOutputs}
-                onOpenUpdate={() => setUpdateDialogOpen(true)}
+                onOpenUpdate={openUpdateDialog}
                 onSetLayoutMode={mainWindow.setLayoutMode}
                 onSelectOutput={selectOutput}
                 output={playback.snapshot.output}
@@ -471,13 +568,23 @@ export default function App() {
         )}
         {library.error && <div className="error-banner" role="alert">{library.error}</div>}
         {mainWindow.error && <div className="error-banner" role="alert">{mainWindow.error.message}</div>}
-        {library.rejectedCount + playback.defaultRejectedCount > 0 && (
-          <div className="import-notice">
-            {t("import.rejected", {
-              count: library.rejectedCount + playback.defaultRejectedCount,
-            })}
-          </div>
-        )}
+        <Transition duration={160} mounted={rejectedImportCount > 0} transition="slide-left">
+          {(transitionStyles) => (
+            <Notification
+              className="import-notice"
+              closeButtonProps={{ "aria-label": t("common.close") }}
+              color="orange"
+              icon={<CircleAlert size={16} />}
+              onClose={dismissImportNotice}
+              role="status"
+              style={transitionStyles}
+              withCloseButton
+              withBorder={false}
+            >
+              {t("import.rejected", { count: importNoticeCount, reasons: importNoticeReasons })}
+            </Notification>
+          )}
+        </Transition>
       </section>
 
       <PlayerBar
@@ -539,6 +646,73 @@ export default function App() {
             </Button>
           </Group>
         </Stack>
+      </Modal>
+      <Modal
+        centered
+        onClose={() => setPlaylistDialogOpen(false)}
+        onExitTransitionEnd={() => setPlaylistDialog(null)}
+        opened={playlistDialogOpen}
+        title={playlistDialog?.kind === "rename" ? t("library.rename") : t("library.clearTitle")}
+      >
+        {playlistDialog?.kind === "rename" ? (
+          <Stack>
+            <TextInput
+              data-autofocus
+              label={t("library.name")}
+              onChange={(event) => setPlaylistDialog({
+                ...playlistDialog,
+                name: event.currentTarget.value,
+              })}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") return;
+                event.preventDefault();
+                const name = playlistDialog.name.trim();
+                if (!name) return;
+                renamePlaylistById(playlistDialog.playlistId, name);
+                setPlaylistDialogOpen(false);
+              }}
+              value={playlistDialog.name}
+            />
+            <Group justify="flex-end">
+              <Button onClick={() => setPlaylistDialogOpen(false)} variant="default">
+                {t("common.cancel")}
+              </Button>
+              <Button
+                disabled={!playlistDialog.name.trim()}
+                onClick={() => {
+                  const name = playlistDialog.name.trim();
+                  if (!name) return;
+                  renamePlaylistById(playlistDialog.playlistId, name);
+                  setPlaylistDialogOpen(false);
+                }}
+              >
+                {t("common.save")}
+              </Button>
+            </Group>
+          </Stack>
+        ) : playlistDialog?.kind === "clear" ? (
+          <Stack>
+            <Text c="dimmed" size="sm">{t("library.clearConfirm")}</Text>
+            <Group justify="flex-end">
+              <Button onClick={() => setPlaylistDialogOpen(false)} variant="default">
+                {t("common.cancel")}
+              </Button>
+              <Button color="red" onClick={() => {
+                const playlistId = playlistDialog.playlistId;
+                setPlaylistDialogOpen(false);
+                if (playlistId === null) {
+                  void playback.clearDefaultPlaylist();
+                } else {
+                  void library.clearItems(playlistId).then((cleared) => {
+                    if (cleared) void playback.refresh();
+                  });
+                }
+              }}>
+                {t("common.clear")}
+              </Button>
+            </Group>
+          </Stack>
+        ) : null}
       </Modal>
       <Modal
         centered
@@ -604,12 +778,12 @@ export default function App() {
           </Group>
         </Stack>
       </Modal>
-      {updateDialogOpen && (
+      {updateDialogMounted && (
         <Suspense fallback={null}>
           <ApplicationUpdateDialog
             applicationUpdate={applicationUpdate}
             onClose={() => setUpdateDialogOpen(false)}
-            opened
+            opened={updateDialogOpen}
           />
         </Suspense>
       )}
@@ -621,9 +795,11 @@ function Sidebar({
   activePlaylist,
   dropTarget,
   externalDragActive,
+  moveDisabled,
   onCreate,
   onClearDefault,
   onDeletePlaylist,
+  onMovePlaylist,
   onRenamePlaylist,
   onSelect,
   playlists,
@@ -632,10 +808,12 @@ function Sidebar({
   activePlaylist: ReturnType<typeof usePlaybackController>["activePlaylist"];
   dropTarget: DropTarget | null;
   externalDragActive: boolean;
+  moveDisabled: boolean;
   onCreate: () => void;
   onClearDefault: () => void;
   onDeletePlaylist: (playlistId: number) => void;
-  onRenamePlaylist: (playlistId: number, name: string) => void;
+  onMovePlaylist: (playlistId: number, toPosition: number) => Promise<boolean>;
+  onRenamePlaylist: (playlistId: number) => void;
   onSelect: (selection: Selection) => void;
   playlists: PlaylistSummary[];
   selection: Selection;
@@ -643,6 +821,14 @@ function Sidebar({
   const { t } = useTranslation();
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; playlist: PlaylistSummary | null; isDefault: boolean } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  const playlistViewportRef = useRef<HTMLDivElement | null>(null);
+  const reorder = usePointerReorder({
+    axis: "vertical",
+    disabled: externalDragActive || moveDisabled,
+    items: playlists,
+    onMove: (playlistId, toPosition) => void onMovePlaylist(playlistId, toPosition),
+    scrollViewportRef: playlistViewportRef,
+  });
   useEffect(() => {
     const dismiss = (event: PointerEvent) => {
       if (event.target instanceof Node && contextMenuRef.current?.contains(event.target)) return;
@@ -666,30 +852,50 @@ function Sidebar({
         </div>
         <PlaylistNavItem
           active={selection.kind === "default"}
-          icon={<Disc3 />}
+          dropActive={dropTarget?.kind === "default"}
           label={t("library.default")}
+          order={1}
           playing={activePlaylist?.kind === "default"}
           onClick={() => onSelect({ kind: "default" })}
           onContextMenu={(event) => { event.preventDefault(); setContextMenu({ x: event.clientX, y: event.clientY, playlist: null, isDefault: true }); }}
         />
-        <ScrollArea className="playlist-nav-scroll" scrollHideDelay={700} type="scroll">
-          <div className="playlist-nav-list" data-external-drag={externalDragActive || undefined}>
-            <PlaylistGap active={dropTarget?.kind === "playlist-gap" && dropTarget.position === 0} position={0} />
+        <ScrollArea
+          className="playlist-nav-scroll"
+          data-drag-scroll-axis="vertical"
+          scrollHideDelay={700}
+          type="scroll"
+          viewportRef={playlistViewportRef}
+        >
+          <div
+            className="playlist-nav-list"
+            data-external-drag={externalDragActive || undefined}
+            data-internal-drag={reorder.draggedId !== null || undefined}
+            ref={reorder.listRef}
+          >
+            <PlaylistGap active={dropTarget?.kind === "playlist-gap" && dropTarget.position === 0 || reorder.insertionPosition === 0} position={0} />
             {playlists.map((playlist, index) => (
               <div key={playlist.id}>
                 <PlaylistNavItem
                   active={selection.kind === "user" && selection.playlistId === playlist.id}
+                  dragging={reorder.draggedId === playlist.id}
                   dropActive={dropTarget?.kind === "playlist" && dropTarget.playlistId === playlist.id}
-                  icon={<ListMusic />}
                   label={playlist.name}
-                  onClick={() => onSelect({ kind: "user", playlistId: playlist.id })}
+                  onClick={() => {
+                    if (!reorder.consumeClick()) onSelect({ kind: "user", playlistId: playlist.id });
+                  }}
                   onDelete={() => onDeletePlaylist(playlist.id)}
                   onContextMenu={(event) => { event.preventDefault(); setContextMenu({ x: event.clientX, y: event.clientY, playlist, isDefault: false }); }}
+                  onPointerCancel={reorder.onPointerCancel}
+                  onPointerDown={(event) => reorder.onPointerDown(event, playlist.id)}
+                  onPointerMove={reorder.onPointerMove}
+                  onPointerUp={reorder.onPointerUp}
+                  order={index + 2}
                   playing={activePlaylist?.kind === "user" && activePlaylist.playlistId === playlist.id}
                   playlistId={playlist.id}
+                  reorderPosition={index}
                 />
                 <PlaylistGap
-                  active={dropTarget?.kind === "playlist-gap" && dropTarget.position === index + 1}
+                  active={dropTarget?.kind === "playlist-gap" && dropTarget.position === index + 1 || reorder.insertionPosition === index + 1}
                   position={index + 1}
                 />
               </div>
@@ -701,9 +907,24 @@ function Sidebar({
         {contextMenu.isDefault ? (
           <button onClick={() => { onClearDefault(); setContextMenu(null); }} type="button">{t("common.clear")}</button>
         ) : <>
+          <button
+            disabled={(contextMenu.playlist?.position ?? 0) <= 0}
+            onClick={() => {
+              if (contextMenu.playlist) void onMovePlaylist(contextMenu.playlist.id, contextMenu.playlist.position - 1);
+              setContextMenu(null);
+            }}
+            type="button"
+          ><ArrowUp size={14} />{t("library.moveUp")}</button>
+          <button
+            disabled={(contextMenu.playlist?.position ?? playlists.length - 1) >= playlists.length - 1}
+            onClick={() => {
+              if (contextMenu.playlist) void onMovePlaylist(contextMenu.playlist.id, contextMenu.playlist.position + 1);
+              setContextMenu(null);
+            }}
+            type="button"
+          ><ArrowDown size={14} />{t("library.moveDown")}</button>
           <button onClick={() => {
-            const name = window.prompt(t("library.name"), contextMenu.playlist?.name ?? "")?.trim();
-            if (name && contextMenu.playlist) onRenamePlaylist(contextMenu.playlist.id, name);
+            if (contextMenu.playlist) onRenamePlaylist(contextMenu.playlist.id);
             setContextMenu(null);
           }} type="button">{t("library.rename")}</button>
           <button onClick={() => { if (contextMenu.playlist) onDeletePlaylist(contextMenu.playlist.id); setContextMenu(null); }} type="button">{t("library.delete")}</button>
@@ -755,16 +976,22 @@ function NavButton({ active, icon, label, onClick }: {
   );
 }
 
-function PlaylistNavItem({ active, dropActive, icon, label, onClick, onContextMenu, onDelete, playing, playlistId }: {
+function PlaylistNavItem({ active, dragging, dropActive, label, onClick, onContextMenu, onDelete, onPointerCancel, onPointerDown, onPointerMove, onPointerUp, order, playing, playlistId, reorderPosition }: {
   active: boolean;
+  dragging?: boolean;
   dropActive?: boolean;
-  icon: ReactNode;
   label: string;
   onClick: () => void;
   onContextMenu?: (event: React.MouseEvent) => void;
   onDelete?: () => void;
+  onPointerCancel?: (event: React.PointerEvent<HTMLElement>) => void;
+  onPointerDown?: (event: React.PointerEvent<HTMLElement>) => void;
+  onPointerMove?: (event: React.PointerEvent<HTMLElement>) => void;
+  onPointerUp?: (event: React.PointerEvent<HTMLElement>) => void;
+  order: number;
   playing?: boolean;
   playlistId?: number;
+  reorderPosition?: number;
 }) {
   const { t } = useTranslation();
   return (
@@ -773,13 +1000,22 @@ function PlaylistNavItem({ active, dropActive, icon, label, onClick, onContextMe
         aria-current={active ? "page" : undefined}
         className="playlist-nav-item"
         data-active={active || undefined}
+        data-dragging={dragging || undefined}
         data-drop-active={dropActive || undefined}
-        data-drop-kind={playlistId === undefined ? undefined : "playlist"}
+        data-drop-kind={playlistId === undefined ? "default" : "playlist"}
         data-playlist-id={playlistId}
         data-playing={playing || undefined}
+        data-reorder-position={reorderPosition}
         onClick={onClick}
+        onPointerCancel={onPointerCancel}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
       >
-        <span className="nav-icon">{playing ? <span aria-label="Playing" className="playlist-playing-indicator"><i /><i /><i /></span> : icon}</span>
+        <span className="nav-icon playlist-order-slot">{playing
+          ? <span aria-label={t("playback.playing")} className="playlist-playing-indicator"><i /><i /><i /></span>
+          : <span className="playlist-order">{order}</span>}
+        </span>
         <OverflowMarquee className="nav-label" text={label} />
       </UnstyledButton>
       {onDelete && <Tooltip label={t("library.delete")}><ActionIcon aria-label={t("library.delete")} className="playlist-nav-delete" color="red" onClick={(event) => { event.stopPropagation(); onDelete(); }} size="sm" variant="subtle"><Trash2 size={14} /></ActionIcon></Tooltip>}
@@ -826,6 +1062,7 @@ function DefaultPlaylistView({
   sourceDirectory: string | null;
 }) {
   const { t } = useTranslation();
+  const trackViewportRef = useRef<HTMLDivElement | null>(null);
   return (
     <div className="page-content list-page">
       <div className="playlist-detail-heading">
@@ -859,9 +1096,11 @@ function DefaultPlaylistView({
       ) : (
         <ScrollArea
           className="track-scroll"
+          data-drag-scroll-axis="vertical"
           data-drop-kind="default-track-list"
           scrollHideDelay={700}
           type="scroll"
+          viewportRef={trackViewportRef}
         >
           <PlaylistTrackList
             busy={busy}
@@ -874,6 +1113,7 @@ function DefaultPlaylistView({
             onMove={(itemId, position) => void onMove(itemId, position)}
             onPlay={(itemId) => void onPlay(itemId)}
             onRemove={(itemIds) => void onRemove(itemIds)}
+            scrollViewportRef={trackViewportRef}
           />
         </ScrollArea>
       )}
@@ -914,6 +1154,7 @@ function UserPlaylistView({
 }) {
   const { t } = useTranslation();
   const [name, setName] = useState(playlist?.name ?? "");
+  const trackViewportRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => setName(playlist?.name ?? ""), [playlist?.id, playlist?.name]);
 
   if (!playlist) return <EmptyView icon={<ListMusic />} label={t("library.selectPrompt")} />;
@@ -955,10 +1196,12 @@ function UserPlaylistView({
       ) : (
         <ScrollArea
           className="track-scroll"
+          data-drag-scroll-axis="vertical"
           data-drop-kind="track-list"
           data-playlist-id={playlist.id}
           scrollHideDelay={700}
           type="scroll"
+          viewportRef={trackViewportRef}
         >
           <div>
             <PlaylistTrackList
@@ -974,6 +1217,7 @@ function UserPlaylistView({
               onMove={onMove}
               onPlay={onPlay}
               onRemove={onRemove}
+              scrollViewportRef={trackViewportRef}
             />
           </div>
         </ScrollArea>
@@ -1742,7 +1986,8 @@ function PlaybackModeButton({ busy, mode, onRun }: {
   );
 }
 
-function FullPlayerView({ details, error, loading, lyrics, onClose, onSeek, output, seekable, title }: {
+function FullPlayerView({ compact, details, error, loading, lyrics, onClose, onSeek, output, seekable, title, trackKey }: {
+  compact: boolean;
   details: ReturnType<typeof useTrackDetails>["details"];
   error: string | null;
   loading: boolean;
@@ -1752,13 +1997,34 @@ function FullPlayerView({ details, error, loading, lyrics, onClose, onSeek, outp
   output: PlaybackSnapshot["output"];
   seekable: boolean;
   title: string;
+  trackKey: string | null;
 }) {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<"lyrics" | "details">("lyrics");
+  const lyricsMatchTrack = lyrics.audioPath === trackKey;
+  const lyricsStatus = lyricsMatchTrack ? lyrics.status : "idle";
+  const lines = lyricsMatchTrack ? lyrics.document?.lines ?? [] : [];
+  const [paging, setPaging] = useState(() => createFullPlayerPagingState({
+    compact,
+    lineCount: lines.length,
+    lyricsStatus,
+    trackKey,
+  }));
   const activeLyricRef = useRef<HTMLButtonElement | null>(null);
-  const lines = lyrics.document?.lines ?? [];
+  const pages = fullPlayerPages(compact);
+  const previousPage = adjacentFullPlayerPage(pages, paging.page, -1);
+  const nextPage = adjacentFullPlayerPage(pages, paging.page, 1);
+
   useEffect(() => {
-    if (tab !== "lyrics" || lyrics.activeLineIndex === null) return;
+    setPaging((current) => reconcileFullPlayerPaging(current, {
+      compact,
+      lineCount: lines.length,
+      lyricsStatus,
+      trackKey,
+    }));
+  }, [compact, lines.length, lyricsStatus, trackKey]);
+
+  useEffect(() => {
+    if (paging.page !== "lyrics" || !lyricsMatchTrack || lyrics.activeLineIndex === null) return;
     const frame = requestAnimationFrame(() => {
       activeLyricRef.current?.scrollIntoView({
         behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
@@ -1766,75 +2032,142 @@ function FullPlayerView({ details, error, loading, lyrics, onClose, onSeek, outp
       });
     });
     return () => cancelAnimationFrame(frame);
-  }, [lyrics.activeLineIndex, tab]);
+  }, [lyrics.activeLineIndex, lyricsMatchTrack, paging.page]);
+
+  const selectPage = (page: FullPlayerPage) => {
+    setPaging((current) => selectFullPlayerPage(current, page));
+  };
+  const closeButton = (
+    <ActionIcon
+      aria-label={t("common.close")}
+      className="full-player-close"
+      data-testid="player-close"
+      onClick={onClose}
+      variant="subtle"
+    >
+      <X size={19} />
+    </ActionIcon>
+  );
+  const artwork = (
+    <div className="full-player-artwork">
+      <img
+        alt=""
+        data-placeholder={!details?.artworkDataUrl || undefined}
+        draggable={false}
+        src={details?.artworkDataUrl ?? artworkPlaceholder}
+      />
+    </div>
+  );
+
   return (
     <section className="full-player" aria-label={t("playback.nowPlaying")}>
-      <ActionIcon aria-label={t("common.close")} className="full-player-close" data-testid="player-close" onClick={onClose} variant="subtle">
-        <X size={19} />
-      </ActionIcon>
-      <div className="full-player-summary">
-        <div className="full-player-artwork">
-          {details?.artworkDataUrl
-            ? <img alt="" src={details.artworkDataUrl} />
-            : <Disc3 aria-hidden="true" size={72} />}
+      {compact ? (
+        <div className="full-player-compact-header">
+          <div className="full-player-compact-copy">
+            <Title order={3} lineClamp={1}>{details?.title || title}</Title>
+            <Text c="dimmed" lineClamp={1} size="sm">{details?.artist || t("metadata.unknownArtist")}</Text>
+          </div>
+          {closeButton}
         </div>
-        <div className="full-player-copy">
-          <Title order={2}>{details?.title || title}</Title>
-          <Text c="dimmed">{details?.artist || t("metadata.unknownArtist")}</Text>
-          {loading && <Loader size="xs" />}
-          {(error || details?.metadataWarning) && <Text c="yellow" size="xs">{t("metadata.partial")}</Text>}
-        </div>
-      </div>
-      <div className="full-player-compact-copy">
-        <Title order={3} lineClamp={1}>{details?.title || title}</Title>
-        <Text c="dimmed" lineClamp={1} size="sm">{details?.artist || t("metadata.unknownArtist")}</Text>
-      </div>
-      <div className="full-player-right">
-        <div className="full-player-view-switch">
-          <SegmentedControl
-            aria-label={t("playback.nowPlayingView")}
-            data={[
-              { label: t("lyrics.region"), value: "lyrics" },
-              { label: t("metadata.title"), value: "details" },
-            ]}
-            fullWidth
-            onChange={(value) => setTab(value as "lyrics" | "details")}
-            size="xs"
-            value={tab}
-          />
-        </div>
-        {tab === "lyrics" ? (
-          <ScrollArea className="full-player-panel full-player-lyrics" type="never" aria-label={t("lyrics.region")}>
-            <div className="full-player-lyrics-content">
-            {lines.length === 0 ? (
-              <EmptyView icon={<Captions />} label={t("playback.noLyrics")} />
-            ) : (
-              lines.map((line, index) => (
-                <UnstyledButton
-                  aria-label={`${line.text} · ${formatDuration(line.startMs)}`}
-                  className="full-player-lyric-line"
-                  data-active={index === lyrics.activeLineIndex || undefined}
-                  disabled={!seekable}
-                  key={`${line.startMs}-${index}`}
-                  onClick={() => void onSeek(line.startMs)}
-                  ref={index === lyrics.activeLineIndex ? activeLyricRef : undefined}
-                >{line.text}</UnstyledButton>
-              ))
-            )}
+      ) : (
+        <>
+          {closeButton}
+          <div className="full-player-summary">
+            {artwork}
+            <div className="full-player-copy">
+              <Title order={2}>{details?.title || title}</Title>
+              <Text c="dimmed">{details?.artist || t("metadata.unknownArtist")}</Text>
+              {loading && <Loader size="xs" />}
+              {(error || details?.metadataWarning) && <Text c="yellow" size="xs">{t("metadata.partial")}</Text>}
             </div>
-          </ScrollArea>
-        ) : (
-          <ScrollArea className="full-player-panel full-player-details" scrollHideDelay={700} type="scroll">
-            <div className="full-player-details-content">
-            <MetadataRow label={t("metadata.artist")} value={details?.artist} />
-            <MetadataRow label={t("metadata.album")} value={details?.album} />
-            <MetadataRow compact label={t("metadata.inputInfo")} value={formatInputAudioInfo(details, t)} />
-            <MetadataRow compact label={t("metadata.outputInfo")} value={formatOutputAudioInfo(output, t)} />
-            <MetadataRow label={t("metadata.path")} value={details?.path} />
-            </div>
-          </ScrollArea>
-        )}
-      </div>
+          </div>
+        </>
+      )}
+      <Tabs
+        className="full-player-pager"
+        keepMounted
+        onChange={(value) => {
+          if (value && pages.includes(value as FullPlayerPage)) selectPage(value as FullPlayerPage);
+        }}
+        value={paging.page}
+        variant="none"
+      >
+        <div className="full-player-pages">
+          {compact && (
+            <Tabs.Panel className="full-player-page full-player-artwork-page" value="artwork">
+              {artwork}
+            </Tabs.Panel>
+          )}
+          <Tabs.Panel className="full-player-page" value="lyrics">
+            <ScrollArea className="full-player-panel full-player-lyrics" type="never" aria-label={t("lyrics.region")}>
+              <div className="full-player-lyrics-content">
+              {lines.length === 0 ? (
+                <EmptyView icon={<Captions />} label={t("playback.noLyrics")} />
+              ) : (
+                lines.map((line, index) => (
+                  <UnstyledButton
+                    aria-label={`${line.text} · ${formatDuration(line.startMs)}`}
+                    className="full-player-lyric-line"
+                    data-active={index === lyrics.activeLineIndex || undefined}
+                    disabled={!seekable}
+                    key={`${line.startMs}-${index}`}
+                    onClick={() => void onSeek(line.startMs)}
+                    ref={index === lyrics.activeLineIndex ? activeLyricRef : undefined}
+                  >{line.text}</UnstyledButton>
+                ))
+              )}
+              </div>
+            </ScrollArea>
+          </Tabs.Panel>
+          <Tabs.Panel className="full-player-page" value="details">
+            <ScrollArea className="full-player-panel full-player-details" scrollHideDelay={700} type="scroll">
+              <div className="full-player-details-content">
+              <MetadataRow label={t("metadata.artist")} value={details?.artist} />
+              <MetadataRow label={t("metadata.album")} value={details?.album} />
+              <MetadataRow compact label={t("metadata.inputInfo")} value={formatInputAudioInfo(details, t)} />
+              <MetadataRow compact label={t("metadata.outputInfo")} value={formatOutputAudioInfo(output, t)} />
+              <MetadataRow label={t("metadata.path")} value={details?.path} />
+              </div>
+            </ScrollArea>
+          </Tabs.Panel>
+        </div>
+        <div className="full-player-page-controls">
+          <ActionIcon
+            aria-label={t("common.previousPage")}
+            className="full-player-page-arrow"
+            data-hidden={!previousPage || undefined}
+            disabled={!previousPage}
+            onClick={() => previousPage && selectPage(previousPage)}
+            size="sm"
+            variant="subtle"
+          >
+            <ChevronLeft size={17} />
+          </ActionIcon>
+          <Tabs.List aria-label={t("playback.nowPlayingView")} className="full-player-page-dots">
+            {pages.map((page) => (
+              <Tabs.Tab
+                aria-label={t(`playback.pages.${page}`)}
+                className="full-player-page-dot"
+                key={page}
+                value={page}
+              >
+                <span aria-hidden="true" />
+              </Tabs.Tab>
+            ))}
+          </Tabs.List>
+          <ActionIcon
+            aria-label={t("common.nextPage")}
+            className="full-player-page-arrow"
+            data-hidden={!nextPage || undefined}
+            disabled={!nextPage}
+            onClick={() => nextPage && selectPage(nextPage)}
+            size="sm"
+            variant="subtle"
+          >
+            <ChevronRight size={17} />
+          </ActionIcon>
+        </div>
+      </Tabs>
     </section>
   );
 }
@@ -1931,6 +2264,18 @@ function dropTargetAtPosition(clientX: number, clientY: number): DropTarget | nu
     return { kind, playlistId, position };
   }
   return null;
+}
+
+function dragScrollTargetAtPosition(clientX: number, clientY: number): {
+  axis: ScrollAxis;
+  viewport: HTMLElement;
+} | null {
+  const root = document.elementFromPoint(clientX, clientY)
+    ?.closest<HTMLElement>("[data-drag-scroll-axis]");
+  const axis = root?.dataset.dragScrollAxis;
+  if (!root || (axis !== "horizontal" && axis !== "vertical")) return null;
+  const viewport = root.querySelector<HTMLElement>(".mantine-ScrollArea-viewport");
+  return viewport ? { axis, viewport } : null;
 }
 
 function dropTargetsEqual(left: DropTarget | null, right: DropTarget | null) {

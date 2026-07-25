@@ -10,6 +10,7 @@ import type {
   OpenMediaResult,
   PlaylistItem,
   PlaylistPlaybackResult,
+  RejectedPath,
 } from "../../shared/model/library";
 import {
   emptyLyricsSnapshot,
@@ -58,7 +59,7 @@ export function usePlaybackController() {
       ? defaultFromPlayback(previewPlayback)
       : emptyDefaultPlaylist,
   );
-  const [defaultRejectedCount, setDefaultRejectedCount] = useState(0);
+  const [defaultRejectedPaths, setDefaultRejectedPaths] = useState<RejectedPath[]>([]);
   const [activePlaylist, setActivePlaylist] = useState<ActivePlaylistSnapshot | null>(
     preview && new URLSearchParams(window.location.search).get("preview") !== "empty"
       ? { kind: "default", playlistId: null }
@@ -84,19 +85,32 @@ export function usePlaybackController() {
     const merged = mergePlaybackSnapshot(snapshotRef.current, next);
     snapshotRef.current = merged;
     setSnapshot(merged);
-    setLyrics((current) => current.audioPath === next.path ? current : {
-      ...emptyLyricsSnapshot,
-      revision: current.revision,
-      audioPath: next.path,
+    setLyrics((current) => {
+      if (current.audioPath === next.path) return current;
+      if (preview) {
+        const fixture = next.path?.endsWith("Midnight Signal.flac")
+          ? previewLyricsSnapshot()
+          : { ...emptyLyricsSnapshot, status: "missing" as const };
+        return {
+          ...fixture,
+          revision: current.revision + 1,
+          audioPath: next.path,
+        };
+      }
+      return {
+        ...emptyLyricsSnapshot,
+        revision: current.revision,
+        audioPath: next.path,
+      };
     });
-  }, []);
+  }, [preview]);
 
   const acceptOpenResult = useCallback((result: OpenMediaResult) => {
     acceptPlaybackSnapshot(result.playback);
     setActivePlaylist(result.activePlaylist);
     defaultPlaylistRef.current = result.defaultPlaylist;
     setDefaultPlaylist(result.defaultPlaylist);
-    setDefaultRejectedCount(0);
+    setDefaultRejectedPaths([]);
     setOpenSequence((current) => current + 1);
     setRefreshError(null);
   }, [acceptPlaybackSnapshot]);
@@ -216,6 +230,7 @@ export function usePlaybackController() {
 
   const addDefaultItems = useCallback(async (paths: string[], position: number | null = null) => {
     if (paths.length === 0) return null;
+    setDefaultRejectedPaths([]);
     setPending(true);
     try {
       const result = preview
@@ -223,7 +238,7 @@ export function usePlaybackController() {
         : await invokeTauri<DefaultPlaylistMutationResult>("add_default_playlist_items", { paths, position });
       acceptDefaultPlaylist(result.defaultPlaylist);
       await refresh();
-      setDefaultRejectedCount(result.rejected.length);
+      setDefaultRejectedPaths(result.rejected);
       setRefreshError(null);
       return result;
     } catch (error) {
@@ -409,6 +424,8 @@ export function usePlaybackController() {
     }
   }, [acceptDefaultPlaylist, preview]);
 
+  const dismissDefaultRejected = useCallback(() => setDefaultRejectedPaths([]), []);
+
   const chooseAndAddDefaultFiles = useCallback(
     () => chooseAndAddDefault("files"),
     [chooseAndAddDefault],
@@ -426,7 +443,9 @@ export function usePlaybackController() {
     chooseAndAddDefaultFolders,
     currentItem,
     defaultPlaylist,
-    defaultRejectedCount,
+    defaultRejectedCount: defaultRejectedPaths.length,
+    defaultRejectedPaths,
+    dismissDefaultRejected,
     dialogOpen,
     lyrics,
     openPath,

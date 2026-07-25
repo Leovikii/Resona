@@ -10,7 +10,7 @@ mod windows_impl {
 
     use tauri::AppHandle;
     use windows::core::PCWSTR;
-    use windows::Win32::Foundation::{BOOL, HANDLE, HWND, LPARAM, LRESULT, RECT, WPARAM};
+    use windows::Win32::Foundation::{BOOL, HANDLE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
     use windows::Win32::Graphics::Dwm::{
         DwmInvalidateIconicBitmaps, DwmSetIconicLivePreviewBitmap, DwmSetIconicThumbnail,
         DwmSetWindowAttribute, DWMWA_FORCE_ICONIC_REPRESENTATION, DWMWA_HAS_ICONIC_BITMAP,
@@ -43,6 +43,9 @@ mod windows_impl {
     const PREVIOUS_BUTTON_ID: u32 = 4_001;
     const PLAY_BUTTON_ID: u32 = 4_002;
     const NEXT_BUTTON_ID: u32 = 4_003;
+    const ICONIC_BITMAP_SIZES: [u32; 20] = [
+        1, 16, 24, 32, 48, 64, 80, 96, 112, 120, 128, 144, 160, 176, 192, 224, 256, 320, 384, 512,
+    ];
 
     #[derive(Clone)]
     enum TaskbarCommand {
@@ -52,6 +55,8 @@ mod windows_impl {
         RecreateButtons,
         Shutdown,
     }
+
+    type TaskbarReady = Result<(u32, Vec<Arc<IconicBitmap>>), String>;
 
     pub struct TaskbarAdapter {
         app: AppHandle,
@@ -85,13 +90,13 @@ mod windows_impl {
                 .map_err(|error| format!("failed to start taskbar worker: {error}"))?;
 
             match ready_receiver.recv_timeout(Duration::from_secs(5)) {
-                Ok(Ok((taskbar_created_message, placeholder))) => {
+                Ok(Ok((taskbar_created_message, bitmaps))) => {
                     if let Err(error) = install_message_hook(
                         app,
                         hwnd,
                         commands.clone(),
                         taskbar_created_message,
-                        placeholder,
+                        bitmaps,
                     ) {
                         let _ = commands.send(TaskbarCommand::Shutdown);
                         let _ = worker.join();
@@ -135,7 +140,7 @@ mod windows_impl {
         engine: Arc<RodioPlaybackEngine>,
         resource_dir: PathBuf,
         receiver: Receiver<TaskbarCommand>,
-        ready_sender: SyncSender<Result<(u32, Arc<Artwork>), String>>,
+        ready_sender: SyncSender<TaskbarReady>,
         projection: Receiver<NativePlaybackSnapshot>,
     ) {
         let initialized = match unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) } {
@@ -179,6 +184,16 @@ mod windows_impl {
                 return;
             }
         };
+        let placeholder_bitmaps = match create_iconic_bitmaps(&placeholder) {
+            Ok(bitmaps) => bitmaps,
+            Err(error) => {
+                let _ = ready_sender.send(Err(format!(
+                    "failed to render taskbar artwork placeholder: {error}"
+                )));
+                unsafe { CoUninitialize() };
+                return;
+            }
+        };
         let taskbar_created_message =
             unsafe { RegisterWindowMessageW(windows::w!("TaskbarButtonCreated")) };
         if taskbar_created_message == 0 {
@@ -189,7 +204,7 @@ mod windows_impl {
             return;
         }
         if ready_sender
-            .send(Ok((taskbar_created_message, Arc::clone(&placeholder))))
+            .send(Ok((taskbar_created_message, placeholder_bitmaps)))
             .is_err()
         {
             unsafe { CoUninitialize() };
@@ -233,8 +248,16 @@ mod windows_impl {
             if let Some(native) = projection.try_iter().last() {
                 let next_artwork = native.artwork.unwrap_or_else(|| Arc::clone(&placeholder));
                 if !Arc::ptr_eq(&latest_artwork, &next_artwork) {
-                    latest_artwork = next_artwork;
-                    update_hook_artwork(hwnd.0, Arc::clone(&latest_artwork));
+                    match create_iconic_bitmaps(&next_artwork) {
+                        Ok(bitmaps) => {
+                            if update_hook_bitmaps(hwnd.0, bitmaps) {
+                                latest_artwork = next_artwork;
+                            }
+                        }
+                        Err(error) => {
+                            eprintln!("Windows taskbar artwork render failed: {error}");
+                        }
+                    }
                 }
                 latest_snapshot = Some(native.playback);
             }
@@ -454,7 +477,18 @@ mod windows_impl {
         previous: isize,
         commands: Sender<TaskbarCommand>,
         taskbar_created_message: u32,
-        artwork: Arc<Artwork>,
+        bitmaps: Vec<Arc<IconicBitmap>>,
+    }
+
+    struct IconicBitmap {
+        size: u32,
+        handle: HBITMAP,
+    }
+
+    impl Drop for IconicBitmap {
+        fn drop(&mut self) {
+            unsafe { DeleteObject(self.handle) };
+        }
     }
 
     fn hook_state() -> &'static Mutex<Option<HookState>> {
@@ -467,12 +501,12 @@ mod windows_impl {
         hwnd: isize,
         commands: Sender<TaskbarCommand>,
         taskbar_created_message: u32,
-        artwork: Arc<Artwork>,
+        bitmaps: Vec<Arc<IconicBitmap>>,
     ) -> Result<(), String> {
         let (sender, receiver) = mpsc::sync_channel(1);
         app.run_on_main_thread(move || {
             let result =
-                install_message_hook_on_main(hwnd, commands, taskbar_created_message, artwork);
+                install_message_hook_on_main(hwnd, commands, taskbar_created_message, bitmaps);
             let _ = sender.send(result);
         })
         .map_err(|error| format!("failed to dispatch taskbar message hook: {error}"))?;
@@ -485,7 +519,7 @@ mod windows_impl {
         hwnd: isize,
         commands: Sender<TaskbarCommand>,
         taskbar_created_message: u32,
-        artwork: Arc<Artwork>,
+        bitmaps: Vec<Arc<IconicBitmap>>,
     ) -> Result<(), String> {
         let mut state = hook_state()
             .lock()
@@ -523,22 +557,24 @@ mod windows_impl {
             previous,
             commands,
             taskbar_created_message,
-            artwork,
+            bitmaps,
         });
         Ok(())
     }
 
-    fn update_hook_artwork(hwnd: isize, artwork: Arc<Artwork>) {
-        {
+    fn update_hook_bitmaps(hwnd: isize, bitmaps: Vec<Arc<IconicBitmap>>) -> bool {
+        let previous_bitmaps = {
             let mut guard = hook_state()
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             let Some(state) = guard.as_mut().filter(|state| state.hwnd == hwnd) else {
-                return;
+                return false;
             };
-            state.artwork = artwork;
-        }
+            std::mem::replace(&mut state.bitmaps, bitmaps)
+        };
+        drop(previous_bitmaps);
         let _ = unsafe { DwmInvalidateIconicBitmaps(HWND(hwnd)) };
+        true
     }
 
     fn uninstall_message_hook(app: &AppHandle, hwnd: isize) {
@@ -570,11 +606,11 @@ mod windows_impl {
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> LRESULT {
-        let (previous, command, artwork) = {
-            let state = hook_state()
+        let (previous, command, iconic_bitmap, live_preview, live_preview_origin, iconic_message) = {
+            let mut state = hook_state()
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let Some(state) = state.as_ref().filter(|state| state.hwnd == hwnd.0) else {
+            let Some(state) = state.as_mut().filter(|state| state.hwnd == hwnd.0) else {
                 return windows::Win32::UI::WindowsAndMessaging::DefWindowProcW(
                     hwnd, message, wparam, lparam,
                 );
@@ -594,35 +630,62 @@ mod windows_impl {
             if let Some(command) = command.as_ref() {
                 let _ = state.commands.send(command.clone());
             }
-            let artwork = matches!(
-                message,
-                WM_DWMSENDICONICTHUMBNAIL | WM_DWMSENDICONICLIVEPREVIEWBITMAP
-            )
-            .then(|| Arc::clone(&state.artwork));
-            (state.previous, command.is_some(), artwork)
-        };
-        if let Some(artwork) = artwork {
-            let result = if message == WM_DWMSENDICONICTHUMBNAIL {
+            let request = if message == WM_DWMSENDICONICTHUMBNAIL {
                 let width = ((lparam.0 >> 16) & 0xffff) as u32;
                 let height = (lparam.0 & 0xffff) as u32;
-                submit_iconic_bitmap(hwnd, &artwork, width, height, false)
-            } else {
+                Some((width.min(height).max(1), false, None))
+            } else if message == WM_DWMSENDICONICLIVEPREVIEWBITMAP {
                 let mut client = RECT::default();
-                if GetClientRect(hwnd, &mut client).as_bool() {
-                    submit_iconic_bitmap(
+                GetClientRect(hwnd, &mut client).as_bool().then(|| {
+                    let width = (client.right - client.left).max(1) as u32;
+                    let height = (client.bottom - client.top).max(1) as u32;
+                    let max_side = width.min(height).min(512);
+                    (max_side, true, Some((width, height)))
+                })
+            } else {
+                None
+            };
+            let iconic_bitmap = request
+                .as_ref()
+                .and_then(|(max_side, _, _)| select_iconic_bitmap(&state.bitmaps, *max_side));
+            let iconic_message = request.is_some();
+            let live_preview = request.as_ref().is_some_and(|(_, live, _)| *live);
+            let live_preview_origin = request
+                .as_ref()
+                .and_then(|(_, _, client)| *client)
+                .zip(iconic_bitmap.as_ref())
+                .map(|((width, height), bitmap)| POINT {
+                    x: ((width - bitmap.size) / 2) as i32,
+                    y: ((height - bitmap.size) / 2) as i32,
+                });
+            (
+                state.previous,
+                command.is_some(),
+                iconic_bitmap,
+                live_preview,
+                live_preview_origin,
+                iconic_message,
+            )
+        };
+        if let Some(bitmap) = iconic_bitmap {
+            let result = unsafe {
+                if live_preview {
+                    DwmSetIconicLivePreviewBitmap(
                         hwnd,
-                        &artwork,
-                        (client.right - client.left).max(1) as u32,
-                        (client.bottom - client.top).max(1) as u32,
-                        true,
+                        bitmap.handle,
+                        live_preview_origin.as_ref().map(std::ptr::from_ref),
+                        0,
                     )
                 } else {
-                    Err("failed to read taskbar live preview size".to_owned())
+                    DwmSetIconicThumbnail(hwnd, bitmap.handle, 0)
                 }
             };
             if result.is_ok() {
                 return LRESULT(0);
             }
+        }
+        if iconic_message {
+            return LRESULT(0);
         }
         if command {
             return LRESULT(0);
@@ -631,26 +694,35 @@ mod windows_impl {
         CallWindowProcW(previous, hwnd, message, wparam, lparam)
     }
 
-    fn submit_iconic_bitmap(
-        hwnd: HWND,
-        artwork: &Artwork,
-        width: u32,
-        height: u32,
-        live_preview: bool,
-    ) -> Result<(), String> {
-        let width = width.clamp(1, 1_280);
-        let height = height.clamp(1, 800);
-        let bitmap = create_contained_bitmap(artwork, width, height)?;
-        let result = unsafe {
-            if live_preview {
-                DwmSetIconicLivePreviewBitmap(hwnd, bitmap, None, 0)
-            } else {
-                DwmSetIconicThumbnail(hwnd, bitmap, 0)
-            }
-        }
-        .map_err(|error| error.to_string());
-        unsafe { DeleteObject(bitmap) };
-        result
+    fn select_iconic_bitmap(
+        bitmaps: &[Arc<IconicBitmap>],
+        max_side: u32,
+    ) -> Option<Arc<IconicBitmap>> {
+        let available: Vec<_> = bitmaps.iter().map(|bitmap| bitmap.size).collect();
+        let selected_size = select_iconic_bitmap_size(&available, max_side)?;
+        bitmaps
+            .iter()
+            .find(|bitmap| bitmap.size == selected_size)
+            .cloned()
+    }
+
+    fn select_iconic_bitmap_size(available: &[u32], max_side: u32) -> Option<u32> {
+        available
+            .iter()
+            .copied()
+            .filter(|size| *size <= max_side)
+            .max()
+            .or_else(|| available.iter().copied().min())
+    }
+
+    fn create_iconic_bitmaps(artwork: &Artwork) -> Result<Vec<Arc<IconicBitmap>>, String> {
+        ICONIC_BITMAP_SIZES
+            .into_iter()
+            .map(|size| {
+                create_contained_bitmap(artwork, size, size)
+                    .map(|handle| Arc::new(IconicBitmap { size, handle }))
+            })
+            .collect()
     }
 
     fn create_contained_bitmap(
@@ -753,6 +825,19 @@ mod windows_impl {
                 TaskbarProjection::from_snapshot(&snapshot).duration_ms,
                 None
             );
+        }
+
+        #[test]
+        fn iconic_bitmap_selection_never_exceeds_the_requested_bounds() {
+            let available = [
+                1, 16, 24, 32, 48, 64, 80, 96, 112, 120, 128, 144, 160, 176, 192, 224, 256, 320,
+                384, 512,
+            ];
+
+            assert_eq!(select_iconic_bitmap_size(&available, 180), Some(176));
+            assert_eq!(select_iconic_bitmap_size(&available, 512), Some(512));
+            assert_eq!(select_iconic_bitmap_size(&available, 24), Some(24));
+            assert_eq!(select_iconic_bitmap_size(&[], 180), None);
         }
     }
 }

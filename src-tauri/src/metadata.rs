@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use base64::Engine;
-use image::{DynamicImage, ImageDecoder, ImageReader};
+use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader};
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::tag::Accessor;
 use serde::Serialize;
@@ -66,7 +66,7 @@ const MAX_CACHE_ENTRIES: usize = 4;
 const MAX_ARTWORK_BYTES: usize = 16 * 1024 * 1024;
 const MAX_ARTWORK_DIMENSION: u32 = 8_192;
 const MAX_DECODED_ARTWORK_BYTES: u64 = 64 * 1024 * 1024;
-const CACHED_ARTWORK_DIMENSION: u32 = 1_024;
+const CACHED_ARTWORK_DIMENSION: u32 = 512;
 
 #[derive(Clone, Debug)]
 pub struct Artwork {
@@ -216,7 +216,7 @@ fn read_uncached_track_metadata(path: &Path) -> CachedTrackMetadata {
     CachedTrackMetadata { details, artwork }
 }
 
-fn decode_artwork(mime_type: &str, bytes: &[u8]) -> Result<Arc<Artwork>, String> {
+fn decode_artwork(_mime_type: &str, bytes: &[u8]) -> Result<Arc<Artwork>, String> {
     if bytes.len() > MAX_ARTWORK_BYTES {
         return Err(format!("artwork exceeds {MAX_ARTWORK_BYTES} bytes"));
     }
@@ -241,13 +241,17 @@ fn decode_artwork(mime_type: &str, bytes: &[u8]) -> Result<Arc<Artwork>, String>
     };
     let rgba = decoded.into_rgba8();
     let (width, height) = rgba.dimensions();
+    let mut encoded = Vec::new();
+    DynamicImage::ImageRgba8(rgba.clone())
+        .write_to(&mut Cursor::new(&mut encoded), ImageFormat::Png)
+        .map_err(|error| error.to_string())?;
     let mut bgra = rgba.into_raw();
     for pixel in bgra.chunks_exact_mut(4) {
         pixel.swap(0, 2);
     }
     Ok(Arc::new(Artwork {
-        mime_type: mime_type.to_owned(),
-        encoded: Arc::from(bytes),
+        mime_type: "image/png".to_owned(),
+        encoded: Arc::from(encoded),
         bgra: Arc::from(bgra),
         width,
         height,
@@ -336,5 +340,25 @@ mod tests {
             Some(AudioQuality::Hq)
         );
         assert_eq!(classify_quality("MP3", Some(44_100), None, Some(192)), None);
+    }
+
+    #[test]
+    fn artwork_is_normalized_to_a_bounded_png() {
+        let source = DynamicImage::new_rgb8(1_024, 768);
+        let mut bytes = Vec::new();
+        source
+            .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
+            .expect("encode source image");
+
+        let artwork = decode_artwork("image/jpeg", &bytes).expect("decode artwork");
+
+        assert_eq!(artwork.mime_type, "image/png");
+        assert!(artwork.encoded.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(artwork.width <= CACHED_ARTWORK_DIMENSION);
+        assert!(artwork.height <= CACHED_ARTWORK_DIMENSION);
+        assert_eq!(
+            artwork.bgra.len(),
+            (artwork.width * artwork.height * 4) as usize
+        );
     }
 }

@@ -1,22 +1,28 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
+
+import { scrollViewportAtPointer, type ScrollAxis } from "./edgeAutoScroll";
 
 interface ReorderItem {
   id: number;
 }
 
 interface PointerReorderOptions<T extends ReorderItem> {
+  axis?: ScrollAxis;
   disabled: boolean;
   items: T[];
   onDragStart?: (itemId: number) => void;
   onMove: (itemId: number, toIndex: number) => void;
+  scrollViewportRef?: { current: HTMLElement | null };
 }
 
 export function usePointerReorder<T extends ReorderItem>({
+  axis = "vertical",
   disabled,
   items,
   onDragStart,
   onMove,
+  scrollViewportRef,
 }: PointerReorderOptions<T>) {
   const [draggedId, setDraggedId] = useState<number | null>(null);
   const [insertionPosition, setInsertionPosition] = useState<number | null>(null);
@@ -24,6 +30,7 @@ export function usePointerReorder<T extends ReorderItem>({
   const listRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{
     active: boolean;
+    captureElement: HTMLElement;
     itemId: number;
     pointerId: number;
     startX: number;
@@ -31,14 +38,53 @@ export function usePointerReorder<T extends ReorderItem>({
   } | null>(null);
   const targetIndexRef = useRef<number | null>(null);
   const suppressClickRef = useRef(false);
+  const pointerRef = useRef<{ x: number; y: number } | null>(null);
+  const edgeScrollFrameRef = useRef<number | null>(null);
 
   const reset = useCallback(() => {
+    if (edgeScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(edgeScrollFrameRef.current);
+      edgeScrollFrameRef.current = null;
+    }
     dragRef.current = null;
+    pointerRef.current = null;
     targetIndexRef.current = null;
     setDraggedId(null);
     setInsertionPosition(null);
     setTargetIndex(null);
   }, []);
+
+  const updateTarget = useCallback((clientX: number, clientY: number) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const from = items.findIndex((candidate) => candidate.id === drag.itemId);
+    const insertion = listInsertionPosition(
+      listRef.current,
+      axis === "horizontal" ? clientX : clientY,
+      axis,
+    );
+    const target = movedItemIndex(items.length, from, insertion);
+    setInsertionPosition((current) => current === insertion ? current : insertion);
+    if (targetIndexRef.current !== target) {
+      targetIndexRef.current = target;
+      setTargetIndex(target);
+    }
+  }, [axis, items]);
+
+  const scheduleEdgeScroll = useCallback(() => {
+    if (!scrollViewportRef?.current || edgeScrollFrameRef.current !== null) return;
+    const tick = () => {
+      edgeScrollFrameRef.current = null;
+      const drag = dragRef.current;
+      const pointer = pointerRef.current;
+      const viewport = scrollViewportRef.current;
+      if (!drag?.active || !pointer || !viewport) return;
+      if (!scrollViewportAtPointer(viewport, axis, pointer.x, pointer.y)) return;
+      updateTarget(pointer.x, pointer.y);
+      edgeScrollFrameRef.current = window.requestAnimationFrame(tick);
+    };
+    edgeScrollFrameRef.current = window.requestAnimationFrame(tick);
+  }, [axis, scrollViewportRef, updateTarget]);
 
   const onPointerDown = useCallback((
     event: ReactPointerEvent<HTMLElement>,
@@ -47,6 +93,7 @@ export function usePointerReorder<T extends ReorderItem>({
     if (disabled || event.button !== 0 || !event.isPrimary) return;
     dragRef.current = {
       active: false,
+      captureElement: event.currentTarget,
       itemId,
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -69,21 +116,16 @@ export function usePointerReorder<T extends ReorderItem>({
       onDragStart?.(drag.itemId);
       setDraggedId(drag.itemId);
     }
-    const from = items.findIndex((candidate) => candidate.id === drag.itemId);
-    const insertion = listInsertionPositionAtY(listRef.current, event.clientY);
-    const target = movedItemIndex(items.length, from, insertion);
-    setInsertionPosition((current) => current === insertion ? current : insertion);
-    if (targetIndexRef.current !== target) {
-      targetIndexRef.current = target;
-      setTargetIndex(target);
-    }
-  }, [items, onDragStart]);
+    pointerRef.current = { x: event.clientX, y: event.clientY };
+    updateTarget(event.clientX, event.clientY);
+    scheduleEdgeScroll();
+  }, [onDragStart, scheduleEdgeScroll, updateTarget]);
 
-  const finish = useCallback((event: ReactPointerEvent<HTMLElement>, cancelled: boolean) => {
+  const finish = useCallback((pointerId: number, cancelled: boolean) => {
     const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
+    if (!drag || drag.pointerId !== pointerId) return;
+    if (drag.captureElement.hasPointerCapture(pointerId)) {
+      drag.captureElement.releasePointerCapture(pointerId);
     }
     if (drag.active && !cancelled) {
       suppressClickRef.current = true;
@@ -99,6 +141,17 @@ export function usePointerReorder<T extends ReorderItem>({
     reset();
   }, [items, onMove, reset]);
 
+  useEffect(() => {
+    const finishPointer = (event: PointerEvent) => finish(event.pointerId, false);
+    const cancelPointer = (event: PointerEvent) => finish(event.pointerId, true);
+    window.addEventListener("pointerup", finishPointer);
+    window.addEventListener("pointercancel", cancelPointer);
+    return () => {
+      window.removeEventListener("pointerup", finishPointer);
+      window.removeEventListener("pointercancel", cancelPointer);
+    };
+  }, [finish]);
+
   const consumeClick = useCallback(() => {
     if (!suppressClickRef.current) return false;
     suppressClickRef.current = false;
@@ -110,10 +163,10 @@ export function usePointerReorder<T extends ReorderItem>({
     draggedId,
     insertionPosition,
     listRef,
-    onPointerCancel: (event: ReactPointerEvent<HTMLElement>) => finish(event, true),
+    onPointerCancel: (event: ReactPointerEvent<HTMLElement>) => finish(event.pointerId, true),
     onPointerDown,
     onPointerMove,
-    onPointerUp: (event: ReactPointerEvent<HTMLElement>) => finish(event, false),
+    onPointerUp: (event: ReactPointerEvent<HTMLElement>) => finish(event.pointerId, false),
     targetIndex,
   };
 }
@@ -125,6 +178,26 @@ export function listInsertionPositionAtY(container: HTMLElement | null, clientY:
     const bounds = row.getBoundingClientRect();
     if (clientY < bounds.top + bounds.height / 2) {
       const position = Number(row.dataset.trackPosition);
+      return Number.isFinite(position) ? position : 0;
+    }
+  }
+  return rows.length;
+}
+
+function listInsertionPosition(
+  container: HTMLElement | null,
+  coordinate: number,
+  axis: ScrollAxis,
+) {
+  if (!container) return 0;
+  const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-reorder-position]"));
+  for (const row of rows) {
+    const bounds = row.getBoundingClientRect();
+    const midpoint = axis === "horizontal"
+      ? bounds.left + bounds.width / 2
+      : bounds.top + bounds.height / 2;
+    if (coordinate < midpoint) {
+      const position = Number(row.dataset.reorderPosition);
       return Number.isFinite(position) ? position : 0;
     }
   }

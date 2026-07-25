@@ -12,6 +12,7 @@ use souvlaki::{
     MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig,
     SeekDirection,
 };
+use windows::Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED};
 
 use crate::metadata::Artwork;
 use crate::platform::playback_projection::NativePlaybackSnapshot;
@@ -19,6 +20,16 @@ use crate::playback::{PlaybackEngine, PlaybackStatus, RodioPlaybackEngine};
 
 const COMMAND_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const SEEK_STEP: Duration = Duration::from_secs(10);
+const TIMELINE_SYNC_INTERVAL_MS: u64 = 5_000;
+
+fn playback_sync_key(status: PlaybackStatus, position_ms: u64) -> (PlaybackStatus, u64) {
+    let position_key = match status {
+        PlaybackStatus::Playing => position_ms / TIMELINE_SYNC_INTERVAL_MS,
+        PlaybackStatus::Paused => position_ms,
+        PlaybackStatus::Idle | PlaybackStatus::Stopped | PlaybackStatus::Failed => 0,
+    };
+    (status, position_key)
+}
 
 enum MediaSessionCommand {
     Event(MediaControlEvent),
@@ -103,6 +114,13 @@ fn run_session(
     artwork: MediaSessionArtwork,
     projection: Receiver<NativePlaybackSnapshot>,
 ) {
+    clear_artwork_cache(&artwork.cache_dir);
+    if let Err(error) = unsafe { RoInitialize(RO_INIT_MULTITHREADED) } {
+        let _ = ready_sender.send(Err(format!(
+            "failed to initialize Windows Runtime for SMTC: {error}"
+        )));
+        return;
+    }
     let config = PlatformConfig {
         dbus_name: "io.github.vki.resona",
         display_name: "Resona",
@@ -112,6 +130,7 @@ fn run_session(
         Ok(controls) => controls,
         Err(error) => {
             let _ = ready_sender.send(Err(format!("failed to initialize Windows SMTC: {error}")));
+            unsafe { RoUninitialize() };
             return;
         }
     };
@@ -123,14 +142,17 @@ fn run_session(
         let _ = ready_sender.send(Err(format!(
             "failed to attach Windows SMTC events: {error}"
         )));
+        unsafe { RoUninitialize() };
         return;
     }
 
     if ready_sender.send(Ok(())).is_err() {
+        unsafe { RoUninitialize() };
         return;
     }
 
     let mut last_metadata: Option<(String, String, Option<u64>, Option<usize>)> = None;
+    let mut last_playback: Option<(PlaybackStatus, u64)> = None;
     loop {
         match receiver.recv_timeout(COMMAND_POLL_INTERVAL) {
             Ok(MediaSessionCommand::Event(event)) => {
@@ -144,13 +166,15 @@ fn run_session(
                 &projection,
                 &mut controls,
                 &mut last_metadata,
+                &mut last_playback,
                 &artwork.app_logo_url,
                 &artwork.cache_dir,
             );
         }
     }
     drop(controls);
-    cleanup_artwork_cache(&artwork.cache_dir, None);
+    clear_artwork_cache(&artwork.cache_dir);
+    unsafe { RoUninitialize() };
 }
 
 fn handle_event(engine: &RodioPlaybackEngine, event: MediaControlEvent) {
@@ -218,6 +242,7 @@ fn sync_controls(
     projection: &NativePlaybackSnapshot,
     controls: &mut MediaControls,
     last_metadata: &mut Option<(String, String, Option<u64>, Option<usize>)>,
+    last_playback: &mut Option<(PlaybackStatus, u64)>,
     app_logo_url: &str,
     artwork_cache_dir: &Path,
 ) {
@@ -233,9 +258,6 @@ fn sync_controls(
             .map(|artwork| Arc::as_ptr(artwork) as usize),
     );
     if last_metadata.as_ref() != Some(&metadata_key) {
-        if projection.artwork.is_none() {
-            cleanup_artwork_cache(artwork_cache_dir, None);
-        }
         let cover_url = projection
             .artwork
             .as_ref()
@@ -289,9 +311,14 @@ fn sync_controls(
         }
         if metadata_applied {
             *last_metadata = Some(metadata_key);
+            *last_playback = None;
         }
     }
 
+    let playback_key = playback_sync_key(snapshot.status, snapshot.position_ms);
+    if last_playback.as_ref() == Some(&playback_key) {
+        return;
+    }
     let playback = match snapshot.status {
         PlaybackStatus::Playing => MediaPlayback::Playing {
             progress: Some(MediaPosition(Duration::from_millis(snapshot.position_ms))),
@@ -303,7 +330,11 @@ fn sync_controls(
             MediaPlayback::Stopped
         }
     };
-    let _ = controls.set_playback(playback);
+    if let Err(error) = controls.set_playback(playback) {
+        eprintln!("Windows SMTC playback update failed: {error}");
+    } else {
+        *last_playback = Some(playback_key);
+    }
 }
 
 fn materialize_artwork(cache_dir: &Path, artwork: &Artwork) -> Result<String, String> {
@@ -313,10 +344,7 @@ fn materialize_artwork(cache_dir: &Path, artwork: &Artwork) -> Result<String, St
     for byte in digest {
         write!(&mut fingerprint, "{byte:02x}").expect("writing to a string cannot fail");
     }
-    let path = cache_dir.join(format!(
-        "{fingerprint}.{}",
-        artwork_extension(&artwork.mime_type)
-    ));
+    let path = cache_dir.join(format!("{fingerprint}.png"));
     if !path.is_file() {
         let temporary = cache_dir.join(format!(".{}.tmp", fastrand::u64(..)));
         std::fs::write(&temporary, artwork.encoded.as_ref()).map_err(|error| error.to_string())?;
@@ -327,7 +355,6 @@ fn materialize_artwork(cache_dir: &Path, artwork: &Artwork) -> Result<String, St
             }
         }
     }
-    cleanup_artwork_cache(cache_dir, Some(&path));
     file_url(&path)
 }
 
@@ -344,21 +371,13 @@ fn file_url(path: &Path) -> Result<String, String> {
     Ok(format!("file://{winrt_path}"))
 }
 
-fn artwork_extension(mime_type: &str) -> &'static str {
-    if mime_type.eq_ignore_ascii_case("image/jpeg") || mime_type.eq_ignore_ascii_case("image/jpg") {
-        "jpg"
-    } else {
-        "png"
-    }
-}
-
-fn cleanup_artwork_cache(cache_dir: &Path, keep: Option<&Path>) {
+fn clear_artwork_cache(cache_dir: &Path) {
     let Ok(entries) = std::fs::read_dir(cache_dir) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if keep == Some(path.as_path()) || !path.is_file() {
+        if !path.is_file() {
             continue;
         }
         let _ = std::fs::remove_file(path);
@@ -409,7 +428,7 @@ mod tests {
         let cache_dir =
             std::env::temp_dir().join(format!("resona-smtc-artwork-{}", fastrand::u64(..)));
         let artwork = Artwork {
-            mime_type: "image/jpeg".to_owned(),
+            mime_type: "image/png".to_owned(),
             encoded: Arc::from(&b"encoded artwork"[..]),
             bgra: Arc::from(&b"\0\0\0\xff"[..]),
             width: 1,
@@ -419,13 +438,40 @@ mod tests {
         let first = materialize_artwork(&cache_dir, &artwork).expect("materialize artwork");
         let second = materialize_artwork(&cache_dir, &artwork).expect("reuse artwork");
         assert_eq!(first, second);
-        assert!(first.ends_with(".jpg"));
+        assert!(first.ends_with(".png"));
         assert_eq!(
             std::fs::read(first.trim_start_matches("file://")).expect("read cached artwork"),
             artwork.encoded.as_ref()
         );
 
-        cleanup_artwork_cache(&cache_dir, None);
+        clear_artwork_cache(&cache_dir);
+        let _ = std::fs::remove_dir(cache_dir);
+    }
+
+    #[test]
+    fn smtc_artwork_files_remain_available_until_adapter_shutdown() {
+        let cache_dir =
+            std::env::temp_dir().join(format!("resona-smtc-retain-{}", fastrand::u64(..)));
+        let artwork = |encoded: &'static [u8]| Artwork {
+            mime_type: "image/png".to_owned(),
+            encoded: Arc::from(encoded),
+            bgra: Arc::from(&b"\0\0\0\xff"[..]),
+            width: 1,
+            height: 1,
+        };
+
+        let first =
+            materialize_artwork(&cache_dir, &artwork(b"first")).expect("materialize first artwork");
+        let second = materialize_artwork(&cache_dir, &artwork(b"second"))
+            .expect("materialize second artwork");
+
+        assert_ne!(first, second);
+        assert!(Path::new(first.trim_start_matches("file://")).is_file());
+        assert!(Path::new(second.trim_start_matches("file://")).is_file());
+
+        clear_artwork_cache(&cache_dir);
+        assert!(!Path::new(first.trim_start_matches("file://")).exists());
+        assert!(!Path::new(second.trim_start_matches("file://")).exists());
         let _ = std::fs::remove_dir(cache_dir);
     }
 
@@ -447,6 +493,26 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(cache_dir);
+    }
+
+    #[test]
+    fn playing_timeline_is_throttled_but_state_and_paused_position_are_exact() {
+        assert_eq!(
+            playback_sync_key(PlaybackStatus::Playing, 5_100),
+            playback_sync_key(PlaybackStatus::Playing, 9_900)
+        );
+        assert_ne!(
+            playback_sync_key(PlaybackStatus::Playing, 9_900),
+            playback_sync_key(PlaybackStatus::Playing, 10_000)
+        );
+        assert_ne!(
+            playback_sync_key(PlaybackStatus::Playing, 5_100),
+            playback_sync_key(PlaybackStatus::Paused, 5_100)
+        );
+        assert_ne!(
+            playback_sync_key(PlaybackStatus::Paused, 5_100),
+            playback_sync_key(PlaybackStatus::Paused, 5_101)
+        );
     }
 
     #[test]

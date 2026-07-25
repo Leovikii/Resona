@@ -23,6 +23,7 @@ interface PlaylistTrackListProps {
   onMove: (itemId: number, toPosition: number) => void;
   onPlay: (itemId: number) => void;
   onRemove: (itemIds: number[]) => void;
+  scrollViewportRef: { current: HTMLDivElement | null };
 }
 
 export function PlaylistTrackList({
@@ -36,6 +37,7 @@ export function PlaylistTrackList({
   onMove,
   onPlay,
   onRemove,
+  scrollViewportRef,
 }: PlaylistTrackListProps) {
   const { t } = useTranslation();
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
@@ -51,6 +53,7 @@ export function PlaylistTrackList({
     items,
     onDragStart: selectDraggedTrack,
     onMove,
+    scrollViewportRef,
   });
 
   useEffect(() => {
@@ -160,6 +163,7 @@ export function PlaylistTrackList({
             className="saved-track-row"
             data-current={current || undefined}
             data-dragging={reorder.draggedId === item.id || undefined}
+            data-reorder-position={index}
             data-selected={selected.has(item.id) || undefined}
             data-track-id={item.id}
             data-track-position={index}
