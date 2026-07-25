@@ -3,5 +3,10 @@
   "identifier": "audio-compression",
   "description": "Minimal permissions for the Resona audio compression workspace",
   "windows": ["audio-compression"],
-  "permissions": ["core:default", "dialog:allow-open"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-set-title",
+    "core:window:allow-show",
+    "dialog:allow-open"
+  ]
 }

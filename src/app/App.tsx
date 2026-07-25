@@ -1,5 +1,5 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, WheelEvent } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -53,7 +53,9 @@ import {
   Shuffle,
   Tags,
   Trash2,
+  Volume1,
   Volume2,
+  VolumeX,
   Wrench,
   X,
 } from "lucide-react";
@@ -1609,24 +1611,38 @@ function VolumeButton({ busy, onChange, onChangeEnd, volume }: {
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const VolumeIcon = volume === 0 ? VolumeX : volume < 50 ? Volume1 : Volume2;
+  const adjustWithWheel = (event: WheelEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (busy || event.deltaY === 0) return;
+    const next = Math.max(0, Math.min(100, volume + (event.deltaY < 0 ? 10 : -10)));
+    if (next === volume) return;
+    onChange(next);
+    onChangeEnd(next);
+  };
   return (
-    <Popover onChange={setOpen} opened={open} position="top" shadow="md" width={190} withArrow>
+    <Popover onChange={setOpen} opened={open} position="top" shadow="md" width={76} withArrow>
       <Popover.Target>
         <Tooltip label={t("playback.volume")}>
           <ActionIcon aria-label={t("playback.volume")} disabled={busy} onClick={() => setOpen((value) => !value)} size="xl" variant="subtle">
-            <Volume2 size={19} />
+            <VolumeIcon size={19} />
           </ActionIcon>
         </Tooltip>
       </Popover.Target>
-      <Popover.Dropdown className="player-volume-popover">
+      <Popover.Dropdown className="player-volume-popover" onWheel={adjustWithWheel}>
+        <Text className="player-volume-value" fw={650} size="xs">{Math.round(volume)}%</Text>
         <Slider
           aria-label={t("playback.volume")}
+          className="player-volume-slider"
           disabled={busy}
           label={(value) => `${Math.round(value)}%`}
           max={100}
           min={0}
           onChange={onChange}
           onChangeEnd={onChangeEnd}
+          orientation="vertical"
+          step={1}
           value={volume}
         />
       </Popover.Dropdown>
