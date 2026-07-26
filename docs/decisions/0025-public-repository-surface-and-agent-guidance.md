@@ -14,7 +14,7 @@
 ### 用户 README
 
 - 根 `README.md` 改为简洁英文用户首页，并新增同结构的 `README.zh-CN.md`；主 README 顶部直接链接中文版本。
-- 两份 README 使用 `assets/resona-gothic-wordmark.svg` 或等价 Resona 品牌资源作为标题，保留可访问的 `alt` 文本。
+- 两份 README 使用 `assets/resona-resonance-wordmark.svg` 或等价 Resona 品牌资源作为标题，保留可访问的 `alt` 文本。
 - 内容只保留一句定位、核心特色、支持平台/格式、下载入口、语言切换、许可证和一个开发文档入口。技术栈、内部版本状态、Agent 阅读顺序、完整开发命令和历史验收不再放在用户 README。
 - 中英文 README 必须结构对应、信息一致，避免维护两套不同承诺；不加入徽章墙、营销套话、长截图墙或未验证能力。
 

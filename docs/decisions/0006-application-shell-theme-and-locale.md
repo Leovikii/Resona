@@ -17,6 +17,7 @@ Resona 进入 P2 后需要从技术验证界面演进为稳定桌面播放器。
 - 正在播放视图在底栏上方显示“左侧大方形封面 + 右侧歌词”，底栏稳定挂载且布局不变。
 - “工具”作为后续 WAV → FLAC 等转换能力的统一入口，但不在 UI feature 中实现转换领域逻辑。
 - 主题模式为“跟随系统、浅色、深色”，默认跟随系统；主题色只提供 Mantine 原生 `violet`、`blue`、`green`、`pink`、`yellow` 五个预设，默认 `violet`。Mantine 使用浅色 `primaryShade: 7`、暗色 `primaryShade: 5`，并启用 `autoContrast` 与 `luminanceThreshold: 0.3`，保证浅色主题和黄色 filled 控件的文字对比度。
+- Mantine 交互组件统一通过主题级 `activeClassName` 使用 `resona-active` 按下态；反馈只降低亮度，不对按钮根节点应用位移、缩放或其他几何变化。确需保留原生按钮或 `UnstyledButton` 的既有界面显式复用同一类，不再维护独立的按下动画。禁用、持久激活和键盘焦点继续使用组件原生语义。
 - 界面语言为“跟随系统、中文简体、English”，默认跟随系统。
 - Mantine 继续作为组件和主题实现；本地化采用成熟的 key/resource 模型，Rust 通过稳定错误码和参数支持前端翻译。
 
@@ -28,11 +29,13 @@ Resona 进入 P2 后需要从技术验证界面演进为稳定桌面播放器。
 - 系统默认加手动覆盖符合桌面应用习惯，同时避免为主题和语言建立复杂账户设置。
 - 有限主题色比任意颜色输入更容易保证浅色/深色对比度和可访问性。
 - 使用 Mantine 原生色板避免自维护色值；`violet` 作为默认色与 `pink` 保持足够色相区分，旧版 `cyan`、`teal`、`orange` 偏好通过允许列表自然回退，不增加迁移代码。
+- 使用 Mantine 官方 `activeClassName` 扩展点可以在一个主题入口覆盖 Button、ActionIcon 等交互组件；无几何变化的反馈不会覆盖绝对定位控件的居中 transform，也不会改变 Menu/Popover 锚点的测量边界。
 
 ## 后果
 
 - 当前 `App.tsx` 技术验证界面需要拆分为 app shell、features 和 shared UI。
 - 固定深色 CSS 必须迁移到 Mantine 变量与语义 token。
 - 所有用户可见界面文案必须迁移到翻译资源；文件名、路径和原始标签保持原文。
+- 新增按钮优先使用 Mantine 交互组件；不得新增根节点 `translate`/`scale` 按下态。既有原生按钮若需要相同反馈，应复用 `resona-active`。
 - 0.0.5 只建立封面/歌词区域及缺失态，真实封面读取和歌词同步仍由后续领域阶段实现。
 - 工具页可先显示明确的未实现状态，不能包含前端自研转码逻辑。

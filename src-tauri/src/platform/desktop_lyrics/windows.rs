@@ -14,9 +14,11 @@ use tauri::{
 use windows::core::{Error as WindowsError, PCWSTR};
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    Arc as DrawArc, BeginPaint, CreatePen, CreateRoundRectRgn, CreateSolidBrush, DeleteObject,
-    EndPaint, FillRect, InvalidateRect, LineTo, MoveToEx, RoundRect, SelectObject, SetWindowRgn,
-    PAINTSTRUCT, PS_SOLID,
+    BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, DrawTextW,
+    EndPaint, FillRect, GetGlyphIndicesW, InvalidateRect, SelectObject, SetBkMode, SetTextColor,
+    SetWindowRgn, ANTIALIASED_QUALITY, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH,
+    DT_CENTER, DT_SINGLELINE, DT_VCENTER, FW_NORMAL, GGI_MARK_NONEXISTING_GLYPHS,
+    OUT_DEFAULT_PRECIS, PAINTSTRUCT, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::WM_MOUSELEAVE;
@@ -25,10 +27,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, GetWindowLongPtrW, IsWindow,
     LoadCursorW, RegisterClassExW, SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos,
     ShowWindow, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, GWLP_USERDATA, HWND_TOPMOST, IDC_ARROW,
-    LWA_ALPHA, MA_NOACTIVATE, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SW_HIDE, SW_SHOWNOACTIVATE,
-    WM_ERASEBKGND, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_NCCREATE, WM_NCDESTROY,
-    WM_PAINT, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
-    WS_POPUP,
+    LWA_ALPHA, MA_NOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SW_HIDE,
+    SW_SHOWNOACTIVATE, WM_ERASEBKGND, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_NCCREATE,
+    WM_NCDESTROY, WM_PAINT, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_POPUP,
 };
 
 use super::{DesktopLyricsWindowFailure, DesktopLyricsWindowSnapshot};
@@ -45,6 +47,7 @@ const HELPER_LOGICAL_INSET: f64 = 8.0;
 // Keep a near-transparent pixel so the unlock hotspot remains discoverable.
 const HELPER_IDLE_ALPHA: u8 = 1;
 const HELPER_HOVER_ALPHA: u8 = 230;
+const UNLOCK_GLYPH: u16 = 0xE785;
 const _: () = assert!(HELPER_IDLE_ALPHA > 0 && HELPER_HOVER_ALPHA > HELPER_IDLE_ALPHA);
 const HELPER_CLASS_NAME: PCWSTR = windows::w!("ResonaDesktopLyricsUnlock");
 
@@ -182,6 +185,7 @@ impl DesktopLyricsWindowService {
                 .show()
                 .map_err(|error| window_failure("desktop_lyrics_show_failed", error))?;
         }
+        self.ensure_topmost()?;
         Ok(snapshot)
     }
 
@@ -206,6 +210,7 @@ impl DesktopLyricsWindowService {
                 .show()
                 .map_err(|error| window_failure("desktop_lyrics_show_failed", error))?;
         }
+        self.ensure_topmost()?;
         Ok(self.snapshot())
     }
 
@@ -282,7 +287,10 @@ impl DesktopLyricsWindowService {
             return Err(window_failure("desktop_lyrics_lock_failed", error));
         }
         state.lifecycle.mark_locked();
-        Ok(state.lifecycle.snapshot())
+        let snapshot = state.lifecycle.snapshot();
+        drop(state);
+        self.ensure_topmost()?;
+        Ok(snapshot)
     }
 
     pub fn unlock(&self) -> Result<DesktopLyricsWindowSnapshot, DesktopLyricsWindowFailure> {
@@ -337,6 +345,7 @@ impl DesktopLyricsWindowService {
                 position_helper(resources)?;
             }
         }
+        self.ensure_topmost()?;
         Ok(self.snapshot())
     }
 
@@ -373,7 +382,58 @@ impl DesktopLyricsWindowService {
             resources.native_helper.hide();
         }
         state.lifecycle.mark_unlocked();
-        Ok(state.lifecycle.snapshot())
+        let snapshot = state.lifecycle.snapshot();
+        drop(state);
+        self.ensure_topmost()?;
+        Ok(snapshot)
+    }
+
+    pub fn maintain_topmost(&self) {
+        if let Err(error) = self.ensure_topmost() {
+            eprintln!(
+                "desktop lyrics topmost correction failed: {}",
+                error.message
+            );
+        }
+    }
+
+    fn ensure_topmost(&self) -> Result<(), DesktopLyricsWindowFailure> {
+        let (window, helper) = {
+            let state = self.lock_state();
+            if !state.lifecycle.visible {
+                return Ok(());
+            }
+            let resources = state.resources.as_ref().ok_or_else(|| {
+                DesktopLyricsWindowFailure::new(
+                    "desktop_lyrics_unavailable",
+                    "desktop lyrics windows are not initialized",
+                )
+            })?;
+            (
+                resources.lyrics_window.clone(),
+                state
+                    .lifecycle
+                    .locked
+                    .then_some(resources.native_helper.hwnd),
+            )
+        };
+        let lyrics = window
+            .hwnd()
+            .map_err(|error| window_failure("desktop_lyrics_handle_failed", error))?;
+        set_native_topmost(HWND(lyrics.0 as isize))?;
+        if let Some(helper) = helper {
+            let position = window
+                .outer_position()
+                .map_err(|error| window_failure("desktop_lyrics_position_failed", error))?;
+            let size = window
+                .outer_size()
+                .map_err(|error| window_failure("desktop_lyrics_size_failed", error))?;
+            let scale = window
+                .scale_factor()
+                .map_err(|error| window_failure("desktop_lyrics_scale_failed", error))?;
+            set_helper_bounds(helper, helper_bounds(position, size, scale))?;
+        }
+        Ok(())
     }
 
     fn lock_state(&self) -> std::sync::MutexGuard<'_, ServiceState> {
@@ -425,6 +485,10 @@ fn create_windows(
             return Err(error);
         }
     };
+    if let Err(error) = set_native_topmost(HWND(owner)) {
+        let _ = lyrics_window.close();
+        return Err(error);
+    }
 
     Ok(WindowResources {
         native_helper,
@@ -616,6 +680,28 @@ fn window_failure(code: &str, error: impl std::fmt::Display) -> DesktopLyricsWin
     )
 }
 
+fn set_native_topmost(hwnd: HWND) -> Result<(), DesktopLyricsWindowFailure> {
+    let positioned = unsafe {
+        SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOMOVE | SWP_NOSIZE,
+        )
+    };
+    if positioned.as_bool() {
+        Ok(())
+    } else {
+        Err(window_failure(
+            "desktop_lyrics_topmost_failed",
+            WindowsError::from_win32(),
+        ))
+    }
+}
+
 enum NativeHelperCommand {
     Unlock,
     Shutdown,
@@ -714,40 +800,7 @@ impl NativeUnlockHelper {
     }
 
     fn set_bounds(&self, bounds: HelperBounds) -> Result<(), DesktopLyricsWindowFailure> {
-        let size = i32::try_from(bounds.size).unwrap_or(i32::MAX);
-        let radius = (size / 3).max(2);
-        let region = unsafe { CreateRoundRectRgn(0, 0, size + 1, size + 1, radius, radius) };
-        if region.0 == 0 {
-            return Err(DesktopLyricsWindowFailure::new(
-                "desktop_lyrics_helper_shape_failed",
-                "failed to create desktop lyrics helper window region",
-            ));
-        }
-        if unsafe { SetWindowRgn(self.hwnd, region, true) } == 0 {
-            unsafe { DeleteObject(region) };
-            return Err(DesktopLyricsWindowFailure::new(
-                "desktop_lyrics_helper_shape_failed",
-                "failed to apply desktop lyrics helper window region",
-            ));
-        }
-        let positioned = unsafe {
-            SetWindowPos(
-                self.hwnd,
-                HWND_TOPMOST,
-                bounds.x,
-                bounds.y,
-                size,
-                size,
-                SWP_NOACTIVATE | SWP_NOOWNERZORDER,
-            )
-        };
-        if !positioned.as_bool() {
-            return Err(window_failure(
-                "desktop_lyrics_helper_position_failed",
-                WindowsError::from_win32(),
-            ));
-        }
-        Ok(())
+        set_helper_bounds(self.hwnd, bounds)
     }
 
     fn show(&self) -> Result<(), DesktopLyricsWindowFailure> {
@@ -759,12 +812,49 @@ impl NativeUnlockHelper {
         }
         set_helper_alpha(self.hwnd, HELPER_IDLE_ALPHA);
         unsafe { ShowWindow(self.hwnd, SW_SHOWNOACTIVATE) };
-        Ok(())
+        set_native_topmost(self.hwnd)
     }
 
     fn hide(&self) {
         unsafe { ShowWindow(self.hwnd, SW_HIDE) };
     }
+}
+
+fn set_helper_bounds(hwnd: HWND, bounds: HelperBounds) -> Result<(), DesktopLyricsWindowFailure> {
+    let size = i32::try_from(bounds.size).unwrap_or(i32::MAX);
+    let radius = (size / 3).max(2);
+    let region = unsafe { CreateRoundRectRgn(0, 0, size + 1, size + 1, radius, radius) };
+    if region.0 == 0 {
+        return Err(DesktopLyricsWindowFailure::new(
+            "desktop_lyrics_helper_shape_failed",
+            "failed to create desktop lyrics helper window region",
+        ));
+    }
+    if unsafe { SetWindowRgn(hwnd, region, true) } == 0 {
+        unsafe { DeleteObject(region) };
+        return Err(DesktopLyricsWindowFailure::new(
+            "desktop_lyrics_helper_shape_failed",
+            "failed to apply desktop lyrics helper window region",
+        ));
+    }
+    let positioned = unsafe {
+        SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            bounds.x,
+            bounds.y,
+            size,
+            size,
+            SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+        )
+    };
+    if !positioned.as_bool() {
+        return Err(window_failure(
+            "desktop_lyrics_helper_position_failed",
+            WindowsError::from_win32(),
+        ));
+    }
+    Ok(())
 }
 
 impl Drop for NativeUnlockHelper {
@@ -937,55 +1027,68 @@ unsafe fn paint_helper(hwnd: HWND, hovered: bool) {
 
     let width = rect.right - rect.left;
     let height = rect.bottom - rect.top;
-    let scale = (width.min(height) as f32 / 38.0).max(0.5);
-    let stroke = (2.0 * scale).round().max(1.0) as i32;
-    let pen = CreatePen(PS_SOLID, stroke, COLORREF(0x00FFFFFF));
-    let old_pen = SelectObject(hdc, pen);
-    let hollow =
-        windows::Win32::Graphics::Gdi::GetStockObject(windows::Win32::Graphics::Gdi::HOLLOW_BRUSH);
-    let old_brush = SelectObject(hdc, hollow);
-
-    let cx = width / 2;
-    let cy = height / 2;
-    let half = (7.0 * scale).round() as i32;
-    let body_top = cy - (1.0 * scale).round() as i32;
-    let body_bottom = cy + (9.0 * scale).round() as i32;
-    RoundRect(
-        hdc,
-        cx - half,
-        body_top,
-        cx + half,
-        body_bottom,
-        stroke * 2,
-        stroke * 2,
-    );
-    DrawArc(
-        hdc,
-        cx - half + stroke,
-        cy - (10.0 * scale).round() as i32,
-        cx + half - stroke,
-        cy + (3.0 * scale).round() as i32,
-        cx + half - stroke,
-        cy - (4.0 * scale).round() as i32,
-        cx - half + stroke,
-        cy - (4.0 * scale).round() as i32,
-    );
-    MoveToEx(
-        hdc,
-        cx + half - stroke,
-        cy - (4.0 * scale).round() as i32,
-        None,
-    );
-    LineTo(
-        hdc,
-        cx + half + (2.0 * scale).round() as i32,
-        cy - (4.0 * scale).round() as i32,
-    );
-
-    SelectObject(hdc, old_brush);
-    SelectObject(hdc, old_pen);
-    DeleteObject(pen);
+    let font_height = -(width.min(height) * 18 / HELPER_LOGICAL_SIZE as i32).max(12);
+    if let Some(font) = create_unlock_font(hdc, font_height) {
+        let old_font = SelectObject(hdc, font);
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, COLORREF(0x00FFFFFF));
+        let mut glyph = [UNLOCK_GLYPH];
+        DrawTextW(
+            hdc,
+            &mut glyph,
+            &mut rect,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+        );
+        SelectObject(hdc, old_font);
+        DeleteObject(font);
+    }
     EndPaint(hwnd, &paint);
+}
+
+unsafe fn create_unlock_font(
+    hdc: windows::Win32::Graphics::Gdi::HDC,
+    height: i32,
+) -> Option<windows::Win32::Graphics::Gdi::HFONT> {
+    for face in [
+        windows::w!("Segoe Fluent Icons"),
+        windows::w!("Segoe MDL2 Assets"),
+    ] {
+        let font = CreateFontW(
+            height,
+            0,
+            0,
+            0,
+            FW_NORMAL.0 as i32,
+            0,
+            0,
+            0,
+            DEFAULT_CHARSET.0 as u32,
+            OUT_DEFAULT_PRECIS.0 as u32,
+            CLIP_DEFAULT_PRECIS.0 as u32,
+            ANTIALIASED_QUALITY.0 as u32,
+            DEFAULT_PITCH.0 as u32,
+            face,
+        );
+        if font.0 == 0 {
+            continue;
+        }
+        let old_font = SelectObject(hdc, font);
+        let glyph_text = [UNLOCK_GLYPH, 0];
+        let mut glyph_index = u16::MAX;
+        let glyph_count = GetGlyphIndicesW(
+            hdc,
+            PCWSTR(glyph_text.as_ptr()),
+            1,
+            &mut glyph_index,
+            GGI_MARK_NONEXISTING_GLYPHS,
+        );
+        SelectObject(hdc, old_font);
+        if glyph_count != u32::MAX && glyph_index != u16::MAX {
+            return Some(font);
+        }
+        DeleteObject(font);
+    }
+    None
 }
 
 #[cfg(test)]

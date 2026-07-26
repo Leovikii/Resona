@@ -25,4 +25,3 @@ writeFileSync(
   }, null, 2)}\n`,
 );
 process.stdout.write(`${configPath}\n`);
-

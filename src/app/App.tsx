@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode, WheelEvent } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen } from "@tauri-apps/api/event";
@@ -12,11 +12,9 @@ import {
   Loader,
   Menu,
   Modal,
-  Notification,
   NumberInput,
   Paper,
   Popover,
-  Portal,
   Progress,
   ScrollArea,
   SegmentedControl,
@@ -30,7 +28,6 @@ import {
   ThemeIcon,
   Title,
   Tooltip,
-  Transition,
   UnstyledButton,
   useMantineColorScheme,
 } from "@mantine/core";
@@ -40,18 +37,20 @@ import {
   ArrowRight,
   ArrowUp,
   Check,
-  CircleAlert,
   ChevronLeft,
   ChevronRight,
   Disc3,
   Download,
   FileAudio,
+  Eraser,
+  ListX,
   ListMusic,
   Maximize2,
   Minimize2,
   Pause,
   Play,
   Plus,
+  Pencil,
   RefreshCw,
   Repeat,
   Repeat1,
@@ -74,6 +73,7 @@ import { useAudioCompression } from "../features/compression/useAudioCompression
 import { useFfmpegDependency } from "../features/compression/useFfmpegDependency";
 import { useLibrary } from "../features/library/useLibrary";
 import { useTrackDetails } from "../features/metadata/useTrackDetails";
+import { useTrackSummaries } from "../features/metadata/useTrackSummaries";
 import { showAudioCompressionWindow } from "../shared/bridge/compressionWindow";
 import { usePlaybackController } from "../features/playback/usePlaybackController";
 import { useSeekTransaction } from "../features/playback/useSeekTransaction";
@@ -93,11 +93,26 @@ import type { TrackDetails } from "../shared/model/metadata";
 import { fileNameFromPath, formatBytes, formatDuration } from "../shared/utils/format";
 import { listInsertionPositionAtY, usePointerReorder } from "../shared/ui/usePointerReorder";
 import { scrollViewportAtPointer, type ScrollAxis } from "../shared/ui/edgeAutoScroll";
-import { PlaylistTrackList } from "../shared/ui/PlaylistTrackList";
+import {
+  PlaylistTrackList,
+  type PlaylistTrackLocateRequest,
+} from "../shared/ui/PlaylistTrackList";
+import type { PlaylistFolderState } from "../shared/ui/playlistTree";
 import { AddMediaMenu } from "../shared/ui/AddMediaMenu";
+import {
+  AppContextMenu,
+  closeActiveContextMenu,
+  type AppContextMenuItem,
+} from "../shared/ui/AppContextMenu";
 import { BrandWordmark } from "../shared/ui/BrandWordmark";
 import { CompactTopNavigation, type CompactNavigationSelection } from "../shared/ui/CompactTopNavigation";
 import { OverflowMarquee } from "../shared/ui/OverflowMarquee";
+import {
+  TransientNotice,
+  type TransientNoticeMessage,
+  type TransientNoticeTone,
+} from "../shared/ui/TransientNotice";
+import { AudioFileInfoDialog } from "./AudioFileInfoDialog";
 import { accentColors, type AccentColor, usePreferences } from "./preferences";
 import {
   adjacentFullPlayerPage,
@@ -107,7 +122,7 @@ import {
   selectFullPlayerPage,
   type FullPlayerPage,
 } from "./fullPlayerPaging";
-import artworkPlaceholder from "../../assets/resona-icon.svg";
+import artworkPlaceholder from "../../assets/resona-default-artwork.svg";
 
 type Selection = CompactNavigationSelection;
 
@@ -145,8 +160,16 @@ export default function App() {
   const [playerExpanded, setPlayerExpanded] = useState(false);
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
   const [updateDialogMounted, setUpdateDialogMounted] = useState(false);
-  const [importNoticeCount, setImportNoticeCount] = useState(0);
-  const [importNoticeReasons, setImportNoticeReasons] = useState("");
+  const [notice, setNotice] = useState<TransientNoticeMessage | null>(null);
+  const [fileInfoPath, setFileInfoPath] = useState<string | null>(null);
+  const [playlistFolderStates, setPlaylistFolderStates] = useState<Map<string, PlaylistFolderState>>(
+    () => new Map(),
+  );
+  const [playlistLocateRequest, setPlaylistLocateRequest] = useState<(
+    PlaylistTrackLocateRequest & { treeKey: string }
+  ) | null>(null);
+  const playlistLocateRequestIdRef = useRef(0);
+  const noticeIdRef = useRef(0);
   const dropActionsRef = useRef({ library, playback, t });
   const autoLyricsPathRef = useRef<string | null>(null);
   dropActionsRef.current = { library, playback, t };
@@ -155,10 +178,21 @@ export default function App() {
     setUpdateDialogMounted(true);
     setUpdateDialogOpen(true);
   }, []);
+  const publishNotice = useCallback((message: string, tone: TransientNoticeTone = "error") => {
+    noticeIdRef.current += 1;
+    setNotice({ id: noticeIdRef.current, message, tone });
+  }, []);
+  const dismissNotice = useCallback(() => setNotice(null), []);
 
   useEffect(() => {
     if (applicationLifetime.closePromptOpen) setRememberCloseDecision(false);
   }, [applicationLifetime.closePromptOpen]);
+
+  useLayoutEffect(() => {
+    if (applicationLifetime.closePromptOpen || applicationLifetime.exitConfirmationOpen) {
+      closeActiveContextMenu();
+    }
+  }, [applicationLifetime.closePromptOpen, applicationLifetime.exitConfirmationOpen]);
 
   useEffect(() => {
     let timer = 0;
@@ -192,11 +226,31 @@ export default function App() {
   }, [library.dismissRejected, playback.dismissDefaultRejected]);
   useEffect(() => {
     if (rejectedImportCount <= 0) return;
-    setImportNoticeCount(rejectedImportCount);
-    setImportNoticeReasons(rejectedImportReasons);
-    const timer = window.setTimeout(dismissImportNotice, 4_000);
-    return () => window.clearTimeout(timer);
-  }, [dismissImportNotice, rejectedImportCount, rejectedImportReasons]);
+    publishNotice(
+      t("import.rejected", { count: rejectedImportCount, reasons: rejectedImportReasons }),
+      "warning",
+    );
+    dismissImportNotice();
+  }, [
+    dismissImportNotice,
+    publishNotice,
+    rejectedImportCount,
+    rejectedImportReasons,
+    t,
+  ]);
+
+  const playbackFailure = playback.snapshot.error ?? playback.refreshError;
+  useEffect(() => {
+    if (playbackFailure) publishNotice(localizeFailure(playbackFailure, t));
+  }, [playbackFailure, publishNotice, t]);
+
+  useEffect(() => {
+    if (library.error) publishNotice(library.error.message);
+  }, [library.error, publishNotice]);
+
+  useEffect(() => {
+    if (mainWindow.error) publishNotice(mainWindow.error.message);
+  }, [mainWindow.error, publishNotice]);
 
   const hasCurrentTrack = playback.snapshot.currentItemId !== null
     && playback.selectedPath !== null;
@@ -383,6 +437,38 @@ export default function App() {
     else setSelection(next);
   }, [selectUserPlaylist]);
 
+  const updatePlaylistFolderState = useCallback((treeKey: string, state: PlaylistFolderState) => {
+    setPlaylistFolderStates((current) => {
+      const next = new Map(current);
+      next.set(treeKey, state);
+      return next;
+    });
+  }, []);
+  const updateDefaultFolderState = useCallback((state: PlaylistFolderState) => {
+    updatePlaylistFolderState("default", state);
+  }, [updatePlaylistFolderState]);
+  const selectedPlaylistTreeKey = selection.kind === "user" ? `playlist-${selection.playlistId}` : null;
+  const updateSelectedFolderState = useCallback((state: PlaylistFolderState) => {
+    if (selectedPlaylistTreeKey) updatePlaylistFolderState(selectedPlaylistTreeKey, state);
+  }, [selectedPlaylistTreeKey, updatePlaylistFolderState]);
+  const handleLocateRequest = useCallback((requestId: number) => {
+    setPlaylistLocateRequest((current) => current?.id === requestId ? null : current);
+  }, []);
+  const locateCurrentTrack = useCallback(() => {
+    const active = playback.activePlaylist;
+    const path = playback.selectedPath;
+    if (!active || !path) return;
+    const treeKey = active.kind === "default" ? "default" : `playlist-${active.playlistId}`;
+    setPlayerExpanded(false);
+    if (active.kind === "user" && active.playlistId !== null) {
+      selectUserPlaylist(active.playlistId);
+    } else {
+      setSelection({ kind: "default" });
+    }
+    playlistLocateRequestIdRef.current += 1;
+    setPlaylistLocateRequest({ id: playlistLocateRequestIdRef.current, path, treeKey });
+  }, [playback.activePlaylist, playback.selectedPath, selectUserPlaylist]);
+
   const closePlayer = useCallback(() => setPlayerExpanded(false), []);
   const togglePlayer = useCallback(() => setPlayerExpanded((value) => !value), []);
   const selectedUserId = selection.kind === "user" ? selection.playlistId : null;
@@ -405,6 +491,14 @@ export default function App() {
       setSelection({ kind: "default" });
     });
   }, [library.deletePlaylist, playback.refresh, playback.reloadDefaultPlaylist]);
+  const deleteOtherUserPlaylists = useCallback((keepId: number | null) => {
+    void library.deleteOtherPlaylists(keepId).then(async (deleted) => {
+      if (!deleted) return;
+      await Promise.all([playback.refresh(), playback.reloadDefaultPlaylist()]);
+      if (keepId === null) setSelection({ kind: "default" });
+      else selectUserPlaylist(keepId);
+    });
+  }, [library.deleteOtherPlaylists, playback.refresh, playback.reloadDefaultPlaylist, selectUserPlaylist]);
   const moveUserItem = useCallback((itemId: number, toPosition: number) => {
     if (selectedUserId === null) return;
     void library.moveItem(selectedUserId, itemId, toPosition).then((moved) => {
@@ -461,6 +555,7 @@ export default function App() {
       moveDisabled={library.loading}
       onCreate={openCreatePlaylist}
       onClearDefault={clearDefaultItems}
+      onDeleteOtherPlaylists={deleteOtherUserPlaylists}
       onDeletePlaylist={deleteUserPlaylist}
       onMovePlaylist={library.movePlaylist}
       onRenamePlaylist={requestRenamePlaylist}
@@ -482,6 +577,7 @@ export default function App() {
             moveDisabled={library.loading}
             onClearDefault={clearDefaultItems}
             onCreatePlaylist={openCreatePlaylist}
+            onDeleteOtherPlaylists={deleteOtherUserPlaylists}
             onDeletePlaylist={deleteUserPlaylist}
             onMovePlaylist={library.movePlaylist}
             onRenamePlaylist={requestRenamePlaylist}
@@ -515,13 +611,18 @@ export default function App() {
                 busy={playback.busy}
                 currentPath={playback.selectedPath}
                 dropTarget={dropTarget}
+                folderState={playlistFolderStates.get("default")}
                 items={playback.defaultPlaylist.items}
+                locateRequest={playlistLocateRequest?.treeKey === "default" ? playlistLocateRequest : null}
                 onAddFiles={playback.chooseAndAddDefaultFiles}
                 onAddFolders={playback.chooseAndAddDefaultFolders}
                 onPlay={playback.playDefaultItem}
                 onClear={clearDefaultItems}
+                onFolderStateChange={updateDefaultFolderState}
+                onLocateHandled={handleLocateRequest}
                 onMove={playback.moveDefaultItem}
                 onRemove={playback.removeDefaultItems}
+                onShowInfo={setFileInfoPath}
                 sourceDirectory={playback.defaultPlaylist.sourceDirectory}
               />
             )}
@@ -531,19 +632,24 @@ export default function App() {
                 currentPath={playback.selectedPath}
                 dropTarget={dropTarget}
                 externalDragActive={externalDragActive}
+                folderState={selectedPlaylistTreeKey ? playlistFolderStates.get(selectedPlaylistTreeKey) : undefined}
                 items={library.selectedItems}
                 itemsLoading={library.itemsLoading}
+                locateRequest={playlistLocateRequest?.treeKey === selectedPlaylistTreeKey ? playlistLocateRequest : null}
                 onAddFiles={addUserFiles}
                 onAddFolders={addUserFolders}
                 onMove={moveUserItem}
                 onPlay={playUserItem}
                 onClear={clearUserItems}
+                onFolderStateChange={updateSelectedFolderState}
+                onLocateHandled={handleLocateRequest}
                 onRemove={removeUserItems}
                 onRename={renameUserPlaylist}
+                onShowInfo={setFileInfoPath}
                 playlist={selectedPlaylist}
               />
             )}
-            {selection.kind === "tools" && <MemoToolsView />}
+            {selection.kind === "tools" && <MemoToolsView onNotify={publishNotice} />}
             {selection.kind === "settings" && (
               <MemoSettingsView
                 applicationLifetime={applicationLifetime}
@@ -563,28 +669,11 @@ export default function App() {
           </section>
         )}
 
-        {(playback.snapshot.error ?? playback.refreshError) && (
-          <ErrorBanner failure={(playback.snapshot.error ?? playback.refreshError)!} />
-        )}
-        {library.error && <div className="error-banner" role="alert">{library.error}</div>}
-        {mainWindow.error && <div className="error-banner" role="alert">{mainWindow.error.message}</div>}
-        <Transition duration={160} mounted={rejectedImportCount > 0} transition="slide-left">
-          {(transitionStyles) => (
-            <Notification
-              className="import-notice"
-              closeButtonProps={{ "aria-label": t("common.close") }}
-              color="orange"
-              icon={<CircleAlert size={16} />}
-              onClose={dismissImportNotice}
-              role="status"
-              style={transitionStyles}
-              withCloseButton
-              withBorder={false}
-            >
-              {t("import.rejected", { count: importNoticeCount, reasons: importNoticeReasons })}
-            </Notification>
-          )}
-        </Transition>
+        <TransientNotice
+          closeLabel={t("common.close")}
+          notice={notice}
+          onDismiss={dismissNotice}
+        />
       </section>
 
       <PlayerBar
@@ -593,6 +682,8 @@ export default function App() {
         details={trackDetails.details}
         hasCurrentTrack={hasCurrentTrack}
         expanded={playerExpanded}
+        canLocateCurrentTrack={Boolean(playback.activePlaylist && playback.selectedPath)}
+        onLocateCurrentTrack={locateCurrentTrack}
         onToggleExpanded={togglePlayer}
         onRun={playback.run}
         seek={seek}
@@ -787,6 +878,7 @@ export default function App() {
           />
         </Suspense>
       )}
+      <AudioFileInfoDialog onClose={() => setFileInfoPath(null)} path={fileInfoPath} />
     </main>
   );
 }
@@ -798,6 +890,7 @@ function Sidebar({
   moveDisabled,
   onCreate,
   onClearDefault,
+  onDeleteOtherPlaylists,
   onDeletePlaylist,
   onMovePlaylist,
   onRenamePlaylist,
@@ -811,6 +904,7 @@ function Sidebar({
   moveDisabled: boolean;
   onCreate: () => void;
   onClearDefault: () => void;
+  onDeleteOtherPlaylists: (keepId: number | null) => void;
   onDeletePlaylist: (playlistId: number) => void;
   onMovePlaylist: (playlistId: number, toPosition: number) => Promise<boolean>;
   onRenamePlaylist: (playlistId: number) => void;
@@ -819,8 +913,6 @@ function Sidebar({
   selection: Selection;
 }) {
   const { t } = useTranslation();
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; playlist: PlaylistSummary | null; isDefault: boolean } | null>(null);
-  const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const playlistViewportRef = useRef<HTMLDivElement | null>(null);
   const reorder = usePointerReorder({
     axis: "vertical",
@@ -829,14 +921,6 @@ function Sidebar({
     onMove: (playlistId, toPosition) => void onMovePlaylist(playlistId, toPosition),
     scrollViewportRef: playlistViewportRef,
   });
-  useEffect(() => {
-    const dismiss = (event: PointerEvent) => {
-      if (event.target instanceof Node && contextMenuRef.current?.contains(event.target)) return;
-      setContextMenu(null);
-    };
-    window.addEventListener("pointerdown", dismiss);
-    return () => window.removeEventListener("pointerdown", dismiss);
-  }, []);
   return (
     <aside className="sidebar">
       <BrandLockup />
@@ -854,10 +938,27 @@ function Sidebar({
           active={selection.kind === "default"}
           dropActive={dropTarget?.kind === "default"}
           label={t("library.default")}
+          contextMenuItems={[
+            {
+              destructive: true,
+              icon: Eraser,
+              id: "clear",
+              label: t("common.clear"),
+              onSelect: onClearDefault,
+            },
+            {
+              destructive: true,
+              disabled: playlists.length === 0,
+              dividerBefore: true,
+              icon: ListX,
+              id: "delete-others",
+              label: t("library.closeOthers"),
+              onSelect: () => onDeleteOtherPlaylists(null),
+            },
+          ]}
           order={1}
           playing={activePlaylist?.kind === "default"}
           onClick={() => onSelect({ kind: "default" })}
-          onContextMenu={(event) => { event.preventDefault(); setContextMenu({ x: event.clientX, y: event.clientY, playlist: null, isDefault: true }); }}
         />
         <ScrollArea
           className="playlist-nav-scroll"
@@ -879,12 +980,50 @@ function Sidebar({
                   active={selection.kind === "user" && selection.playlistId === playlist.id}
                   dragging={reorder.draggedId === playlist.id}
                   dropActive={dropTarget?.kind === "playlist" && dropTarget.playlistId === playlist.id}
+                  contextMenuItems={[
+                    {
+                      disabled: playlist.position <= 0,
+                      icon: ArrowUp,
+                      id: "move-up",
+                      label: t("library.moveUp"),
+                      onSelect: () => void onMovePlaylist(playlist.id, playlist.position - 1),
+                    },
+                    {
+                      disabled: playlist.position >= playlists.length - 1,
+                      icon: ArrowDown,
+                      id: "move-down",
+                      label: t("library.moveDown"),
+                      onSelect: () => void onMovePlaylist(playlist.id, playlist.position + 1),
+                    },
+                    {
+                      dividerBefore: true,
+                      icon: Pencil,
+                      id: "rename",
+                      label: t("library.rename"),
+                      onSelect: () => onRenamePlaylist(playlist.id),
+                    },
+                    {
+                      destructive: true,
+                      disabled: playlists.length <= 1,
+                      dividerBefore: true,
+                      icon: ListX,
+                      id: "delete-others",
+                      label: t("library.closeOthers"),
+                      onSelect: () => onDeleteOtherPlaylists(playlist.id),
+                    },
+                    {
+                      destructive: true,
+                      icon: Trash2,
+                      id: "delete",
+                      label: t("library.delete"),
+                      onSelect: () => onDeletePlaylist(playlist.id),
+                    },
+                  ]}
                   label={playlist.name}
                   onClick={() => {
                     if (!reorder.consumeClick()) onSelect({ kind: "user", playlistId: playlist.id });
                   }}
                   onDelete={() => onDeletePlaylist(playlist.id)}
-                  onContextMenu={(event) => { event.preventDefault(); setContextMenu({ x: event.clientX, y: event.clientY, playlist, isDefault: false }); }}
                   onPointerCancel={reorder.onPointerCancel}
                   onPointerDown={(event) => reorder.onPointerDown(event, playlist.id)}
                   onPointerMove={reorder.onPointerMove}
@@ -903,34 +1042,6 @@ function Sidebar({
           </div>
         </ScrollArea>
       </nav>
-      {contextMenu && <Portal><Paper className="app-context-menu" ref={contextMenuRef} shadow="md" style={{ left: contextMenu.x, top: contextMenu.y }} withBorder>
-        {contextMenu.isDefault ? (
-          <button onClick={() => { onClearDefault(); setContextMenu(null); }} type="button">{t("common.clear")}</button>
-        ) : <>
-          <button
-            disabled={(contextMenu.playlist?.position ?? 0) <= 0}
-            onClick={() => {
-              if (contextMenu.playlist) void onMovePlaylist(contextMenu.playlist.id, contextMenu.playlist.position - 1);
-              setContextMenu(null);
-            }}
-            type="button"
-          ><ArrowUp size={14} />{t("library.moveUp")}</button>
-          <button
-            disabled={(contextMenu.playlist?.position ?? playlists.length - 1) >= playlists.length - 1}
-            onClick={() => {
-              if (contextMenu.playlist) void onMovePlaylist(contextMenu.playlist.id, contextMenu.playlist.position + 1);
-              setContextMenu(null);
-            }}
-            type="button"
-          ><ArrowDown size={14} />{t("library.moveDown")}</button>
-          <button onClick={() => {
-            if (contextMenu.playlist) onRenamePlaylist(contextMenu.playlist.id);
-            setContextMenu(null);
-          }} type="button">{t("library.rename")}</button>
-          <button onClick={() => { if (contextMenu.playlist) onDeletePlaylist(contextMenu.playlist.id); setContextMenu(null); }} type="button">{t("library.delete")}</button>
-        </>}
-      </Paper></Portal>}
-
       <nav className="sidebar-nav-bottom">
         <NavButton
           active={selection.kind === "tools"}
@@ -966,7 +1077,7 @@ function NavButton({ active, icon, label, onClick }: {
   return (
     <UnstyledButton
       aria-current={active ? "page" : undefined}
-      className="nav-button"
+      className="nav-button resona-active"
       data-active={active || undefined}
       onClick={onClick}
     >
@@ -976,13 +1087,13 @@ function NavButton({ active, icon, label, onClick }: {
   );
 }
 
-function PlaylistNavItem({ active, dragging, dropActive, label, onClick, onContextMenu, onDelete, onPointerCancel, onPointerDown, onPointerMove, onPointerUp, order, playing, playlistId, reorderPosition }: {
+function PlaylistNavItem({ active, contextMenuItems, dragging, dropActive, label, onClick, onDelete, onPointerCancel, onPointerDown, onPointerMove, onPointerUp, order, playing, playlistId, reorderPosition }: {
   active: boolean;
+  contextMenuItems: AppContextMenuItem[];
   dragging?: boolean;
   dropActive?: boolean;
   label: string;
   onClick: () => void;
-  onContextMenu?: (event: React.MouseEvent) => void;
   onDelete?: () => void;
   onPointerCancel?: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerDown?: (event: React.PointerEvent<HTMLElement>) => void;
@@ -995,8 +1106,9 @@ function PlaylistNavItem({ active, dragging, dropActive, label, onClick, onConte
 }) {
   const { t } = useTranslation();
   return (
-    <div className="playlist-nav-item-wrap" onContextMenu={onContextMenu}>
-      <UnstyledButton
+    <div className="playlist-nav-item-wrap">
+      <AppContextMenu items={contextMenuItems}>
+        <UnstyledButton
         aria-current={active ? "page" : undefined}
         className="playlist-nav-item"
         data-active={active || undefined}
@@ -1017,7 +1129,8 @@ function PlaylistNavItem({ active, dragging, dropActive, label, onClick, onConte
           : <span className="playlist-order">{order}</span>}
         </span>
         <OverflowMarquee className="nav-label" text={label} />
-      </UnstyledButton>
+        </UnstyledButton>
+      </AppContextMenu>
       {onDelete && <Tooltip label={t("library.delete")}><ActionIcon aria-label={t("library.delete")} className="playlist-nav-delete" color="red" onClick={(event) => { event.stopPropagation(); onDelete(); }} size="sm" variant="subtle"><Trash2 size={14} /></ActionIcon></Tooltip>}
     </div>
   );
@@ -1040,29 +1153,41 @@ function DefaultPlaylistView({
   busy,
   currentPath,
   dropTarget,
+  folderState,
   items,
+  locateRequest,
   onAddFiles,
   onAddFolders,
   onClear,
+  onFolderStateChange,
+  onLocateHandled,
   onMove,
   onPlay,
   onRemove,
+  onShowInfo,
   sourceDirectory,
 }: {
   busy: boolean;
   currentPath: string | null;
   dropTarget: DropTarget | null;
+  folderState: PlaylistFolderState | undefined;
   items: DefaultPlaylistItem[];
+  locateRequest: PlaylistTrackLocateRequest | null;
   onAddFiles: () => Promise<void>;
   onAddFolders: () => Promise<void>;
   onClear: () => void;
+  onFolderStateChange: (state: PlaylistFolderState) => void;
+  onLocateHandled: (requestId: number) => void;
   onMove: (itemId: number, toPosition: number) => Promise<unknown>;
   onPlay: (itemId: number) => Promise<PlaybackSnapshot | null>;
   onRemove: (itemIds: number[]) => Promise<DefaultPlaylistSnapshot | null>;
+  onShowInfo: (path: string) => void;
   sourceDirectory: string | null;
 }) {
   const { t } = useTranslation();
   const trackViewportRef = useRef<HTMLDivElement | null>(null);
+  const [visiblePaths, setVisiblePaths] = useState<string[]>([]);
+  const summaries = useTrackSummaries(visiblePaths);
   return (
     <div className="page-content list-page">
       <div className="playlist-detail-heading">
@@ -1106,14 +1231,22 @@ function DefaultPlaylistView({
             busy={busy}
             currentPath={currentPath}
             externalInsertionPosition={dropTarget?.kind === "default-track-gap" ? dropTarget.position : null}
+            folderState={folderState}
             items={items}
+            locateRequest={locateRequest}
             onAddFiles={() => void onAddFiles()}
             onAddFolders={() => void onAddFolders()}
             onClear={onClear}
+            onFolderStateChange={onFolderStateChange}
+            onLocateHandled={onLocateHandled}
             onMove={(itemId, position) => void onMove(itemId, position)}
             onPlay={(itemId) => void onPlay(itemId)}
             onRemove={(itemIds) => void onRemove(itemIds)}
+            onShowInfo={onShowInfo}
+            onVisiblePaths={setVisiblePaths}
             scrollViewportRef={trackViewportRef}
+            summaries={summaries}
+            treeKey="default"
           />
         </ScrollArea>
       )}
@@ -1126,36 +1259,49 @@ function UserPlaylistView({
   currentPath,
   dropTarget,
   externalDragActive,
+  folderState,
   items,
   itemsLoading,
+  locateRequest,
   onAddFiles,
   onAddFolders,
   onMove,
   onPlay,
   onClear,
+  onFolderStateChange,
+  onLocateHandled,
   onRemove,
   onRename,
+  onShowInfo,
   playlist,
 }: {
   busy: boolean;
   currentPath: string | null;
   dropTarget: DropTarget | null;
   externalDragActive: boolean;
+  folderState: PlaylistFolderState | undefined;
   items: PlaylistItem[];
   itemsLoading: boolean;
+  locateRequest: PlaylistTrackLocateRequest | null;
   onAddFiles: () => void;
   onAddFolders: () => void;
   onMove: (itemId: number, toPosition: number) => void;
   onPlay: (itemId: number) => void;
   onClear: () => void;
+  onFolderStateChange: (state: PlaylistFolderState) => void;
+  onLocateHandled: (requestId: number) => void;
   onRemove: (itemIds: number[]) => void;
   onRename: (name: string) => Promise<boolean>;
+  onShowInfo: (path: string) => void;
   playlist: PlaylistSummary | null;
 }) {
   const { t } = useTranslation();
   const [name, setName] = useState(playlist?.name ?? "");
   const trackViewportRef = useRef<HTMLDivElement | null>(null);
+  const [visiblePaths, setVisiblePaths] = useState<string[]>([]);
+  const summaries = useTrackSummaries(visiblePaths);
   useEffect(() => setName(playlist?.name ?? ""), [playlist?.id, playlist?.name]);
+  useEffect(() => setVisiblePaths([]), [playlist?.id]);
 
   if (!playlist) return <EmptyView icon={<ListMusic />} label={t("library.selectPrompt")} />;
   return (
@@ -1210,14 +1356,22 @@ function UserPlaylistView({
               externalInsertionPosition={externalDragActive && dropTarget?.kind === "track-gap" && dropTarget.playlistId === playlist.id
                 ? dropTarget.position
                 : null}
+              folderState={folderState}
               items={items}
+              locateRequest={locateRequest}
               onAddFiles={onAddFiles}
               onAddFolders={onAddFolders}
               onClear={onClear}
+              onFolderStateChange={onFolderStateChange}
+              onLocateHandled={onLocateHandled}
               onMove={onMove}
               onPlay={onPlay}
               onRemove={onRemove}
+              onShowInfo={onShowInfo}
+              onVisiblePaths={setVisiblePaths}
               scrollViewportRef={trackViewportRef}
+              summaries={summaries}
+              treeKey={`playlist-${playlist.id}`}
             />
           </div>
         </ScrollArea>
@@ -1226,11 +1380,20 @@ function UserPlaylistView({
   );
 }
 
-function ToolsView() {
+function ToolsView({ onNotify }: {
+  onNotify: (message: string, tone?: TransientNoticeTone) => void;
+}) {
   const { t } = useTranslation();
   const compression = useAudioCompression();
   const dependency = useFfmpegDependency();
   const [openError, setOpenError] = useState<string | null>(null);
+  useEffect(() => {
+    const error = openError || dependency.commandError;
+    if (!error) return;
+    onNotify(error);
+    setOpenError(null);
+    dependency.dismissCommandError();
+  }, [dependency.commandError, dependency.dismissCommandError, onNotify, openError]);
   const running = compression.snapshot.status === "running" || compression.snapshot.status === "cancelling";
   const progress = compression.snapshot.total > 0
     ? (compression.snapshot.items.reduce((total, item) => total + item.progress, 0)
@@ -1305,11 +1468,6 @@ function ToolsView() {
               : t("tools.downloadFfmpeg")}</Button>
           )}
         </Paper>
-        {(openError || dependency.commandError) && (
-          <div className="error-banner" role="alert">
-            {openError || dependency.commandError}
-          </div>
-        )}
         <Paper className="tool-row" data-deferred>
           <ThemeIcon color="gray" size={38} variant="light"><Tags size={19} /></ThemeIcon>
           <Text fw={600}>{t("tools.tagEditor")}</Text>
@@ -1345,9 +1503,11 @@ function SettingsView({ applicationLifetime, applicationUpdate, busy, desktopLyr
     setLocale,
   } = usePreferences();
   const [backgroundOpacity, setBackgroundOpacity] = useState(lyricsPreferences.backgroundOpacity);
+  const [textOpacity, setTextOpacity] = useState(lyricsPreferences.textOpacity);
   const [fontDraft, setFontDraft] = useState(String(lyricsPreferences.fontSize));
   const [aboutError, setAboutError] = useState<string | null>(null);
   useEffect(() => setBackgroundOpacity(lyricsPreferences.backgroundOpacity), [lyricsPreferences.backgroundOpacity]);
+  useEffect(() => setTextOpacity(lyricsPreferences.textOpacity), [lyricsPreferences.textOpacity]);
   useEffect(() => setFontDraft(String(lyricsPreferences.fontSize)), [lyricsPreferences.fontSize]);
   const openProjectPage = useCallback(async (page: "repository" | "releases") => {
     try {
@@ -1568,8 +1728,12 @@ function SettingsView({ applicationLifetime, applicationUpdate, busy, desktopLyr
             label={(value) => `${value}%`}
             max={100}
             min={10}
-            onChangeEnd={(value) => setDesktopLyrics({ textOpacity: value })}
-            value={lyricsPreferences.textOpacity}
+            onChange={(value) => {
+              setTextOpacity(value);
+              setDesktopLyrics({ textOpacity: value });
+            }}
+            step={10}
+            value={textOpacity}
           />
         </SettingRow>
         <SettingRow label={t("desktopLyrics.backgroundOpacity")}>
@@ -1577,10 +1741,13 @@ function SettingsView({ applicationLifetime, applicationUpdate, busy, desktopLyr
             aria-label={t("desktopLyrics.backgroundOpacity")}
             className="lyrics-opacity-setting"
             label={(value) => `${value}%`}
-            max={80}
+            max={90}
             min={0}
-            onChange={setBackgroundOpacity}
-            onChangeEnd={(value) => setDesktopLyrics({ backgroundOpacity: value })}
+            onChange={(value) => {
+              setBackgroundOpacity(value);
+              setDesktopLyrics({ backgroundOpacity: value });
+            }}
+            step={10}
             value={backgroundOpacity}
           />
         </SettingRow>
@@ -1645,13 +1812,15 @@ function SettingRow({ children, className, label }: { children: ReactNode; class
   );
 }
 
-function PlayerBar({ busy, compact, desktopLyrics, details, expanded, hasCurrentTrack, onRun, onToggleExpanded, seek, snapshot, title }: {
+function PlayerBar({ busy, canLocateCurrentTrack, compact, desktopLyrics, details, expanded, hasCurrentTrack, onLocateCurrentTrack, onRun, onToggleExpanded, seek, snapshot, title }: {
   busy: boolean;
+  canLocateCurrentTrack: boolean;
   compact: boolean;
   desktopLyrics: ReturnType<typeof useDesktopLyricsWindow>;
   details: ReturnType<typeof useTrackDetails>["details"];
   expanded: boolean;
   hasCurrentTrack: boolean;
+  onLocateCurrentTrack: () => void;
   onRun: ReturnType<typeof usePlaybackController>["run"];
   onToggleExpanded: () => void;
   seek: ReturnType<typeof useSeekTransaction>;
@@ -1661,12 +1830,76 @@ function PlayerBar({ busy, compact, desktopLyrics, details, expanded, hasCurrent
   const { t } = useTranslation();
   const [changingVolume, setChangingVolume] = useState(false);
   const [volume, setVolume] = useState(Math.round(snapshot.volume * 100));
+  const queuedVolumeRef = useRef<number | null>(null);
+  const volumeDrainRef = useRef<Promise<void> | null>(null);
+  const volumeInteractionRef = useRef(0);
   useEffect(() => {
     if (!changingVolume) setVolume(Math.round(snapshot.volume * 100));
   }, [changingVolume, snapshot.volume]);
 
   const canControl = snapshot.status === "playing" || snapshot.status === "paused";
   const currentId = snapshot.currentItemId ?? snapshot.queue[0]?.id;
+  const queueVolumeChange = useCallback((value: number) => {
+    queuedVolumeRef.current = value;
+    if (volumeDrainRef.current) return volumeDrainRef.current;
+
+    const drain = (async () => {
+      while (queuedVolumeRef.current !== null) {
+        const next = queuedVolumeRef.current;
+        queuedVolumeRef.current = null;
+        await onRun("set_playback_volume", { volume: next / 100 });
+      }
+    })();
+    volumeDrainRef.current = drain;
+    void drain.finally(() => {
+      if (volumeDrainRef.current === drain) volumeDrainRef.current = null;
+    });
+    return drain;
+  }, [onRun]);
+  const changeVolume = (value: number) => {
+    volumeInteractionRef.current += 1;
+    setChangingVolume(true);
+    setVolume(value);
+    void queueVolumeChange(value);
+  };
+  const commitVolume = (value: number) => {
+    const interaction = ++volumeInteractionRef.current;
+    setVolume(value);
+    void queueVolumeChange(value).finally(() => {
+      if (volumeInteractionRef.current === interaction) setChangingVolume(false);
+    });
+  };
+  const track = (
+    <div className="player-track">
+      <UnstyledButton
+        aria-label={expanded ? t("playback.collapse") : t("playback.expand")}
+        className="mini-artwork"
+        data-testid="player-expand"
+        disabled={!hasCurrentTrack}
+        onClick={onToggleExpanded}
+      >
+        <img
+          alt=""
+          className="mini-artwork-image"
+          data-placeholder={!details?.artworkDataUrl || undefined}
+          draggable={false}
+          src={details?.artworkDataUrl ?? artworkPlaceholder}
+        />
+        <span className="mini-artwork-action">
+          {expanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+        </span>
+      </UnstyledButton>
+      <div className="player-track-copy">
+        <OverflowMarquee className="player-track-title" text={title} />
+        <div className="player-track-meta">
+          <Text c="dimmed" size="xs">
+            {formatDuration(seek.displayPositionMs)} / {formatDuration(snapshot.durationMs)}
+          </Text>
+          <AudioQualityBadge quality={details?.quality ?? null} />
+        </div>
+      </div>
+    </div>
+  );
   return (
     <footer
       className="player-bar"
@@ -1686,79 +1919,51 @@ function PlayerBar({ busy, compact, desktopLyrics, details, expanded, hasCurrent
         size="xs"
         value={Math.min(seek.displayPositionMs, Math.max(snapshot.durationMs ?? 0, 1))}
       />
-      <div className="player-track">
-        <UnstyledButton
-          aria-label={expanded ? t("playback.collapse") : t("playback.expand")}
-          className="mini-artwork"
-          data-testid="player-expand"
-          disabled={!hasCurrentTrack}
-          onClick={onToggleExpanded}
-        >
-          <img
-            alt=""
-            className="mini-artwork-image"
-            data-placeholder={!details?.artworkDataUrl || undefined}
-            draggable={false}
-            src={details?.artworkDataUrl ?? artworkPlaceholder}
-          />
-          <span className="mini-artwork-action">
-            {expanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
-          </span>
-        </UnstyledButton>
-        <div className="player-track-copy">
-          <OverflowMarquee className="player-track-title" text={title} />
-          <Text c="dimmed" size="xs">
-            {formatDuration(seek.displayPositionMs)} / {formatDuration(snapshot.durationMs)}
-          </Text>
-        </div>
-      </div>
+      {compact ? (
+        <div className="compact-player-top-row">{track}</div>
+      ) : track}
       {compact ? (
         <CompactPlayerControls
           busy={busy}
           canControl={canControl}
+          canLocateCurrentTrack={canLocateCurrentTrack}
           currentId={currentId}
           desktopLyrics={desktopLyrics}
-          details={details}
           hasCurrentTrack={hasCurrentTrack}
-          mode={snapshot.playbackMode}
+          onLocateCurrentTrack={onLocateCurrentTrack}
           onRun={onRun}
           snapshot={snapshot}
-          onVolumeChange={(value) => {
-            setChangingVolume(true);
-            setVolume(value);
-          }}
-          onVolumeChangeEnd={(value) => {
-            setChangingVolume(false);
-            void onRun("set_playback_volume", { volume: value / 100 });
-          }}
+          onVolumeChange={changeVolume}
+          onVolumeChangeEnd={commitVolume}
           volume={volume}
         />
-      ) : <>
-        <PlaybackCoreControls
-          busy={busy}
-          canControl={canControl}
-          currentId={currentId}
-          onRun={onRun}
-          snapshot={snapshot}
-        />
-        <div className="player-actions">
-          <AudioQualityBadge quality={details?.quality ?? null} />
-          <PlaybackModeButton busy={busy} mode={snapshot.playbackMode} onRun={onRun} />
-          <DesktopLyricsButton busy={busy} controller={desktopLyrics} hasCurrentTrack={hasCurrentTrack} />
-          <VolumeButton
+      ) : (
+        <>
+          <PlaybackCoreControls
             busy={busy}
-            onChange={(value) => {
-              setChangingVolume(true);
-              setVolume(value);
-            }}
-            onChangeEnd={(value) => {
-              setChangingVolume(false);
-              void onRun("set_playback_volume", { volume: value / 100 });
-            }}
-            volume={volume}
+            canControl={canControl}
+            currentId={currentId}
+            onRun={onRun}
+            snapshot={snapshot}
           />
-        </div>
-      </>}
+          <div className="wide-player-actions">
+            <VolumeButton
+              busy={busy}
+              onChange={changeVolume}
+              onChangeEnd={commitVolume}
+              volume={volume}
+            />
+            <div className="player-actions">
+              <PlaybackModeButton busy={busy} mode={snapshot.playbackMode} onRun={onRun} />
+              <DesktopLyricsButton busy={busy} controller={desktopLyrics} hasCurrentTrack={hasCurrentTrack} />
+              <CurrentPlaylistButton
+                disabled={!canLocateCurrentTrack}
+                onClick={onLocateCurrentTrack}
+              />
+            </div>
+          </div>
+        </>
+      )}
     </footer>
   );
 }
@@ -1779,27 +1984,30 @@ function PlaybackCoreControls({ busy, canControl, currentId, onRun, snapshot }: 
   return (
     <Group className="player-controls" gap="xs" justify="center" wrap="nowrap">
       <Tooltip label={t("playback.previous")}>
-        <ActionIcon aria-label={t("playback.previous")} disabled={!canControl || busy} onClick={() => void onRun("previous_playback")} size="xl" variant="default">
+        <ActionIcon aria-label={t("playback.previous")} className="player-control-action" color="gray" disabled={!canControl || busy} onClick={() => void onRun("previous_playback")} size="xl" variant="transparent">
           <SkipBack fill="currentColor" size={18} />
         </ActionIcon>
       </Tooltip>
       <Tooltip label={toggleLabel}>
         <ActionIcon
           aria-label={toggleLabel}
+          className="player-control-action player-control-action-primary"
+          color={currentId === undefined ? "gray" : undefined}
           disabled={currentId === undefined || busy}
           onClick={() => {
             if (snapshot.status === "playing") void onRun("pause_playback");
             else if (snapshot.status === "paused") void onRun("resume_playback");
             else if (currentId !== undefined) void onRun("play_queue_item", { id: currentId });
           }}
+          radius="xl"
           size="xl"
           variant="filled"
         >
-          {snapshot.status === "playing" ? <Pause fill="currentColor" size={19} /> : <Play fill="currentColor" size={19} />}
+          {snapshot.status === "playing" ? <Pause fill="currentColor" size={20} /> : <Play fill="currentColor" size={20} />}
         </ActionIcon>
       </Tooltip>
       <Tooltip label={t("playback.next")}>
-        <ActionIcon aria-label={t("playback.next")} disabled={!canControl || busy} onClick={() => void onRun("next_playback")} size="xl" variant="default">
+        <ActionIcon aria-label={t("playback.next")} className="player-control-action" color="gray" disabled={!canControl || busy} onClick={() => void onRun("next_playback")} size="xl" variant="transparent">
           <SkipForward fill="currentColor" size={18} />
         </ActionIcon>
       </Tooltip>
@@ -1807,14 +2015,14 @@ function PlaybackCoreControls({ busy, canControl, currentId, onRun, snapshot }: 
   );
 }
 
-function CompactPlayerControls({ busy, canControl, currentId, desktopLyrics, details, hasCurrentTrack, mode, onRun, onVolumeChange, onVolumeChangeEnd, snapshot, volume }: {
+function CompactPlayerControls({ busy, canControl, canLocateCurrentTrack, currentId, desktopLyrics, hasCurrentTrack, onLocateCurrentTrack, onRun, onVolumeChange, onVolumeChangeEnd, snapshot, volume }: {
   busy: boolean;
   canControl: boolean;
+  canLocateCurrentTrack: boolean;
   currentId: number | undefined;
   desktopLyrics: ReturnType<typeof useDesktopLyricsWindow>;
-  details: TrackDetails | null;
   hasCurrentTrack: boolean;
-  mode: PlaybackSnapshot["playbackMode"];
+  onLocateCurrentTrack: () => void;
   onRun: ReturnType<typeof usePlaybackController>["run"];
   onVolumeChange: (value: number) => void;
   onVolumeChangeEnd: (value: number) => void;
@@ -1824,7 +2032,17 @@ function CompactPlayerControls({ busy, canControl, currentId, desktopLyrics, det
   return (
     <div className="compact-player-controls">
       <div className="compact-player-side compact-player-side-left">
-        <AudioQualityBadge quality={details?.quality ?? null} />
+        <div className="compact-player-volume">
+          <VolumeButton
+            busy={busy}
+            onChange={onVolumeChange}
+            onChangeEnd={onVolumeChangeEnd}
+            volume={volume}
+          />
+        </div>
+        <div className="compact-player-mode">
+          <PlaybackModeButton busy={busy} mode={snapshot.playbackMode} onRun={onRun} />
+        </div>
       </div>
       <PlaybackCoreControls
         busy={busy}
@@ -1834,14 +2052,15 @@ function CompactPlayerControls({ busy, canControl, currentId, desktopLyrics, det
         snapshot={snapshot}
       />
       <div className="compact-player-side compact-player-side-right">
-        <PlaybackModeButton busy={busy} mode={mode} onRun={onRun} />
-        <DesktopLyricsButton busy={busy} controller={desktopLyrics} hasCurrentTrack={hasCurrentTrack} />
-        <VolumeButton
-          busy={busy}
-          onChange={onVolumeChange}
-          onChangeEnd={onVolumeChangeEnd}
-          volume={volume}
-        />
+        <div className="compact-player-lyrics">
+          <DesktopLyricsButton busy={busy} controller={desktopLyrics} hasCurrentTrack={hasCurrentTrack} />
+        </div>
+        <div className="compact-player-playlist">
+          <CurrentPlaylistButton
+            disabled={!canLocateCurrentTrack}
+            onClick={onLocateCurrentTrack}
+          />
+        </div>
       </div>
     </div>
   );
@@ -1866,10 +2085,25 @@ function VolumeButton({ busy, onChange, onChangeEnd, volume }: {
     onChangeEnd(next);
   };
   return (
-    <Popover onChange={setOpen} opened={open} position="top" shadow="md" width={76} withArrow>
+    <Popover
+      onChange={setOpen}
+      opened={open}
+      position="top"
+      shadow="md"
+      width={76}
+      withArrow
+    >
       <Popover.Target>
         <Tooltip label={t("playback.volume")}>
-          <ActionIcon aria-label={t("playback.volume")} disabled={busy} onClick={() => setOpen((value) => !value)} size="xl" variant="subtle">
+          <ActionIcon
+            aria-label={t("playback.volume")}
+            className="player-control-action"
+            color="gray"
+            disabled={busy}
+            onClick={() => setOpen((value) => !value)}
+            size="xl"
+            variant="transparent"
+          >
             <VolumeIcon size={19} />
           </ActionIcon>
         </Tooltip>
@@ -1905,7 +2139,9 @@ function DesktopLyricsButton({ busy, controller, hasCurrentTrack }: {
     <Tooltip label={controller.snapshot.visible ? t("desktopLyrics.hide") : t("desktopLyrics.show")}>
       <ActionIcon
         aria-label={controller.snapshot.visible ? t("desktopLyrics.hide") : t("desktopLyrics.show")}
+        className="player-control-action"
         color={controller.snapshot.visible ? undefined : "gray"}
+        data-active={controller.snapshot.visible || undefined}
         disabled={busy || controller.busy || !hasCurrentTrack || !controller.snapshot.supported}
         onClick={() => {
           if (controller.snapshot.visible) {
@@ -1918,7 +2154,7 @@ function DesktopLyricsButton({ busy, controller, hasCurrentTrack }: {
           });
         }}
         size="xl"
-        variant={controller.snapshot.visible ? "light" : "subtle"}
+        variant="transparent"
       >
         <Captions size={19} />
       </ActionIcon>
@@ -1930,16 +2166,17 @@ function AudioQualityBadge({ quality }: { quality: TrackDetails["quality"] }) {
   if (!quality) return <span aria-hidden="true" className="audio-quality-slot" />;
   const label = quality === "hi_res" ? "Hi-Res" : quality === "sq" ? "SQ" : "HQ";
   return (
-    <svg
+    <span
       aria-label={label}
       className="audio-quality-badge"
       data-quality={quality}
       role="img"
-      viewBox="0 0 46 26"
     >
-      <rect height="24.5" rx="3" width="44.5" x="0.75" y="0.75" />
-      <text x="23" y="13">{quality === "hi_res" ? "HI-RES" : label}</text>
-    </svg>
+      <span className="audio-quality-label-full">{quality === "hi_res" ? "HI-RES" : label}</span>
+      <span aria-hidden="true" className="audio-quality-label-compact">
+        {quality === "hi_res" ? "HR" : label}
+      </span>
+    </span>
   );
 }
 
@@ -1961,11 +2198,13 @@ function PlaybackModeButton({ busy, mode, onRun }: {
       <Menu.Target>
         <ActionIcon
           aria-label={t(`playback.modes.${mode}`)}
+          className="player-control-action"
           color={mode === "sequential" ? "gray" : undefined}
+          data-active={mode !== "sequential" || undefined}
           disabled={busy}
           size="xl"
           title={t(`playback.modes.${mode}`)}
-          variant={mode === "sequential" ? "subtle" : "light"}
+          variant="transparent"
         >
           {active.icon}
         </ActionIcon>
@@ -1986,6 +2225,28 @@ function PlaybackModeButton({ busy, mode, onRun }: {
   );
 }
 
+function CurrentPlaylistButton({ disabled, onClick }: {
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Tooltip label={t("library.locateCurrentTrack")}>
+      <ActionIcon
+        aria-label={t("library.locateCurrentTrack")}
+        className="player-control-action"
+        color="gray"
+        disabled={disabled}
+        onClick={onClick}
+        size="xl"
+        variant="transparent"
+      >
+        <ListMusic size={19} />
+      </ActionIcon>
+    </Tooltip>
+  );
+}
+
 function FullPlayerView({ compact, details, error, loading, lyrics, onClose, onSeek, output, seekable, title, trackKey }: {
   compact: boolean;
   details: ReturnType<typeof useTrackDetails>["details"];
@@ -2003,32 +2264,49 @@ function FullPlayerView({ compact, details, error, loading, lyrics, onClose, onS
   const lyricsMatchTrack = lyrics.audioPath === trackKey;
   const lyricsStatus = lyricsMatchTrack ? lyrics.status : "idle";
   const lines = lyricsMatchTrack ? lyrics.document?.lines ?? [] : [];
+  const detailsMatchTrack = details?.path === trackKey;
+  const artworkResolved = !loading && (detailsMatchTrack || error !== null);
+  const hasArtwork = detailsMatchTrack && Boolean(details.artworkDataUrl);
   const [paging, setPaging] = useState(() => createFullPlayerPagingState({
+    artworkResolved,
     compact,
+    hasArtwork,
     lineCount: lines.length,
     lyricsStatus,
     trackKey,
   }));
   const activeLyricRef = useRef<HTMLButtonElement | null>(null);
+  const lyricsViewportRef = useRef<HTMLDivElement | null>(null);
   const pages = fullPlayerPages(compact);
   const previousPage = adjacentFullPlayerPage(pages, paging.page, -1);
   const nextPage = adjacentFullPlayerPage(pages, paging.page, 1);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setPaging((current) => reconcileFullPlayerPaging(current, {
+      artworkResolved,
       compact,
+      hasArtwork,
       lineCount: lines.length,
       lyricsStatus,
       trackKey,
     }));
-  }, [compact, lines.length, lyricsStatus, trackKey]);
+  }, [artworkResolved, compact, hasArtwork, lines.length, lyricsStatus, trackKey]);
 
   useEffect(() => {
     if (paging.page !== "lyrics" || !lyricsMatchTrack || lyrics.activeLineIndex === null) return;
     const frame = requestAnimationFrame(() => {
-      activeLyricRef.current?.scrollIntoView({
+      const activeLine = activeLyricRef.current;
+      const viewport = lyricsViewportRef.current;
+      if (!activeLine || !viewport) return;
+      const lineBounds = activeLine.getBoundingClientRect();
+      const viewportBounds = viewport.getBoundingClientRect();
+      const top = viewport.scrollTop
+        + lineBounds.top
+        - viewportBounds.top
+        - (viewport.clientHeight - lineBounds.height) / 2;
+      viewport.scrollTo({
         behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
-        block: "center",
+        top: Math.max(0, top),
       });
     });
     return () => cancelAnimationFrame(frame);
@@ -2099,25 +2377,36 @@ function FullPlayerView({ compact, details, error, loading, lyrics, onClose, onS
             </Tabs.Panel>
           )}
           <Tabs.Panel className="full-player-page" value="lyrics">
-            <ScrollArea className="full-player-panel full-player-lyrics" type="never" aria-label={t("lyrics.region")}>
-              <div className="full-player-lyrics-content">
-              {lines.length === 0 ? (
+            {lines.length === 0 ? (
+              <div
+                aria-label={t("lyrics.region")}
+                className="full-player-panel full-player-lyrics-empty"
+                role="region"
+              >
                 <EmptyView icon={<Captions />} label={t("playback.noLyrics")} />
-              ) : (
-                lines.map((line, index) => (
-                  <UnstyledButton
-                    aria-label={`${line.text} · ${formatDuration(line.startMs)}`}
-                    className="full-player-lyric-line"
-                    data-active={index === lyrics.activeLineIndex || undefined}
-                    disabled={!seekable}
-                    key={`${line.startMs}-${index}`}
-                    onClick={() => void onSeek(line.startMs)}
-                    ref={index === lyrics.activeLineIndex ? activeLyricRef : undefined}
-                  >{line.text}</UnstyledButton>
-                ))
-              )}
               </div>
-            </ScrollArea>
+            ) : (
+              <ScrollArea
+                aria-label={t("lyrics.region")}
+                className="full-player-panel full-player-lyrics"
+                type="never"
+                viewportRef={lyricsViewportRef}
+              >
+                <div className="full-player-lyrics-content">
+                  {lines.map((line, index) => (
+                    <UnstyledButton
+                      aria-label={`${line.text} · ${formatDuration(line.startMs)}`}
+                      className="full-player-lyric-line"
+                      data-active={index === lyrics.activeLineIndex || undefined}
+                      disabled={!seekable}
+                      key={`${line.startMs}-${index}`}
+                      onClick={() => void onSeek(line.startMs)}
+                      ref={index === lyrics.activeLineIndex ? activeLyricRef : undefined}
+                    >{line.text}</UnstyledButton>
+                  ))}
+                </div>
+              </ScrollArea>
+            )}
           </Tabs.Panel>
           <Tabs.Panel className="full-player-page" value="details">
             <ScrollArea className="full-player-panel full-player-details" scrollHideDelay={700} type="scroll">
@@ -2223,11 +2512,6 @@ function EmptyView({ icon, label }: { icon: ReactNode; label: string }) {
       <Text c="dimmed" size="sm">{label}</Text>
     </div>
   );
-}
-
-function ErrorBanner({ failure }: { failure: PlaybackFailure }) {
-  const { t } = useTranslation();
-  return <div className="error-banner" role="alert">{localizeFailure(failure, t)}</div>;
 }
 
 function localizeFailure(

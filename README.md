@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/resona-gothic-wordmark.svg" width="420" alt="Resona">
+  <img src="assets/resona-resonance-wordmark.svg" width="420" alt="Resona">
 </p>
 
 <p align="center">A local-first Windows audio player built for focused listening.</p>
@@ -19,7 +19,7 @@
 
 ## Install
 
-Download the Windows x64 NSIS installer from [GitHub Releases](https://github.com/Leovikii/Resona/releases). Preview releases include alpha, beta and release-candidate builds and are opt-in from Settings.
+Download the Windows x64 NSIS installer from [GitHub Releases](https://github.com/Leovikii/Resona/releases). The 0.1.0 installer is not Authenticode-signed, so Windows may show a SmartScreen prompt; use only the official release page and verify its published SHA-256. In-app updates remain cryptographically signed.
 
 ## Development
 

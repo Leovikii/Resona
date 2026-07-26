@@ -13,6 +13,8 @@ use std::time::Duration;
 use lofty::file::{AudioFile, FileType, TaggedFileExt};
 use serde::{Deserialize, Serialize};
 
+use crate::filesystem::is_link_like;
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CompressionPreset {
@@ -52,6 +54,18 @@ pub struct CompressionSnapshot {
     pub completed: usize,
     pub total: usize,
     pub items: Vec<CompressionItem>,
+}
+
+impl CompressionSnapshot {
+    fn idle() -> Self {
+        Self {
+            task_id: 0,
+            status: "idle".to_owned(),
+            completed: 0,
+            total: 0,
+            items: Vec::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -125,6 +139,7 @@ pub struct CompressionService {
     next_scan_id: AtomicU64,
     cancel: Arc<AtomicBool>,
     scan_cancel: Arc<AtomicBool>,
+    discard_task_when_finished: AtomicBool,
     snapshot: Arc<Mutex<CompressionSnapshot>>,
     scan_snapshot: Arc<Mutex<CompressionScanSnapshot>>,
     scan_workspace: Arc<Mutex<ScanWorkspace>>,
@@ -145,13 +160,8 @@ impl Default for CompressionService {
             next_scan_id: AtomicU64::new(1),
             cancel: Arc::new(AtomicBool::new(false)),
             scan_cancel: Arc::new(AtomicBool::new(false)),
-            snapshot: Arc::new(Mutex::new(CompressionSnapshot {
-                task_id: 0,
-                status: "idle".to_owned(),
-                completed: 0,
-                total: 0,
-                items: Vec::new(),
-            })),
+            discard_task_when_finished: AtomicBool::new(false),
+            snapshot: Arc::new(Mutex::new(CompressionSnapshot::idle())),
             scan_snapshot: Arc::new(Mutex::new(CompressionScanSnapshot::idle())),
             scan_workspace: Arc::new(Mutex::new(ScanWorkspace::default())),
         }
@@ -189,6 +199,32 @@ impl CompressionService {
                 self.scan_snapshot().status.as_str(),
                 "scanning" | "cancelling"
             )
+    }
+
+    pub fn window_opened(&self) {
+        let _state = self
+            .snapshot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.discard_task_when_finished
+            .store(false, Ordering::Release);
+    }
+
+    pub fn window_closed(&self) {
+        let mut state = self
+            .snapshot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if matches!(state.status.as_str(), "running" | "cancelling") {
+            self.discard_task_when_finished
+                .store(true, Ordering::Release);
+            return;
+        }
+        self.discard_task_when_finished
+            .store(false, Ordering::Release);
+        *state = CompressionSnapshot::idle();
+        drop(state);
+        self.discard_scan_inputs();
     }
 
     pub fn scan_snapshot(&self) -> CompressionScanSnapshot {
@@ -465,6 +501,11 @@ impl CompressionService {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             state.status = "completed_with_errors".to_owned();
+            let discard = self.discard_terminal_task_if_window_closed(&mut state);
+            drop(state);
+            if discard {
+                self.discard_scan_inputs();
+            }
             return Err(CompressionFailure::new(
                 "compression_task_failed",
                 error.to_string(),
@@ -545,6 +586,10 @@ impl CompressionService {
                 });
             }
         });
+        self.finalize_batch();
+    }
+
+    fn finalize_batch(&self) {
         let mut state = self
             .snapshot
             .lock()
@@ -561,18 +606,35 @@ impl CompressionService {
                 .iter()
                 .filter(|item| item.status != "pending")
                 .count();
-            return;
-        }
-        state.status = if state
-            .items
-            .iter()
-            .any(|item| item.status == "failed" || item.message.is_some())
-        {
-            "completed_with_errors"
         } else {
-            "completed"
+            state.status = if state
+                .items
+                .iter()
+                .any(|item| item.status == "failed" || item.message.is_some())
+            {
+                "completed_with_errors"
+            } else {
+                "completed"
+            }
+            .to_owned();
         }
-        .to_owned();
+        let discard = self.discard_terminal_task_if_window_closed(&mut state);
+        drop(state);
+        if discard {
+            self.discard_scan_inputs();
+        }
+    }
+
+    fn discard_terminal_task_if_window_closed(&self, state: &mut CompressionSnapshot) -> bool {
+        if self
+            .discard_task_when_finished
+            .swap(false, Ordering::AcqRel)
+        {
+            *state = CompressionSnapshot::idle();
+            true
+        } else {
+            false
+        }
     }
 
     fn convert_one(
@@ -1246,22 +1308,6 @@ fn scan_warning(path: &Path, code: &str, error: impl std::fmt::Display) -> Compr
     }
 }
 
-fn is_link_like(metadata: &fs::Metadata) -> bool {
-    if metadata.file_type().is_symlink() {
-        return true;
-    }
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::fs::MetadataExt;
-        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        false
-    }
-}
-
 fn background_command(program: &Path) -> Command {
     let mut command = Command::new(program);
     #[cfg(target_os = "windows")]
@@ -1362,6 +1408,91 @@ mod tests {
             .expect("scan workspace")
             .roots
             .is_empty());
+    }
+
+    #[test]
+    fn closing_an_inactive_window_resets_scan_task_and_errors() {
+        let service = CompressionService::default();
+        prime_batch_snapshot(&service, 9, Path::new("finished.wav"));
+        {
+            let mut task = service.snapshot.lock().expect("compression snapshot");
+            task.status = "completed_with_errors".to_owned();
+            task.items[0].status = "failed".to_owned();
+            task.items[0].message = Some("conversion failed".to_owned());
+        }
+        service
+            .scan_workspace
+            .lock()
+            .expect("scan workspace")
+            .roots
+            .push(PathBuf::from("album"));
+        *service.scan_snapshot.lock().expect("scan snapshot") = CompressionScanSnapshot {
+            scan_id: 4,
+            status: "failed".to_owned(),
+            input_roots: vec!["album".to_owned()],
+            warnings: vec![CompressionScanWarning {
+                path: "album\\broken.wav".to_owned(),
+                code: "invalid_wav".to_owned(),
+                message: "invalid input".to_owned(),
+            }],
+            ..CompressionScanSnapshot::idle()
+        };
+
+        service.window_closed();
+
+        let task = service.snapshot();
+        assert_eq!(task.task_id, 0);
+        assert_eq!(task.status, "idle");
+        assert!(task.items.is_empty());
+        let scan = service.scan_snapshot();
+        assert_eq!(scan.status, "idle");
+        assert!(scan.input_roots.is_empty());
+        assert!(scan.warnings.is_empty());
+        assert!(service
+            .scan_workspace
+            .lock()
+            .expect("scan workspace")
+            .roots
+            .is_empty());
+    }
+
+    #[test]
+    fn closing_an_active_window_preserves_work_until_the_batch_finishes() {
+        let service = CompressionService::default();
+        prime_batch_snapshot(&service, 10, Path::new("active.wav"));
+        *service.scan_snapshot.lock().expect("scan snapshot") = CompressionScanSnapshot {
+            scan_id: 5,
+            status: "ready".to_owned(),
+            input_roots: vec!["active.wav".to_owned()],
+            ..CompressionScanSnapshot::idle()
+        };
+
+        service.window_closed();
+
+        assert_eq!(service.snapshot().status, "running");
+        assert_eq!(service.scan_snapshot().scan_id, 5);
+        assert!(service.discard_task_when_finished.load(Ordering::Acquire));
+
+        service.finalize_batch();
+
+        assert_eq!(service.snapshot().status, "idle");
+        assert_eq!(service.scan_snapshot().status, "idle");
+    }
+
+    #[test]
+    fn reopening_before_completion_keeps_the_finished_batch_visible() {
+        let service = CompressionService::default();
+        prime_batch_snapshot(&service, 11, Path::new("active.wav"));
+
+        service.window_closed();
+        service.window_opened();
+        service.finalize_batch();
+
+        let task = service.snapshot();
+        assert_eq!(task.task_id, 11);
+        assert_eq!(task.status, "completed");
+        assert_eq!(task.items.len(), 1);
+        assert!(!service.discard_task_when_finished.load(Ordering::Acquire));
     }
 
     #[test]

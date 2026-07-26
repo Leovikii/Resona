@@ -47,6 +47,7 @@ pub struct DefaultPlaylistItem {
     pub id: u64,
     pub path: String,
     pub display_name: String,
+    pub folder_root: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
@@ -86,6 +87,7 @@ struct DefaultPlaylistState {
     source_directory: Option<PathBuf>,
     selected_index: Option<usize>,
     paths: Vec<PathBuf>,
+    folder_roots: Vec<Option<PathBuf>>,
     item_ids: Vec<u64>,
     next_item_id: u64,
     active_playlist: Option<ActivePlaylistSnapshot>,
@@ -213,6 +215,7 @@ impl MediaImportService {
         }
         for position in positions.iter().rev() {
             state.paths.remove(*position);
+            state.folder_roots.remove(*position);
             state.item_ids.remove(*position);
         }
         state.revision = state.revision.wrapping_add(1).max(1);
@@ -276,8 +279,10 @@ impl MediaImportService {
             .and_then(|index| state.item_ids.get(index))
             .copied();
         let path = state.paths.remove(from_position);
+        let folder_root = state.folder_roots.remove(from_position);
         let id = state.item_ids.remove(from_position);
         state.paths.insert(target, path);
+        state.folder_roots.insert(target, folder_root);
         state.item_ids.insert(target, id);
         state.selected_index = selected_id
             .and_then(|selected_id| state.item_ids.iter().position(|id| *id == selected_id));
@@ -410,12 +415,17 @@ impl MediaImportService {
             .map_err(|error| error.failure())
     }
 
-    pub fn detach_deleted_user_playlist(
+    pub fn detach_deleted_user_playlists(
         &self,
-        playlist_id: i64,
+        playlist_ids: &[i64],
     ) -> Result<Option<DefaultPlaylistSnapshot>, PlaybackFailure> {
         let mut state = self.state.lock().map_err(|_| state_poisoned())?;
-        if state.active_playlist != Some(ActivePlaylistSnapshot::user_playlist(playlist_id)) {
+        let deleted_active_playlist = state
+            .active_playlist
+            .as_ref()
+            .and_then(|playlist| playlist.playlist_id)
+            .is_some_and(|playlist_id| playlist_ids.contains(&playlist_id));
+        if !deleted_active_playlist {
             return Ok(None);
         }
         let playback = self.engine.snapshot().map_err(|error| error.failure())?;
@@ -499,12 +509,12 @@ fn insert_resolved_paths(
     let mut rejected = resolved.rejected;
     let mut known = state.paths.iter().cloned().collect::<HashSet<_>>();
     let mut accepted = Vec::new();
-    for path in resolved.paths {
-        if known.insert(path.clone()) {
-            accepted.push(path);
+    for item in resolved.items {
+        if known.insert(item.path.clone()) {
+            accepted.push(item);
         } else {
             rejected.push(RejectedPath {
-                path: path.to_string_lossy().into_owned(),
+                path: item.path.to_string_lossy().into_owned(),
                 reason: RejectedPathReason::Duplicate,
             });
         }
@@ -514,9 +524,14 @@ fn insert_resolved_paths(
         let item_ids = (0..accepted.len())
             .map(|_| next_default_item_id(state))
             .collect::<Vec<_>>();
-        state
-            .paths
-            .splice(insertion..insertion, accepted.iter().cloned());
+        state.paths.splice(
+            insertion..insertion,
+            accepted.iter().map(|item| item.path.clone()),
+        );
+        state.folder_roots.splice(
+            insertion..insertion,
+            accepted.iter().map(|item| item.folder_root.clone()),
+        );
         state.item_ids.splice(insertion..insertion, item_ids);
         if let Some(selected) = state.selected_index.as_mut() {
             if *selected >= insertion {
@@ -531,7 +546,7 @@ fn insert_resolved_paths(
             default_playlist: snapshot_from_state(state),
             rejected,
         },
-        accepted,
+        accepted.into_iter().map(|item| item.path).collect(),
         insertion,
     )
 }
@@ -610,14 +625,18 @@ fn snapshot_from_state(state: &DefaultPlaylistState) -> DefaultPlaylistSnapshot 
         items: state
             .paths
             .iter()
+            .zip(&state.folder_roots)
             .zip(&state.item_ids)
-            .map(|(path, id)| DefaultPlaylistItem {
+            .map(|((path, folder_root), id)| DefaultPlaylistItem {
                 id: *id,
                 path: path.to_string_lossy().into_owned(),
                 display_name: path
                     .file_name()
                     .map(|name| name.to_string_lossy().into_owned())
                     .unwrap_or_else(|| path.to_string_lossy().into_owned()),
+                folder_root: folder_root
+                    .as_ref()
+                    .map(|path| path.to_string_lossy().into_owned()),
             })
             .collect(),
     }
@@ -639,6 +658,7 @@ fn replace_default_paths(state: &mut DefaultPlaylistState, paths: Vec<PathBuf>) 
         })
         .collect();
     state.paths = paths;
+    state.folder_roots = vec![None; state.paths.len()];
     state.item_ids = item_ids;
 }
 
@@ -927,6 +947,30 @@ mod tests {
             .is_none());
         assert_eq!(engine.snapshot().expect("sequence snapshot").queue.len(), 1);
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn batch_playlist_deletion_detaches_the_active_playlist_once() {
+        let engine = Arc::new(RodioPlaybackEngine::new());
+        let service = MediaImportService::new(engine);
+        service
+            .state
+            .lock()
+            .expect("playlist state")
+            .active_playlist = Some(ActivePlaylistSnapshot::user_playlist(7));
+
+        assert!(service
+            .detach_deleted_user_playlists(&[5, 6])
+            .expect("ignore retained active playlist")
+            .is_none());
+        assert!(service
+            .detach_deleted_user_playlists(&[6, 7, 8])
+            .expect("detach deleted active playlist")
+            .is_some());
+        assert_eq!(
+            service.active_playlist().expect("active playlist"),
+            Some(ActivePlaylistSnapshot::default_playlist())
+        );
     }
 
     fn test_directory() -> PathBuf {

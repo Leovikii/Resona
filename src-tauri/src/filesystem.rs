@@ -21,6 +21,7 @@ pub enum RejectedPathReason {
     Missing,
     Unsupported,
     Unreadable,
+    LinkedPath,
     EmptyFolder,
     Duplicate,
 }
@@ -31,8 +32,13 @@ pub struct AudioFileContext {
 }
 
 pub struct ResolvedAudioPaths {
-    pub paths: Vec<PathBuf>,
+    pub items: Vec<ResolvedAudioItem>,
     pub rejected: Vec<RejectedPath>,
+}
+
+pub struct ResolvedAudioItem {
+    pub path: PathBuf,
+    pub folder_root: Option<PathBuf>,
 }
 
 pub fn audio_file_context(path: &Path) -> Result<AudioFileContext, PlaybackFailure> {
@@ -67,25 +73,45 @@ pub fn resolve_audio_paths(paths: Vec<PathBuf>) -> ResolvedAudioPaths {
     let mut seen = HashSet::new();
 
     for path in paths {
-        match fs::metadata(&path) {
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if is_link_like(&metadata) => {
+                rejected.push(rejected_path(path, RejectedPathReason::LinkedPath));
+            }
             Ok(metadata) if metadata.is_file() => {
                 if is_supported_audio(&path) {
-                    push_unique(path, &mut resolved, &mut rejected, &mut seen);
+                    push_unique(
+                        ResolvedAudioItem {
+                            path: normalize_audio_path(path),
+                            folder_root: None,
+                        },
+                        &mut resolved,
+                        &mut rejected,
+                        &mut seen,
+                    );
                 } else {
                     rejected.push(rejected_path(path, RejectedPathReason::Unsupported));
                 }
             }
-            Ok(metadata) if metadata.is_dir() => match audio_files_in_directory(&path) {
-                Ok(audio) if audio.is_empty() => {
+            Ok(metadata) if metadata.is_dir() => {
+                let root = normalize_audio_path(path.clone());
+                let rejected_before = rejected.len();
+                let audio = audio_files_in_tree(&root, &mut rejected);
+                if audio.is_empty() && rejected.len() == rejected_before {
                     rejected.push(rejected_path(path, RejectedPathReason::EmptyFolder));
-                }
-                Ok(audio) => {
+                } else {
                     for path in audio {
-                        push_unique(path, &mut resolved, &mut rejected, &mut seen);
+                        push_unique(
+                            ResolvedAudioItem {
+                                path,
+                                folder_root: Some(root.clone()),
+                            },
+                            &mut resolved,
+                            &mut rejected,
+                            &mut seen,
+                        );
                     }
                 }
-                Err(_) => rejected.push(rejected_path(path, RejectedPathReason::Unreadable)),
-            },
+            }
             Ok(_) => rejected.push(rejected_path(path, RejectedPathReason::Unsupported)),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 rejected.push(rejected_path(path, RejectedPathReason::Missing));
@@ -95,22 +121,71 @@ pub fn resolve_audio_paths(paths: Vec<PathBuf>) -> ResolvedAudioPaths {
     }
 
     ResolvedAudioPaths {
-        paths: resolved,
+        items: resolved,
         rejected,
     }
 }
 
 fn push_unique(
-    path: PathBuf,
-    resolved: &mut Vec<PathBuf>,
+    item: ResolvedAudioItem,
+    resolved: &mut Vec<ResolvedAudioItem>,
     rejected: &mut Vec<RejectedPath>,
-    seen: &mut HashSet<PathBuf>,
+    seen: &mut HashSet<String>,
 ) {
-    if seen.insert(path.clone()) {
-        resolved.push(path);
+    if seen.insert(path_identity_key(&item.path)) {
+        resolved.push(item);
     } else {
-        rejected.push(rejected_path(path, RejectedPathReason::Duplicate));
+        rejected.push(rejected_path(item.path, RejectedPathReason::Duplicate));
     }
+}
+
+fn audio_files_in_tree(root: &Path, rejected: &mut Vec<RejectedPath>) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+
+    while let Some(path) = pending.pop() {
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(_) => {
+                rejected.push(rejected_path(path, RejectedPathReason::Unreadable));
+                continue;
+            }
+        };
+        if is_link_like(&metadata) {
+            rejected.push(rejected_path(path, RejectedPathReason::LinkedPath));
+            continue;
+        }
+        if metadata.is_file() {
+            if is_supported_audio(&path) {
+                paths.push(normalize_audio_path(path));
+            }
+            continue;
+        }
+        if !metadata.is_dir() {
+            continue;
+        }
+
+        let entries = match fs::read_dir(&path) {
+            Ok(entries) => entries,
+            Err(_) => {
+                rejected.push(rejected_path(path, RejectedPathReason::Unreadable));
+                continue;
+            }
+        };
+        let mut children = Vec::new();
+        for entry in entries {
+            match entry {
+                Ok(entry) => children.push(entry.path()),
+                Err(_) => {
+                    rejected.push(rejected_path(path.clone(), RejectedPathReason::Unreadable))
+                }
+            }
+        }
+        children.sort_by(|left, right| compare_paths(left, right));
+        pending.extend(children.into_iter().rev());
+    }
+
+    paths
 }
 
 fn audio_files_in_directory(path: &Path) -> Result<Vec<PathBuf>, PlaybackFailure> {
@@ -153,6 +228,39 @@ fn compare_paths(left: &Path, right: &Path) -> std::cmp::Ordering {
         .then_with(|| left.as_os_str().cmp(right.as_os_str()))
 }
 
+fn normalize_audio_path(path: PathBuf) -> PathBuf {
+    path
+}
+
+pub(crate) fn path_identity_key(path: &Path) -> String {
+    let normalized = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let value = normalized.to_string_lossy().into_owned();
+    #[cfg(target_os = "windows")]
+    {
+        value.to_lowercase()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        value
+    }
+}
+
+pub(crate) fn is_link_like(metadata: &fs::Metadata) -> bool {
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
+    }
+}
+
 pub(crate) fn is_supported_audio(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
@@ -188,7 +296,7 @@ mod tests {
     }
 
     #[test]
-    fn expands_direct_child_audio_and_reports_rejected_inputs() {
+    fn recursively_expands_audio_and_reports_rejected_inputs() {
         let root = test_directory();
         File::create(root.join("one.wav")).expect("create audio file");
         File::create(root.join("notes.txt")).expect("create unsupported file");
@@ -198,7 +306,18 @@ mod tests {
         let missing = root.join("missing.flac");
 
         let resolved = resolve_audio_paths(vec![root.clone(), missing]);
-        assert_eq!(resolved.paths, [root.join("one.wav")]);
+        assert_eq!(
+            resolved
+                .items
+                .iter()
+                .map(|item| item.path.clone())
+                .collect::<Vec<_>>(),
+            [nested.join("two.flac"), root.join("one.wav")]
+        );
+        assert!(resolved
+            .items
+            .iter()
+            .all(|item| { item.folder_root.as_deref() == Some(root.as_path()) }));
         assert_eq!(resolved.rejected.len(), 1);
         assert_eq!(resolved.rejected[0].reason, RejectedPathReason::Missing);
 
@@ -212,7 +331,14 @@ mod tests {
         File::create(&audio).expect("create audio file");
 
         let resolved = resolve_audio_paths(vec![audio.clone(), root.clone(), audio.clone()]);
-        assert_eq!(resolved.paths, [audio]);
+        assert_eq!(
+            resolved
+                .items
+                .iter()
+                .map(|item| item.path.clone())
+                .collect::<Vec<_>>(),
+            [audio]
+        );
         assert_eq!(resolved.rejected.len(), 2);
         assert!(resolved
             .rejected

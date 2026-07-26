@@ -30,7 +30,9 @@ use crate::media_import::{
     ActivePlaylistSnapshot, DefaultPlaylistMutationResult, DefaultPlaylistSnapshot,
     MediaImportService, OpenMediaResult, PlaylistPlaybackResult,
 };
-use crate::metadata::{normalized_path, MetadataService, TrackDetails};
+use crate::metadata::{
+    normalized_path, MetadataService, TrackDetails, TrackSummary, MAX_SUMMARY_BATCH_SIZE,
+};
 use crate::persistence::{
     PersistenceFailure, PersistenceService, PlaylistItemRecord, PlaylistSummary,
 };
@@ -213,11 +215,14 @@ pub async fn sync_window_theme(
 pub async fn show_audio_compression_window(
     app: AppHandle,
     dependency: State<'_, ManagedFfmpegDependencyService>,
+    service: State<'_, ManagedCompressionService>,
 ) -> Result<(), CompressionFailure> {
     dependency
         .require_ready()
         .map_err(compression_dependency_failure)?;
-    compression_window::show(&app)
+    compression_window::show(&app)?;
+    service.window_opened();
+    Ok(())
 }
 
 #[tauri::command]
@@ -325,6 +330,47 @@ pub async fn get_track_details(
     tauri::async_runtime::spawn_blocking(move || service.load(&normalized_path(path)).details)
         .await
         .map_err(|error| format!("metadata task failed: {error}"))
+}
+
+#[tauri::command]
+pub async fn get_audio_file_info(
+    path: String,
+    service: State<'_, ManagedMetadataService>,
+) -> Result<TrackDetails, String> {
+    let service = Arc::clone(service.inner());
+    tauri::async_runtime::spawn_blocking(move || service.load_info(&normalized_path(path)))
+        .await
+        .map_err(|error| format!("metadata task failed: {error}"))
+}
+
+#[tauri::command]
+pub async fn get_track_summaries(
+    paths: Vec<String>,
+    service: State<'_, ManagedMetadataService>,
+) -> Result<Vec<TrackSummary>, String> {
+    if paths.len() > MAX_SUMMARY_BATCH_SIZE {
+        return Err(format!(
+            "track summary batch exceeds {MAX_SUMMARY_BATCH_SIZE} items"
+        ));
+    }
+    let service = Arc::clone(service.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let paths = paths.into_iter().map(normalized_path).collect::<Vec<_>>();
+        service.load_summaries(&paths)
+    })
+    .await
+    .map_err(|error| format!("metadata summary task failed: {error}"))
+}
+
+#[tauri::command]
+pub async fn reveal_audio_file(path: String, app: AppHandle) -> Result<(), String> {
+    let path = normalized_path(path);
+    if !path.is_file() {
+        return Err(format!("音频文件不存在：{}", path.display()));
+    }
+    app.opener()
+        .reveal_item_in_dir(&path)
+        .map_err(|error| format!("无法在文件管理器中定位文件：{error}"))
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -746,9 +792,33 @@ pub async fn delete_playlist(
             .delete_playlist(id)
             .map_err(|error| error.failure())?;
         media_import
-            .detach_deleted_user_playlist(id)
+            .detach_deleted_user_playlists(&[id])
             .map_err(playlist_sync_failure)?;
         Ok(())
+    })
+    .await
+    .map_err(|error| PersistenceFailure {
+        code: "playlist_task_failed".to_owned(),
+        message: format!("playlist task failed: {error}"),
+    })?
+}
+
+#[tauri::command]
+pub async fn delete_other_playlists(
+    keep_id: Option<i64>,
+    persistence: State<'_, ManagedPersistence>,
+    media_import: State<'_, ManagedMediaImportService>,
+) -> Result<Vec<PlaylistSummary>, PersistenceFailure> {
+    let database = Arc::clone(persistence.inner());
+    let media_import = Arc::clone(media_import.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let deleted_ids = database
+            .delete_other_playlists(keep_id)
+            .map_err(|error| error.failure())?;
+        media_import
+            .detach_deleted_user_playlists(&deleted_ids)
+            .map_err(playlist_sync_failure)?;
+        database.list_playlists().map_err(|error| error.failure())
     })
     .await
     .map_err(|error| PersistenceFailure {

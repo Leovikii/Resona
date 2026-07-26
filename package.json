@@ -1,7 +1,7 @@
 {
   "name": "resona",
   "private": true,
-  "version": "0.1.0-rc.4",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port 1420",
@@ -9,9 +9,11 @@
     "build:exe": "tauri build --no-bundle",
     "licenses": "node scripts/generate-license-report.mjs",
     "lint:workflow": "go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -ignore \"unexpected key .queue. for .concurrency. section\"",
+    "icons:sources": "node scripts/generate-file-icon-sources.mjs",
     "icons:windows": "node scripts/generate-windows-shell-icons.mjs",
+    "installer:artwork": "node scripts/generate-nsis-artwork.mjs",
     "preview": "vite preview --port 1421",
-    "test": "node --test scripts/release-channel.test.mjs scripts/preference-value.test.mjs scripts/full-player-paging.test.mjs scripts/compression-root-expansion.test.mjs scripts/playlist-ordering.test.mjs scripts/edge-auto-scroll.test.mjs",
+    "test": "node --test scripts/release-channel.test.mjs scripts/preference-value.test.mjs scripts/full-player-paging.test.mjs scripts/compression-root-expansion.test.mjs scripts/playlist-ordering.test.mjs scripts/playlist-tree.test.mjs scripts/edge-auto-scroll.test.mjs",
     "test:release": "node --test scripts/release-channel.test.mjs",
     "verify:fixtures": "node scripts/generate-audio-fixtures.mjs --verify",
     "prepare:test-tools": "node scripts/prepare-ffmpeg-test-tools.mjs",

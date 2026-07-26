@@ -29,11 +29,12 @@ use commands::{
     add_default_playlist_items, add_playlist_items, cancel_application_update,
     cancel_audio_compression, cancel_audio_compression_scan, cancel_ffmpeg_dependency_install,
     check_application_update, clear_audio_compression_inputs, clear_default_playlist,
-    clear_playlist_items, confirm_application_exit, create_playlist, delete_playlist,
-    desktop_lyrics_window_ready, fit_desktop_lyrics_window, get_application_lifetime_state,
-    get_application_update_state, get_audio_compression_scan_state, get_audio_compression_state,
-    get_default_playlist, get_desktop_lyrics_window_state, get_ffmpeg_dependency_state,
-    get_main_window_state, get_now_playing_state, get_playback_state, get_track_details,
+    clear_playlist_items, confirm_application_exit, create_playlist, delete_other_playlists,
+    delete_playlist, desktop_lyrics_window_ready, fit_desktop_lyrics_window,
+    get_application_lifetime_state, get_application_update_state, get_audio_compression_scan_state,
+    get_audio_compression_state, get_audio_file_info, get_default_playlist,
+    get_desktop_lyrics_window_state, get_ffmpeg_dependency_state, get_main_window_state,
+    get_now_playing_state, get_playback_state, get_track_details, get_track_summaries,
     hide_desktop_lyrics_window, install_application_update, install_ffmpeg_dependency,
     list_playlist_items, list_playlists, lock_desktop_lyrics_window, main_window_ready,
     move_default_playlist_item, move_playlist, move_playlist_item, next_playback,
@@ -41,11 +42,11 @@ use commands::{
     play_default_playlist_item, play_queue_item, play_user_playlist_item, previous_playback,
     refresh_output_devices, remove_audio_compression_inputs, remove_default_playlist_items,
     remove_playlist_item, remove_playlist_items, rename_playlist, resolve_main_window_close,
-    resume_playback, scan_audio_compression_inputs, seek_playback, select_output_device,
-    set_close_behavior, set_main_window_layout_mode, set_playback_mode, set_playback_volume,
-    set_receive_prerelease_updates, show_audio_compression_window, show_desktop_lyrics_window,
-    start_audio_compression, start_desktop_lyrics_drag, sync_window_theme,
-    unlock_desktop_lyrics_window,
+    resume_playback, reveal_audio_file, scan_audio_compression_inputs, seek_playback,
+    select_output_device, set_close_behavior, set_main_window_layout_mode, set_playback_mode,
+    set_playback_volume, set_receive_prerelease_updates, show_audio_compression_window,
+    show_desktop_lyrics_window, start_audio_compression, start_desktop_lyrics_drag,
+    sync_window_theme, unlock_desktop_lyrics_window,
 };
 use compression::CompressionService;
 use ffmpeg_dependency::FfmpegDependencyService;
@@ -216,6 +217,9 @@ pub fn run() {
             sync_window_theme,
             get_now_playing_state,
             get_track_details,
+            get_audio_file_info,
+            get_track_summaries,
+            reveal_audio_file,
             start_audio_compression,
             get_audio_compression_state,
             get_ffmpeg_dependency_state,
@@ -241,6 +245,7 @@ pub fn run() {
             create_playlist,
             rename_playlist,
             delete_playlist,
+            delete_other_playlists,
             move_playlist,
             list_playlist_items,
             add_playlist_items,
@@ -262,7 +267,7 @@ pub fn run() {
                     compression_window::persist_geometry(app_handle);
                     app_handle
                         .state::<Arc<CompressionService>>()
-                        .discard_scan_inputs();
+                        .window_closed();
                 } else if label == "main" {
                     api.prevent_close();
                     app_handle
@@ -305,6 +310,19 @@ pub fn run() {
                     .state::<Arc<DesktopLyricsWindowService>>()
                     .enforce_height();
             }
+            if matches!(
+                &event,
+                tauri::RunEvent::WindowEvent {
+                    label,
+                    event: WindowEvent::Focused(false) | WindowEvent::ScaleFactorChanged { .. },
+                    ..
+                } if label == "desktop-lyrics"
+            ) || matches!(&event, tauri::RunEvent::Resumed)
+            {
+                app_handle
+                    .state::<Arc<DesktopLyricsWindowService>>()
+                    .maintain_topmost();
+            }
             #[cfg(target_os = "windows")]
             let should_start = matches!(
                 &event,
@@ -324,13 +342,15 @@ pub fn run() {
                                     continue;
                                 };
                                 let resource_dir = app_handle.path().resource_dir();
-                                let logo_path = resource_dir
+                                let artwork_placeholder_path = resource_dir
                                     .as_ref()
-                                    .map(|directory| directory.join("icons").join("128x128.png"))
+                                    .map(|directory| {
+                                        directory.join("icons").join("default-artwork.png")
+                                    })
                                     .unwrap_or_else(|_| {
                                         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                                             .join("icons")
-                                            .join("128x128.png")
+                                            .join("default-artwork.png")
                                     });
                                 let artwork_cache_dir = app_handle
                                     .path()
@@ -342,7 +362,7 @@ pub fn run() {
                                 match platform::media_session::MediaSessionAdapter::start(
                                     hwnd.0 as isize,
                                     Arc::clone(&playback),
-                                    &logo_path,
+                                    &artwork_placeholder_path,
                                     artwork_cache_dir,
                                     app_handle
                                         .state::<Arc<NativePlaybackProjection>>()

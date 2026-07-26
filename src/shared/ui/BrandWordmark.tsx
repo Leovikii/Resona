@@ -1,6 +1,6 @@
 import { memo } from "react";
 
-import wordmarkAsset from "../../../assets/resona-gothic-wordmark.svg";
+import wordmarkAsset from "../../../assets/resona-resonance-wordmark.svg";
 
 interface BrandWordmarkProps {
   className?: string;

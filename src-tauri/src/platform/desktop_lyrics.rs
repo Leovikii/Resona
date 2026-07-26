@@ -92,4 +92,6 @@ impl DesktopLyricsWindowService {
             "desktop lyrics are not available on this platform",
         ))
     }
+
+    pub fn maintain_topmost(&self) {}
 }

@@ -1,7 +1,7 @@
 # ADR 0012：桌面歌词窗口与原生解锁辅助窗口
 
 - 状态：Accepted
-- 日期：2026-07-19
+- 日期：2026-07-19，修订于 2026-07-26
 
 ## 背景
 
@@ -38,3 +38,9 @@ Resona 需要提供透明、置顶、可锁定穿透且可直接恢复交互的 
 ## 0.0.10 实现说明
 
 Tauri 2.11.5 稳定 API 的无 WebView `WindowBuilder` 仍要求 `unstable` feature。0.0.10 不为这一微型窗口启用不稳定能力，而是在 Windows platform adapter 内通过 raw Win32 创建 owned tool window，并由 Tauri 主事件线程持有窗口创建过程。该调整不改变本 ADR 的窗口分层、恢复顺序、故障回滚和禁止输入注入等约束。
+
+## 0.1.0 置顶与 helper 修订
+
+- Tauri builder 的 `always_on_top` 继续声明初始窗口属性；Windows adapter 同时在显示、锁定、解锁、失焦、事件循环恢复和 DPI 变化时用无激活 `SetWindowPos(HWND_TOPMOST)` 校正歌词窗口。锁定 helper 随同一次事件重新计算物理边界并保持在 topmost 层，不使用定时器、全局 hook 或 Z-order 轮询。
+- topmost 和 helper 几何调用只使用已复制的窗口句柄与状态，服务锁在进入 Win32/Tauri 窗口 API 前释放。普通窗口不得覆盖歌词；其他 topmost 窗口、独占全屏和安全桌面仍遵循 Windows 自身层级。
+- helper 保持无 WebView。当前手绘 GDI 锁形替换为 Windows 自带 Segoe Fluent Icons，并在 Windows 10 回退 Segoe MDL2 Assets；继续使用原生命中、透明度和 hover 消息，不增加图形库或额外 renderer。

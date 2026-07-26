@@ -583,6 +583,7 @@ function defaultFromPlayback(snapshot: PlaybackSnapshot): DefaultPlaylistSnapsho
       id: index + 1,
       path: candidate.path,
       displayName: candidate.displayName,
+      folderRoot: null,
     })),
   };
 }
@@ -609,6 +610,7 @@ function insertPreviewDefault(
       id: Math.max(0, ...current.items.map((item) => item.id)) + offset + 1,
       path,
       displayName: path.split(/[\\/]/).pop() ?? path,
+      folderRoot: null,
     })));
   const directories = new Set(items.map((item) => item.path.replace(/[\\/][^\\/]+$/, "")));
   return {

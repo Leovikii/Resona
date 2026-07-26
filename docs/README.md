@@ -12,8 +12,8 @@
 | [AGENT_GUIDE.md](AGENT_GUIDE.md) | Agent 必读顺序和约束 |
 | [plans/](plans/README.md) | 活动版本计划 |
 | [decisions/](decisions/README.md) | 长期架构决策 |
-| [performance/](performance/) | 当前 RC 性能证据 |
-| [releases/](releases/) | 当前 RC 验收记录 |
+| [performance/](performance/) | 当前正式版性能基线 |
+| [releases/](releases/) | 正式版发布说明 |
 | [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) | 自动生成的依赖许可证 |
 
 冲突时优先级：当前代码/测试/构建结果 > Accepted ADR > 架构与开发规范 > 状态与路线图 > 其他说明。发现不一致必须在同一任务修正文档，不新增逐日流水或复制同一事实到多处。

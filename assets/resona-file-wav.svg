@@ -1,12 +1,21 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
-  <title id="title">Resona WAV audio file</title>
-  <desc id="desc">Resona amber R mark.</desc>
-  <defs>
-    <g id="r-letterform">
-      <path d="M28 208V58l21-20 21 18v152l-21 18z"/>
-      <path d="M49 38l101 68v42l-30 24 56 44-28 16-80-54v-34l52-38-52-34V56z"/>
-    </g>
-  </defs>
-  <use href="#r-letterform" fill="#17151c" transform="translate(64 -68) scale(2.5)"/>
-  <use href="#r-letterform" fill="#f59f00" transform="translate(52 -82) scale(2.5)"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-labelledby="title desc">
+  <title id="title">Resona WAV file icon</title>
+  <desc id="desc">The yellow Resona turntable with a dark format band labelled WAV.</desc>
+  <g transform="translate(-6.3158 -6.3158) scale(1.2632)">
+  <rect x="5" y="6" width="38" height="36" rx="8" fill="#ffab00"/>
+  <path d="M13 6h22a8 8 0 0 1 8 8v9H5v-9a8 8 0 0 1 8-8z" fill="#ffd740"/>
+  <circle cx="20" cy="26" r="13" fill="#9a5a00"/>
+  <circle cx="20" cy="26" r="11" fill="#10091a"/>
+  <circle cx="20" cy="26" r="3.5" fill="#ff4081"/>
+  <circle cx="35" cy="14" r="4.5" fill="#9a5a00"/>
+  <circle cx="35" cy="14" r="2" fill="#fff3c4"/>
+  <path d="m34.2 17.4-1.6-.3-3 10.2-5.2 3.8 1.5 2 5.8-4.2 3.3-10.6z" fill="#fff3c4"/>
+  <path d="m23.5 30.3 2.6 3.3-2.7 2.1-2.6-3.3z" fill="#ff4081"/>
+  <path d="M5 26h38v8a9 9 0 0 1-9 9H14a9 9 0 0 1-9-9z" fill="#212121"/>
+  <g transform="translate(7.144 39.5) scale(0.014 -0.014)" fill="#fafafa" aria-hidden="true">
+    <path d="M494 530H492L418 0H188L33 730H235L309 200H311L375 730H615L679 200H681L755 730H953L798 0H568Z"/>
+    <path transform="translate(961)" d="M300 290H432L367 560H365ZM264 140 231 0H23L263 730H473L713 0H501L467 140Z"/>
+    <path transform="translate(1672)" d="M368 190 505 730H713L473 0H263L23 730H235L366 190Z"/>
+  </g>
+  </g>
 </svg>

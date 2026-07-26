@@ -431,13 +431,13 @@ mod windows_impl {
     }
 
     fn load_placeholder(resource_dir: &Path) -> Result<Arc<Artwork>, String> {
-        let bundled = resource_dir.join("icons").join("128x128.png");
+        let bundled = resource_dir.join("icons").join("default-artwork.png");
         let path = if bundled.is_file() {
             bundled
         } else {
             Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("icons")
-                .join("128x128.png")
+                .join("default-artwork.png")
         };
         read_artwork_file(&path)
             .map_err(|error| format!("failed to load taskbar artwork placeholder: {error}"))

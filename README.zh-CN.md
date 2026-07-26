@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/resona-gothic-wordmark.svg" width="420" alt="Resona">
+  <img src="assets/resona-resonance-wordmark.svg" width="420" alt="Resona">
 </p>
 
 <p align="center">专注聆听的本地优先 Windows 音频播放器。</p>
@@ -19,7 +19,7 @@
 
 ## 安装
 
-从 [GitHub Releases](https://github.com/Leovikii/Resona/releases) 下载 Windows x64 NSIS 安装包。alpha、beta、rc 均属于预览版，可在设置中选择接收。
+从 [GitHub Releases](https://github.com/Leovikii/Resona/releases) 下载 Windows x64 NSIS 安装包。0.1.0 未使用 Authenticode，Windows 可能显示 SmartScreen 提示；请只从官方发布页下载并核对公开的 SHA-256。应用内更新仍使用加密签名验证。
 
 ## 开发
 

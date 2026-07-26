@@ -8,7 +8,7 @@ use rusqlite::{params, Connection, ErrorCode, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 #[derive(Debug, Error)]
 pub enum PersistenceError {
@@ -72,6 +72,13 @@ pub struct PlaylistItemRecord {
     pub path: String,
     pub display_name: String,
     pub position: i64,
+    pub folder_root: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlaylistItemInput {
+    pub path: String,
+    pub folder_root: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -115,7 +122,7 @@ impl PersistenceService {
     pub fn create_playlist_with_items(
         &self,
         name: &str,
-        paths: &[String],
+        items: &[PlaylistItemInput],
         position: Option<i64>,
         ensure_unique_name: bool,
     ) -> Result<PlaylistDetails, PersistenceError> {
@@ -146,7 +153,7 @@ impl PersistenceService {
             )
             .map_err(name_error)?;
         let playlist_id = transaction.last_insert_rowid();
-        insert_playlist_items(&transaction, playlist_id, paths, 0)?;
+        insert_playlist_items(&transaction, playlist_id, items, 0)?;
         transaction.commit().map_err(query_error)?;
 
         playlist_details_by_id(&connection, playlist_id)
@@ -182,6 +189,52 @@ impl PersistenceService {
         }
         normalize_playlist_positions(&transaction)?;
         transaction.commit().map_err(query_error)
+    }
+
+    pub fn delete_other_playlists(
+        &self,
+        keep_id: Option<i64>,
+    ) -> Result<Vec<i64>, PersistenceError> {
+        let connection = self.connection.lock().map_err(|_| poisoned())?;
+        let transaction = connection.unchecked_transaction().map_err(query_error)?;
+        if let Some(id) = keep_id {
+            ensure_playlist_exists(&transaction, id)?;
+        }
+        let deleted_ids = {
+            let (query, parameter) = if let Some(id) = keep_id {
+                (
+                    "SELECT id FROM playlists WHERE id <> ?1 ORDER BY position, id",
+                    Some(id),
+                )
+            } else {
+                ("SELECT id FROM playlists ORDER BY position, id", None)
+            };
+            let mut statement = transaction.prepare(query).map_err(query_error)?;
+            match parameter {
+                Some(id) => statement
+                    .query_map(params![id], |row| row.get::<_, i64>(0))
+                    .map_err(query_error)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(query_error)?,
+                None => statement
+                    .query_map([], |row| row.get::<_, i64>(0))
+                    .map_err(query_error)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(query_error)?,
+            }
+        };
+        if let Some(id) = keep_id {
+            transaction
+                .execute("DELETE FROM playlists WHERE id <> ?1", params![id])
+                .map_err(query_error)?;
+        } else {
+            transaction
+                .execute("DELETE FROM playlists", [])
+                .map_err(query_error)?;
+        }
+        normalize_playlist_positions(&transaction)?;
+        transaction.commit().map_err(query_error)?;
+        Ok(deleted_ids)
     }
 
     pub fn move_playlist(
@@ -243,7 +296,7 @@ impl PersistenceService {
     pub fn add_playlist_items(
         &self,
         playlist_id: i64,
-        paths: &[String],
+        items: &[PlaylistItemInput],
         position: Option<i64>,
     ) -> Result<Vec<PlaylistItemRecord>, PersistenceError> {
         let connection = self.connection.lock().map_err(|_| poisoned())?;
@@ -252,8 +305,8 @@ impl PersistenceService {
         normalize_item_positions(&transaction, playlist_id)?;
         let item_count = playlist_item_count(&transaction, playlist_id)?;
         let start_position = position.unwrap_or(item_count).clamp(0, item_count);
-        insert_playlist_items(&transaction, playlist_id, paths, start_position)?;
-        if !paths.is_empty() {
+        insert_playlist_items(&transaction, playlist_id, items, start_position)?;
+        if !items.is_empty() {
             touch_playlist(&transaction, playlist_id)?;
         }
         transaction.commit().map_err(query_error)?;
@@ -457,7 +510,8 @@ fn migrate(connection: &Connection) -> Result<(), PersistenceError> {
                    playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
                    path TEXT NOT NULL,
                    display_name TEXT NOT NULL,
-                   position INTEGER NOT NULL
+                   position INTEGER NOT NULL,
+                   folder_root TEXT
                  );
                  CREATE INDEX idx_playlist_items_order
                    ON playlist_items(playlist_id, position, id);
@@ -465,7 +519,7 @@ fn migrate(connection: &Connection) -> Result<(), PersistenceError> {
                    key TEXT PRIMARY KEY,
                    value TEXT NOT NULL
                  );
-                 PRAGMA user_version = 5;
+                 PRAGMA user_version = 6;
                  COMMIT;",
             )
             .map_err(|error| PersistenceError::Migration(error.to_string()))?;
@@ -493,6 +547,16 @@ fn migrate(connection: &Connection) -> Result<(), PersistenceError> {
                 "BEGIN;
                  DROP TABLE IF EXISTS recent_plays;
                  PRAGMA user_version = 5;
+                 COMMIT;",
+            )
+            .map_err(|error| PersistenceError::Migration(error.to_string()))?;
+    }
+    if version < 6 {
+        connection
+            .execute_batch(
+                "BEGIN;
+                 ALTER TABLE playlist_items ADD COLUMN folder_root TEXT;
+                 PRAGMA user_version = 6;
                  COMMIT;",
             )
             .map_err(|error| PersistenceError::Migration(error.to_string()))?;
@@ -602,7 +666,7 @@ fn list_playlist_items_with_connection(
 ) -> Result<Vec<PlaylistItemRecord>, PersistenceError> {
     let mut statement = connection
         .prepare(
-            "SELECT id, playlist_id, path, display_name, position
+            "SELECT id, playlist_id, path, display_name, position, folder_root
              FROM playlist_items
              WHERE playlist_id = ?1
              ORDER BY position, id",
@@ -616,6 +680,7 @@ fn list_playlist_items_with_connection(
                 path: row.get(2)?,
                 display_name: row.get(3)?,
                 position: row.get(4)?,
+                folder_root: row.get(5)?,
             })
         })
         .map_err(query_error)?;
@@ -625,34 +690,35 @@ fn list_playlist_items_with_connection(
 fn insert_playlist_items(
     transaction: &Transaction<'_>,
     playlist_id: i64,
-    paths: &[String],
+    items: &[PlaylistItemInput],
     start_position: i64,
 ) -> Result<(), PersistenceError> {
-    if paths.is_empty() {
+    if items.is_empty() {
         return Ok(());
     }
     transaction
         .execute(
             "UPDATE playlist_items SET position = position + ?1
              WHERE playlist_id = ?2 AND position >= ?3",
-            params![paths.len() as i64, playlist_id, start_position],
+            params![items.len() as i64, playlist_id, start_position],
         )
         .map_err(query_error)?;
-    for (offset, path) in paths.iter().enumerate() {
-        let display_name = Path::new(path)
+    for (offset, item) in items.iter().enumerate() {
+        let display_name = Path::new(&item.path)
             .file_name()
             .and_then(|name| name.to_str())
-            .unwrap_or(path);
+            .unwrap_or(&item.path);
         transaction
             .execute(
                 "INSERT INTO playlist_items
-                 (playlist_id, path, display_name, position)
-                 VALUES (?1, ?2, ?3, ?4)",
+                 (playlist_id, path, display_name, position, folder_root)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
                     playlist_id,
-                    path,
+                    item.path,
                     display_name,
-                    start_position + offset as i64
+                    start_position + offset as i64,
+                    item.folder_root,
                 ],
             )
             .map_err(query_error)?;
@@ -848,6 +914,13 @@ mod tests {
         in_memory_for_test()
     }
 
+    fn item(path: &str) -> PlaylistItemInput {
+        PlaylistItemInput {
+            path: path.to_owned(),
+            folder_root: None,
+        }
+    }
+
     #[test]
     fn migrates_v2_without_losing_playlists() {
         let connection = Connection::open_in_memory().expect("open legacy database");
@@ -896,7 +969,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read schema version");
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
         let service = PersistenceService {
             connection: Mutex::new(connection),
         };
@@ -969,7 +1042,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read schema version");
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
         assert!(!table_exists(&connection, "recent_plays"));
         assert_eq!(
             connection
@@ -995,6 +1068,57 @@ mod tests {
                 .expect("app state"),
             "value"
         );
+    }
+
+    #[test]
+    fn migrates_v5_with_flat_items_and_persists_new_folder_roots() {
+        let connection = Connection::open_in_memory().expect("open v5 database");
+        connection
+            .execute_batch(
+                "CREATE TABLE playlists (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   name TEXT NOT NULL UNIQUE,
+                   position INTEGER NOT NULL,
+                   created_at INTEGER NOT NULL,
+                   updated_at INTEGER NOT NULL
+                 );
+                 CREATE INDEX idx_playlists_order ON playlists(position, id);
+                 CREATE TABLE playlist_items (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+                   path TEXT NOT NULL,
+                   display_name TEXT NOT NULL,
+                   position INTEGER NOT NULL
+                 );
+                 CREATE INDEX idx_playlist_items_order
+                   ON playlist_items(playlist_id, position, id);
+                 CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                 INSERT INTO playlists (id, name, position, created_at, updated_at)
+                   VALUES (1, 'Keep', 0, 1, 2);
+                 INSERT INTO playlist_items (id, playlist_id, path, display_name, position)
+                   VALUES (1, 1, 'C:\\Music\\flat.wav', 'flat.wav', 0);
+                 PRAGMA user_version = 5;",
+            )
+            .expect("create v5 schema");
+
+        migrate_for_test(&connection);
+        let service = PersistenceService {
+            connection: Mutex::new(connection),
+        };
+        let migrated = service.list_playlist_items(1).expect("list migrated items");
+        assert_eq!(migrated[0].folder_root, None);
+
+        let added = service
+            .add_playlist_items(
+                1,
+                &[PlaylistItemInput {
+                    path: "C:\\Music\\Album\\nested.flac".to_owned(),
+                    folder_root: Some("C:\\Music\\Album".to_owned()),
+                }],
+                None,
+            )
+            .expect("add folder item");
+        assert_eq!(added[1].folder_root.as_deref(), Some("C:\\Music\\Album"));
     }
 
     #[test]
@@ -1040,7 +1164,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read schema version");
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
         assert!(table_exists(&connection, "app_state"));
         assert!(!table_exists(&connection, "recent_plays"));
         assert_eq!(
@@ -1103,6 +1227,51 @@ mod tests {
     }
 
     #[test]
+    fn deletes_other_playlists_atomically_and_validates_the_kept_playlist() {
+        let service = service();
+        let first = service
+            .create_playlist_with_items("First", &[], None, false)
+            .expect("create first");
+        let kept = service
+            .create_playlist_with_items("Kept", &[], None, false)
+            .expect("create kept");
+        let last = service
+            .create_playlist_with_items("Last", &[], None, false)
+            .expect("create last");
+
+        assert!(matches!(
+            service.delete_other_playlists(Some(i64::MAX)),
+            Err(PersistenceError::PlaylistNotFound)
+        ));
+        assert_eq!(
+            service.list_playlists().expect("unchanged playlists").len(),
+            3
+        );
+
+        assert_eq!(
+            service
+                .delete_other_playlists(Some(kept.playlist.id))
+                .expect("delete other playlists"),
+            vec![first.playlist.id, last.playlist.id]
+        );
+        let remaining = service.list_playlists().expect("remaining playlist");
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, kept.playlist.id);
+        assert_eq!(remaining[0].position, 0);
+
+        assert_eq!(
+            service
+                .delete_other_playlists(None)
+                .expect("delete all user playlists"),
+            vec![kept.playlist.id]
+        );
+        assert!(service
+            .list_playlists()
+            .expect("no remaining playlists")
+            .is_empty());
+    }
+
+    #[test]
     fn playback_session_round_trips_without_starting_playback() {
         let service = service();
         let session = PlaybackSessionRecord {
@@ -1127,7 +1296,7 @@ mod tests {
     #[test]
     fn creates_playlist_and_items_atomically_and_uniquifies_automatic_names() {
         let service = service();
-        let paths = vec!["C:\\Music\\First.wav".to_owned()];
+        let paths = vec![item("C:\\Music\\First.wav")];
         let first = service
             .create_playlist_with_items("Music", &paths, None, true)
             .expect("create first list");
@@ -1150,9 +1319,9 @@ mod tests {
             .create_playlist_with_items(
                 "Road trip",
                 &[
-                    "C:\\Music\\First.wav".to_owned(),
-                    "C:\\Music\\Second.flac".to_owned(),
-                    "C:\\Music\\Third.mp3".to_owned(),
+                    item("C:\\Music\\First.wav"),
+                    item("C:\\Music\\Second.flac"),
+                    item("C:\\Music\\Third.mp3"),
                 ],
                 None,
                 false,
@@ -1187,9 +1356,9 @@ mod tests {
             .create_playlist_with_items(
                 "Selection",
                 &[
-                    "C:\\Music\\one.flac".to_owned(),
-                    "C:\\Music\\two.flac".to_owned(),
-                    "C:\\Music\\three.flac".to_owned(),
+                    item("C:\\Music\\one.flac"),
+                    item("C:\\Music\\two.flac"),
+                    item("C:\\Music\\three.flac"),
                 ],
                 None,
                 false,
