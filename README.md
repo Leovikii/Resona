@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/resona-gothic-wordmark.svg" width="420" alt="Resona">
+  <img src="assets/resona-resonance-wordmark.svg" width="420" alt="Resona">
 </p>
 
 <p align="center">A local-first Windows audio player built for focused listening.</p>

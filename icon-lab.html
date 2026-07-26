@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#100b15" />
+    <title>Resona Icon Preview</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --page: #100b15;
+        --panel: #19121f;
+        --panel-soft: #211728;
+        --line: rgb(226 210 244 / 12%);
+        --text: #f5eff9;
+        --muted: #a79baa;
+        --brand-ink: #c2a0ff;
+        --brand-plate: #141019;
+        --brand-accent: #f45b8b;
+        --wordmark-ink: #a66bea;
+        font-family:
+          "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-width: 320px;
+        min-height: 100vh;
+        margin: 0;
+        background:
+          radial-gradient(circle at 15% 0%, rgb(132 94 247 / 12%), transparent 30rem),
+          var(--page);
+        color: var(--text);
+      }
+
+      main {
+        width: min(1040px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 42px 0 64px;
+      }
+
+      header {
+        margin-bottom: 24px;
+      }
+
+      h1,
+      h2,
+      p {
+        margin-top: 0;
+      }
+
+      h1 {
+        margin-bottom: 10px;
+        font-size: clamp(30px, 5vw, 48px);
+        font-weight: 680;
+        letter-spacing: -0.045em;
+      }
+
+      h2 {
+        margin-bottom: 7px;
+        font-size: 20px;
+        letter-spacing: -0.025em;
+      }
+
+      header p,
+      .section-heading p,
+      footer {
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.65;
+      }
+
+      header p {
+        max-width: 760px;
+        margin-bottom: 0;
+      }
+
+      .card {
+        margin-top: 16px;
+        padding: 24px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: rgb(25 18 31 / 90%);
+      }
+
+      .section-heading {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 20px;
+        margin-bottom: 18px;
+      }
+
+      .section-heading p {
+        margin-bottom: 0;
+      }
+
+      .tag {
+        flex: none;
+        color: #c6b3e0;
+        font-family: "Cascadia Code", Consolas, monospace;
+        font-size: 11px;
+      }
+
+      .two-backgrounds {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .stage {
+        display: grid;
+        min-height: 310px;
+        place-items: center;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 13px;
+      }
+
+      .stage.dark {
+        background: #121016;
+      }
+
+      .stage.light {
+        background: #f3f0f4;
+      }
+
+      .stage.wallpaper {
+        background:
+          radial-gradient(circle at 78% 20%, #b84f82, transparent 19%),
+          radial-gradient(circle at 22% 82%, #4b5fd5, transparent 22%),
+          linear-gradient(135deg, #181520, #3c334c);
+      }
+
+      .stage.violet {
+        background: #6541b5;
+      }
+
+      svg {
+        display: block;
+      }
+
+      .hero-mark {
+        width: min(220px, 58%);
+        height: auto;
+      }
+
+      .hero-wordmark {
+        width: min(420px, 78%);
+        height: auto;
+      }
+
+      .size-strip {
+        display: grid;
+        grid-template-columns: repeat(10, minmax(62px, 1fr));
+        gap: 8px;
+      }
+
+      .size-cell {
+        display: grid;
+        min-height: 112px;
+        place-items: center;
+        padding: 12px 5px 8px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 11px;
+        background: #121016;
+      }
+
+      .size-cell:nth-child(even) {
+        background: #f3f0f4;
+      }
+
+      .size-cell span,
+      .wordmark-cell span {
+        align-self: end;
+        color: #958a9a;
+        font-family: "Cascadia Code", Consolas, monospace;
+        font-size: 10px;
+      }
+
+      .background-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+      }
+
+      .background-grid .stage {
+        min-height: 150px;
+      }
+
+      .background-grid svg {
+        width: 64px;
+        height: 64px;
+      }
+
+      .type-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+      }
+
+      .type-grid .stage {
+        min-height: 230px;
+      }
+
+      .type-grid svg {
+        width: min(148px, 72%);
+        height: auto;
+      }
+
+      .wordmark-sizes {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .wordmark-cell {
+        display: grid;
+        min-height: 140px;
+        place-items: center;
+        padding: 12px 8px 8px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 11px;
+        background: #121016;
+      }
+
+      .wordmark-cell:nth-child(even) {
+        background: #f3f0f4;
+      }
+
+      .wordmark-cell svg {
+        max-width: 100%;
+        height: auto;
+      }
+
+      .lockup-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .lockup {
+        display: flex;
+        min-height: 132px;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        padding: 20px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 13px;
+      }
+
+      .lockup.dark {
+        background: #121016;
+      }
+
+      .lockup.light {
+        background: #f3f0f4;
+      }
+
+      .lockup-mark {
+        width: 52px;
+        height: 52px;
+        flex: none;
+      }
+
+      .lockup-wordmark {
+        width: min(230px, calc(100% - 70px));
+        height: auto;
+      }
+
+      footer {
+        margin: 20px 2px 0;
+      }
+
+      code {
+        color: #c6b3e0;
+        font-family: "Cascadia Code", Consolas, monospace;
+      }
+
+      .svg-source {
+        position: absolute;
+        width: 0;
+        height: 0;
+        overflow: hidden;
+      }
+
+      @media (max-width: 780px) {
+        .size-strip {
+          grid-template-columns: repeat(5, 1fr);
+        }
+
+        .background-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+
+        .type-grid {
+          grid-template-columns: 1fr;
+        }
+
+      }
+
+      @media (max-width: 560px) {
+        main {
+          width: min(100% - 20px, 1040px);
+          padding-top: 28px;
+        }
+
+        .card {
+          padding: 16px;
+        }
+
+        .section-heading {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .two-backgrounds,
+        .lockup-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .stage {
+          min-height: 250px;
+        }
+
+        .size-strip {
+          grid-template-columns: repeat(3, 1fr);
+        }
+
+        .wordmark-sizes {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!--
+      SVG EDITING ENTRY
+      -----------------
+      The app mark, wordmark, and three file-type symbols are previewed here:
+      1. resona-mark     — the square resonant-record application icon
+      2. resona-wordmark — the complete Resona wordmark trial
+      3. resona-file-*   — MP3, WAV, and FLAC file-type icons
+
+      The app mark is a compact turntable made only from color blocks:
+      a two-plane violet deck, black vinyl, and a slender hairpin-like stylus
+      touching the record: the moment resonance begins. No icon backdrop,
+      gradient, shadow, outline, or fine record grooves.
+
+      The wordmark returns to one continuous Resona silhouette. Its first o is
+      a rose-red record label; four nested, low-contrast color fields expand
+      from that same center through the remaining letters. No contour lines
+      divide the fields.
+    -->
+    <svg class="svg-source" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <symbol id="resona-mark" viewBox="0 0 48 48">
+          <rect x="5" y="6" width="38" height="36" rx="8" fill="var(--mark-body, #452068)" />
+          <path d="M13 6h22a8 8 0 0 1 8 8v9H5v-9a8 8 0 0 1 8-8z" fill="var(--mark-top, #6a3698)" />
+          <circle cx="20" cy="26" r="13" fill="#210f34" />
+          <circle cx="20" cy="26" r="11" fill="#0e0d12" />
+          <circle cx="20" cy="26" r="3.5" fill="var(--brand-accent)" />
+          <circle cx="35" cy="14" r="4.5" fill="#2a1043" />
+          <circle cx="35" cy="14" r="2" fill="#b99aff" />
+          <path d="m34.2 17.4-1.6-.3-3 10.2-5.2 3.8 1.5 2 5.8-4.2 3.3-10.6z" fill="var(--mark-arm, #c9b0ff)" />
+          <path d="m23.5 30.3 2.6 3.3-2.7 2.1-2.6-3.3z" fill="var(--brand-accent)" />
+        </symbol>
+
+        <symbol id="resona-file-mp3" viewBox="0 0 48 48">
+          <use href="#resona-mark" style="--mark-body:#1971c2; --mark-top:#339af0; --mark-arm:#c5f6fa" />
+          <path d="M5 26h38v8a9 9 0 0 1-9 9H14a9 9 0 0 1-9-9z" fill="#29272f" />
+          <text x="24" y="39.5" fill="#f8f8fa" font-family="Segoe UI Variable, Segoe UI, sans-serif" font-size="14" font-weight="750" letter-spacing="-0.35" text-anchor="middle">MP3</text>
+        </symbol>
+
+        <symbol id="resona-file-wav" viewBox="0 0 48 48">
+          <use href="#resona-mark" style="--mark-body:#e67700; --mark-top:#fcc419; --mark-arm:#fff3bf" />
+          <path d="M5 26h38v8a9 9 0 0 1-9 9H14a9 9 0 0 1-9-9z" fill="#29272f" />
+          <text x="24" y="39.5" fill="#f8f8fa" font-family="Segoe UI Variable, Segoe UI, sans-serif" font-size="14" font-weight="750" letter-spacing="-0.35" text-anchor="middle">WAV</text>
+        </symbol>
+
+        <symbol id="resona-file-flac" viewBox="0 0 48 48">
+          <use href="#resona-mark" />
+          <path d="M5 26h38v8a9 9 0 0 1-9 9H14a9 9 0 0 1-9-9z" fill="#29272f" />
+          <text x="24" y="39.5" fill="#f8f8fa" font-family="Segoe UI Variable, Segoe UI, sans-serif" font-size="14" font-weight="750" letter-spacing="-0.7" text-anchor="middle">FLAC</text>
+        </symbol>
+
+        <symbol id="resona-wordmark" viewBox="0 0 900 260">
+          <defs>
+            <clipPath id="resona-wordmark-letters">
+              <text
+                x="174"
+                y="181"
+                font-family="Segoe UI Variable Display, Segoe UI Variable, Segoe UI, sans-serif"
+                font-size="164"
+                font-weight="700"
+                letter-spacing="-4"
+              >Resona</text>
+            </clipPath>
+          </defs>
+          <g clip-path="url(#resona-wordmark-letters)">
+            <rect x="130" y="40" width="640" height="180" fill="#c2a0ff" />
+            <circle cx="475" cy="126" r="210" fill="#a66bea" />
+            <circle cx="475" cy="126" r="135" fill="#8053b8" />
+            <circle cx="475" cy="126" r="78" fill="#b6579a" />
+            <circle cx="475" cy="126" r="56" fill="var(--brand-accent)" />
+          </g>
+        </symbol>
+      </defs>
+    </svg>
+
+    <main>
+      <header>
+        <h1>Resona 图标草案 03</h1>
+        <p>
+          单图标使用无背景的简化唱片机：双层紫色机身、黑色唱片，以及像发簪般落到唱片上的玫红唱针；用这个动作表达“共鸣”开始。字标先以 Windows 原生可变字体预览，确认后再转为 SVG 轮廓。
+        </p>
+      </header>
+
+      <section class="card" aria-labelledby="mark-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="mark-title">单图标应用图标</h2>
+            <p>唱盘、唱臂和控制旋钮全在方形安全区内，不另设图标背景。</p>
+          </div>
+          <span class="tag">48 × 48 master</span>
+        </div>
+        <div class="two-backgrounds">
+          <div class="stage dark">
+            <svg class="hero-mark" role="img" aria-label="深色背景上的 Resona R 图标" viewBox="0 0 48 48">
+              <use href="#resona-mark" />
+            </svg>
+          </div>
+          <div class="stage light">
+            <svg class="hero-mark" role="img" aria-label="浅色背景上的 Resona R 图标" viewBox="0 0 48 48">
+              <use href="#resona-mark" />
+            </svg>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="tiny-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="tiny-title">极小尺寸</h2>
+            <p>全部按真实像素显示，不放大。</p>
+          </div>
+          <span class="tag">12 / 14 / 16 px included</span>
+        </div>
+        <div class="size-strip">
+          <div class="size-cell">
+            <svg width="12" height="12" viewBox="0 0 48 48" aria-label="12 像素图标"><use href="#resona-mark" /></svg>
+            <span>12 px</span>
+          </div>
+          <div class="size-cell">
+            <svg width="14" height="14" viewBox="0 0 48 48" aria-label="14 像素图标"><use href="#resona-mark" /></svg>
+            <span>14 px</span>
+          </div>
+          <div class="size-cell">
+            <svg width="16" height="16" viewBox="0 0 48 48" aria-label="16 像素图标"><use href="#resona-mark" /></svg>
+            <span>16 px</span>
+          </div>
+          <div class="size-cell">
+            <svg width="20" height="20" viewBox="0 0 48 48" aria-label="20 像素图标"><use href="#resona-mark" /></svg>
+            <span>20 px</span>
+          </div>
+          <div class="size-cell">
+            <svg width="24" height="24" viewBox="0 0 48 48" aria-label="24 像素图标"><use href="#resona-mark" /></svg>
+            <span>24 px</span>
+          </div>
+          <div class="size-cell">
+            <svg width="32" height="32" viewBox="0 0 48 48" aria-label="32 像素图标"><use href="#resona-mark" /></svg>
+            <span>32 px</span>
+          </div>
+          <div class="size-cell">
+            <svg width="48" height="48" viewBox="0 0 48 48" aria-label="48 像素图标"><use href="#resona-mark" /></svg>
+            <span>48 px</span>
+          </div>
+          <div class="size-cell">
+            <svg width="64" height="64" viewBox="0 0 48 48" aria-label="64 像素图标"><use href="#resona-mark" /></svg>
+            <span>64 px</span>
+          </div>
+          <div class="size-cell">
+            <svg width="96" height="96" viewBox="0 0 48 48" aria-label="96 像素图标"><use href="#resona-mark" /></svg>
+            <span>96 px</span>
+          </div>
+          <div class="size-cell">
+            <svg width="16" height="16" viewBox="0 0 48 48" aria-label="16 像素 MP3 文件类型图标"><use href="#resona-file-mp3" /></svg>
+            <span>MP3 · 16 px</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="file-type-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="file-type-title">音频文件类型图标</h2>
+            <p>主图标结构保持不变；下半部叠加深灰格式信息带与白色大字。只替换上半部紫色：MP3 为 blue，WAV 为 yellow，FLAC 保持主图标的 violet。</p>
+          </div>
+          <span class="tag">48 × 48 master</span>
+        </div>
+        <div class="type-grid">
+          <div class="stage dark">
+            <svg viewBox="0 0 48 48" role="img" aria-label="MP3 文件类型图标"><use href="#resona-file-mp3" /></svg>
+          </div>
+          <div class="stage dark">
+            <svg viewBox="0 0 48 48" role="img" aria-label="WAV 文件类型图标"><use href="#resona-file-wav" /></svg>
+          </div>
+          <div class="stage dark">
+            <svg viewBox="0 0 48 48" role="img" aria-label="FLAC 文件类型图标"><use href="#resona-file-flac" /></svg>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="background-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="background-title">背景适应</h2>
+            <p>同一个两色 SVG 放在四类常见环境中。</p>
+          </div>
+        </div>
+        <div class="background-grid">
+          <div class="stage dark">
+            <svg viewBox="0 0 48 48" aria-label="深色背景"><use href="#resona-mark" /></svg>
+          </div>
+          <div class="stage light">
+            <svg viewBox="0 0 48 48" aria-label="浅色背景"><use href="#resona-mark" /></svg>
+          </div>
+          <div class="stage violet">
+            <svg viewBox="0 0 48 48" aria-label="紫色背景"><use href="#resona-mark" /></svg>
+          </div>
+          <div class="stage wallpaper">
+            <svg viewBox="0 0 48 48" aria-label="壁纸背景"><use href="#resona-mark" /></svg>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="wordmark-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="wordmark-title">完整 Resona 图形字标</h2>
+            <p>首个 o 为玫红唱片标签；相近的紫、梅紫与玫红色块向外扩展，不使用描边式刻纹。</p>
+          </div>
+          <span class="tag">900 × 260 viewBox</span>
+        </div>
+        <div class="two-backgrounds">
+          <div class="stage dark">
+            <svg class="hero-wordmark" role="img" aria-label="深色背景上的完整 Resona 图形字标" viewBox="0 0 900 260">
+              <use href="#resona-wordmark" />
+            </svg>
+          </div>
+          <div class="stage light">
+            <svg class="hero-wordmark" role="img" aria-label="浅色背景上的完整 Resona 图形字标" viewBox="0 0 900 260">
+              <use href="#resona-wordmark" />
+            </svg>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="wordmark-size-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="wordmark-size-title">完整字标缩放</h2>
+            <p>用于侧栏、关于页、README 与安装界面的尺寸参考。</p>
+          </div>
+        </div>
+        <div class="wordmark-sizes">
+          <div class="wordmark-cell">
+            <svg width="320" viewBox="0 0 900 260" aria-label="320 像素宽字标"><use href="#resona-wordmark" /></svg>
+            <span>320 px</span>
+          </div>
+          <div class="wordmark-cell">
+            <svg width="240" viewBox="0 0 900 260" aria-label="240 像素宽字标"><use href="#resona-wordmark" /></svg>
+            <span>240 px</span>
+          </div>
+          <div class="wordmark-cell">
+            <svg width="180" viewBox="0 0 900 260" aria-label="180 像素宽字标"><use href="#resona-wordmark" /></svg>
+            <span>180 px</span>
+          </div>
+          <div class="wordmark-cell">
+            <svg width="128" viewBox="0 0 900 260" aria-label="128 像素宽字标"><use href="#resona-wordmark" /></svg>
+            <span>128 px</span>
+          </div>
+          <div class="wordmark-cell">
+            <svg width="96" viewBox="0 0 900 260" aria-label="96 像素宽字标"><use href="#resona-wordmark" /></svg>
+            <span>96 px</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="lockup-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="lockup-title">组合使用</h2>
+            <p>空间充足时使用单字母标与完整图形字标的横向组合。</p>
+          </div>
+        </div>
+        <div class="lockup-grid">
+          <div class="lockup dark">
+            <svg class="lockup-mark" viewBox="0 0 48 48" aria-hidden="true"><use href="#resona-mark" /></svg>
+            <svg class="lockup-wordmark" viewBox="0 0 900 260" aria-label="深色背景 Resona 组合标志"><use href="#resona-wordmark" /></svg>
+          </div>
+          <div class="lockup light">
+            <svg class="lockup-mark" viewBox="0 0 48 48" aria-hidden="true"><use href="#resona-mark" /></svg>
+            <svg class="lockup-wordmark" viewBox="0 0 900 260" aria-label="浅色背景 Resona 组合标志"><use href="#resona-wordmark" /></svg>
+          </div>
+        </div>
+      </section>
+
+      <footer>
+        迭代入口仅为 <code>icon-lab.html</code> 顶部的
+        <code>resona-mark</code>、<code>resona-wordmark</code> 与
+        <code>resona-file-*</code> 为最终设计的预览入口；正式 SVG 资产已同步。
+      </footer>
+    </main>
+  </body>
+</html>

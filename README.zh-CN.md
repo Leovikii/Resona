@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/resona-gothic-wordmark.svg" width="420" alt="Resona">
+  <img src="assets/resona-resonance-wordmark.svg" width="420" alt="Resona">
 </p>
 
 <p align="center">专注聆听的本地优先 Windows 音频播放器。</p>

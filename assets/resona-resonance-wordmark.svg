@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 260" role="img" aria-labelledby="title desc">
+  <title id="title">Resona resonance wordmark</title>
+  <desc id="desc">The Resona wordmark is a window onto concentric violet, plum, and rose record-label color fields.</desc>
+  <defs>
+    <clipPath id="letters">
+      <text x="174" y="181" font-family="Segoe UI Variable Display, Segoe UI Variable, Segoe UI, sans-serif" font-size="164" font-weight="700" letter-spacing="-4">Resona</text>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#letters)">
+    <rect x="130" y="40" width="640" height="180" fill="#c2a0ff"/>
+    <circle cx="475" cy="126" r="210" fill="#a66bea"/>
+    <circle cx="475" cy="126" r="135" fill="#8053b8"/>
+    <circle cx="475" cy="126" r="78" fill="#b6579a"/>
+    <circle cx="475" cy="126" r="56" fill="#f45b8b"/>
+  </g>
+</svg>
