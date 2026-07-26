@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#100b15" />
+    <title>Resona 图标预览</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family:
+          Inter, "Noto Sans CJK SC", "Microsoft YaHei UI", sans-serif;
+        background: #100b15;
+        color: #f5eff9;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 32px;
+        background:
+          radial-gradient(circle at 85% 0%, rgb(111 0 217 / 18%), transparent 34rem),
+          #100b15;
+      }
+
+      main {
+        width: min(1120px, 100%);
+        margin: 0 auto;
+      }
+
+      h1,
+      h2,
+      p {
+        margin-top: 0;
+      }
+
+      h1 {
+        margin-bottom: 8px;
+        font-size: 28px;
+      }
+
+      h2 {
+        margin-bottom: 8px;
+        font-size: 18px;
+      }
+
+      p {
+        color: #b9acbf;
+        line-height: 1.6;
+      }
+
+      section {
+        margin-top: 20px;
+        padding: 20px;
+        border: 1px solid rgb(226 198 255 / 14%);
+        border-radius: 16px;
+        background: rgb(26 18 32 / 88%);
+      }
+
+      .palette,
+      .preview-grid,
+      .size-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+
+      .swatch {
+        min-width: 132px;
+        padding: 10px;
+        border-radius: 10px;
+        background: #17111b;
+        color: #d8cedd;
+        font-size: 12px;
+      }
+
+      .swatch::before {
+        content: "";
+        display: block;
+        height: 28px;
+        margin-bottom: 8px;
+        border-radius: 7px;
+        background: var(--swatch);
+      }
+
+      .preview-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      }
+
+      .surface {
+        min-height: 180px;
+        padding: 18px;
+        border-radius: 12px;
+      }
+
+      .surface.dark {
+        background: #121016;
+      }
+
+      .surface.light {
+        background: #f4f1f5;
+        color: #2a2230;
+      }
+
+      .surface.wallpaper {
+        background:
+          radial-gradient(circle at 80% 18%, #ff4081, transparent 22%),
+          radial-gradient(circle at 18% 82%, #2979ff, transparent 26%),
+          linear-gradient(135deg, #17101d, #544267);
+      }
+
+      .surface-label,
+      .size-label {
+        display: block;
+        margin-bottom: 14px;
+        color: #a99cae;
+        font-size: 12px;
+      }
+
+      .light .surface-label {
+        color: #756a79;
+      }
+
+      .hero-row {
+        display: flex;
+        align-items: center;
+        gap: 24px;
+      }
+
+      .hero-icon {
+        width: 128px;
+        height: 128px;
+      }
+
+      .default-artwork {
+        width: 128px;
+        height: 128px;
+      }
+
+      .size-row {
+        align-items: end;
+      }
+
+      .size-sample {
+        min-width: 66px;
+        text-align: center;
+      }
+
+      .size-sample img {
+        display: block;
+        margin: 0 auto 8px;
+      }
+
+      .size-label {
+        margin: 0;
+      }
+
+      .file-row img {
+        width: 112px;
+        height: 112px;
+      }
+
+      .file-row,
+      .wordmark-stack {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 22px;
+      }
+
+      .wordmark-stack {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .wordmark-stack img {
+        display: block;
+        max-width: 100%;
+      }
+
+      @media (max-width: 640px) {
+        body {
+          padding: 18px;
+        }
+
+        section {
+          padding: 16px;
+        }
+
+        .hero-icon,
+        .default-artwork {
+          width: 96px;
+          height: 96px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Resona 图标预览</h1>
+      <p>
+        本页直接引用正式 SVG；文件类型图标由主图标按语义色板生成，不保留独立的几何副本。
+      </p>
+
+      <section>
+        <h2>主图标色彩层级</h2>
+        <div class="palette">
+          <div class="swatch" style="--swatch: #6f00d9">主体 · #6F00D9</div>
+          <div class="swatch" style="--swatch: #a000ff">受光面 · #A000FF</div>
+          <div class="swatch" style="--swatch: #440080">结构暗部 · #440080</div>
+          <div class="swatch" style="--swatch: #e2c6ff">浅薰衣草 · #E2C6FF</div>
+          <div class="swatch" style="--swatch: #10091a">唱片 · #10091A</div>
+          <div class="swatch" style="--swatch: #ff4081">焦点 · #FF4081</div>
+        </div>
+      </section>
+
+      <section>
+        <h2>主图标与默认封面</h2>
+        <div class="preview-grid">
+          <div class="surface dark">
+            <span class="surface-label">深色背景</span>
+            <div class="hero-row">
+              <img class="hero-icon" src="/assets/resona-icon.svg" alt="Resona 主图标" />
+              <img
+                class="default-artwork"
+                src="/assets/resona-default-artwork.svg"
+                alt="Resona 默认封面"
+              />
+            </div>
+          </div>
+          <div class="surface light">
+            <span class="surface-label">浅色背景</span>
+            <div class="hero-row">
+              <img class="hero-icon" src="/assets/resona-icon.svg" alt="Resona 主图标" />
+              <img
+                class="default-artwork"
+                src="/assets/resona-default-artwork.svg"
+                alt="Resona 默认封面"
+              />
+            </div>
+          </div>
+          <div class="surface wallpaper">
+            <span class="surface-label">复杂背景</span>
+            <div class="hero-row">
+              <img class="hero-icon" src="/assets/resona-icon.svg" alt="Resona 主图标" />
+              <img
+                class="default-artwork"
+                src="/assets/resona-default-artwork.svg"
+                alt="Resona 默认封面"
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>主图标真实尺寸</h2>
+        <div class="surface dark">
+          <div class="size-row">
+            <div class="size-sample">
+              <img src="/assets/resona-icon.svg" width="12" height="12" alt="12 px" />
+              <span class="size-label">12 px</span>
+            </div>
+            <div class="size-sample">
+              <img src="/assets/resona-icon.svg" width="14" height="14" alt="14 px" />
+              <span class="size-label">14 px</span>
+            </div>
+            <div class="size-sample">
+              <img src="/assets/resona-icon.svg" width="16" height="16" alt="16 px" />
+              <span class="size-label">16 px</span>
+            </div>
+            <div class="size-sample">
+              <img src="/assets/resona-icon.svg" width="20" height="20" alt="20 px" />
+              <span class="size-label">20 px</span>
+            </div>
+            <div class="size-sample">
+              <img src="/assets/resona-icon.svg" width="24" height="24" alt="24 px" />
+              <span class="size-label">24 px</span>
+            </div>
+            <div class="size-sample">
+              <img src="/assets/resona-icon.svg" width="32" height="32" alt="32 px" />
+              <span class="size-label">32 px</span>
+            </div>
+            <div class="size-sample">
+              <img src="/assets/resona-icon.svg" width="48" height="48" alt="48 px" />
+              <span class="size-label">48 px</span>
+            </div>
+            <div class="size-sample">
+              <img src="/assets/resona-icon.svg" width="64" height="64" alt="64 px" />
+              <span class="size-label">64 px</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>文件类型图标</h2>
+        <p>
+          紫、蓝、黄三套色板使用相同四级层次；黑色唱片、粉色焦点和底部文本标签保持一致。
+        </p>
+        <div class="preview-grid">
+          <div class="surface dark file-row">
+            <span class="surface-label">深色背景 · 112 px</span>
+            <img src="/assets/resona-file-mp3.svg" alt="MP3 文件图标" />
+            <img src="/assets/resona-file-wav.svg" alt="WAV 文件图标" />
+            <img src="/assets/resona-file-flac.svg" alt="FLAC 文件图标" />
+          </div>
+          <div class="surface light file-row">
+            <span class="surface-label">浅色背景 · 112 px</span>
+            <img src="/assets/resona-file-mp3.svg" alt="MP3 文件图标" />
+            <img src="/assets/resona-file-wav.svg" alt="WAV 文件图标" />
+            <img src="/assets/resona-file-flac.svg" alt="FLAC 文件图标" />
+          </div>
+        </div>
+        <div class="surface dark">
+          <span class="surface-label">真实尺寸 · 16 / 20 / 24 / 32 / 48 / 64 px</span>
+          <div class="size-row">
+            <div class="size-sample">
+              <img src="/assets/resona-file-mp3.svg" width="16" height="16" alt="16 px MP3" />
+              <span class="size-label">16 px</span>
+            </div>
+            <div class="size-sample">
+              <img src="/assets/resona-file-wav.svg" width="20" height="20" alt="20 px WAV" />
+              <span class="size-label">20 px</span>
+            </div>
+            <div class="size-sample">
+              <img src="/assets/resona-file-flac.svg" width="24" height="24" alt="24 px FLAC" />
+              <span class="size-label">24 px</span>
+            </div>
+            <div class="size-sample">
+              <img src="/assets/resona-file-mp3.svg" width="32" height="32" alt="32 px MP3" />
+              <span class="size-label">32 px</span>
+            </div>
+            <div class="size-sample">
+              <img src="/assets/resona-file-wav.svg" width="48" height="48" alt="48 px WAV" />
+              <span class="size-label">48 px</span>
+            </div>
+            <div class="size-sample">
+              <img src="/assets/resona-file-flac.svg" width="64" height="64" alt="64 px FLAC" />
+              <span class="size-label">64 px</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Resona 字标</h2>
+        <div class="preview-grid">
+          <div class="surface dark wordmark-stack">
+            <span class="surface-label">深色背景</span>
+            <img src="/assets/resona-resonance-wordmark.svg" width="320" alt="Resona 字标 320 px" />
+            <img src="/assets/resona-resonance-wordmark.svg" width="180" alt="Resona 字标 180 px" />
+            <img src="/assets/resona-resonance-wordmark.svg" width="120" alt="Resona 字标 120 px" />
+          </div>
+          <div class="surface light wordmark-stack">
+            <span class="surface-label">浅色背景</span>
+            <img src="/assets/resona-resonance-wordmark.svg" width="320" alt="Resona 字标 320 px" />
+            <img src="/assets/resona-resonance-wordmark.svg" width="180" alt="Resona 字标 180 px" />
+            <img src="/assets/resona-resonance-wordmark.svg" width="120" alt="Resona 字标 120 px" />
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

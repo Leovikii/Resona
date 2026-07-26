@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-labelledby="title desc">
   <title id="title">Resona default artwork</title>
   <desc id="desc">A black vinyl record with a deep violet rim and rose-red center label.</desc>
-  <circle cx="24" cy="24" r="20" fill="#210f34"/>
-  <circle cx="24" cy="24" r="17" fill="#0e0d12"/>
-  <circle cx="24" cy="24" r="5.5" fill="#f45b8b"/>
+  <circle cx="24" cy="24" r="19" fill="#440080" stroke="#a000ff" stroke-width="2"/>
+  <circle cx="24" cy="24" r="16" fill="#10091a"/>
+  <circle cx="24" cy="24" r="5.5" fill="#ff4081"/>
 </svg>

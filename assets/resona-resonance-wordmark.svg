@@ -1,16 +1,24 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 260" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="130 40 640 180" role="img" aria-labelledby="title desc">
   <title id="title">Resona resonance wordmark</title>
   <desc id="desc">The Resona wordmark is a window onto concentric violet, plum, and rose record-label color fields.</desc>
   <defs>
-    <clipPath id="letters">
-      <text x="174" y="181" font-family="Segoe UI Variable Display, Segoe UI Variable, Segoe UI, sans-serif" font-size="164" font-weight="700" letter-spacing="-4">Resona</text>
-    </clipPath>
+    <mask id="letters" maskUnits="userSpaceOnUse" x="0" y="0" width="900" height="260">
+      <rect width="900" height="260" fill="#000"/>
+      <g transform="translate(174 181) scale(0.164 -0.164)" fill="#fff">
+        <path d="M268 255V0H73V725Q203 740 333 740Q633 740 633 515Q633 452 594 398Q555 344 493 321V319Q523 302 543 275.5Q563 249 581 200L653 0H448L386 190Q375 225 358 240Q341 255 313 255ZM268 400H323Q374 400 403.5 425.5Q433 451 433 495Q433 590 323 590Q291 590 268 585Z"/>
+        <path transform="translate(662)" d="M214 310H383Q383 405 298 405Q221 405 214 310ZM216 200Q233 120 330 120Q405 120 473 155L513 30Q421 -10 313 -10Q184 -10 106 63Q28 136 28 260Q28 385 99.5 457.5Q171 530 293 530Q418 530 488 459.5Q558 389 558 260Q558 233 553 200Z"/>
+        <path transform="translate(1229)" d="M478 363Q387 396 308 396Q265 396 249 388.5Q233 381 233 365Q233 350 246 342Q259 334 293 330Q416 315 469.5 272Q523 229 523 155Q523 79 462.5 34.5Q402 -10 288 -10Q153 -10 43 40L78 174Q168 126 268 126Q333 126 333 160Q333 173 323 178Q313 183 273 190Q152 209 100 252.5Q48 296 48 370Q48 445 108 487.5Q168 530 288 530Q407 530 513 495Z"/>
+        <path transform="translate(1771)" d="M100 458Q172 530 303 530Q434 530 506 458Q578 386 578 260Q578 134 506 62Q434 -10 303 -10Q172 -10 100 62Q28 134 28 260Q28 386 100 458ZM236 157Q258 126 303 126Q348 126 370 157Q392 188 392 260Q392 332 370 363Q348 394 303 394Q258 394 236 363Q214 332 214 260Q214 188 236 157Z"/>
+        <path transform="translate(2353)" d="M244 450Q272 487 313.5 508.5Q355 530 398 530Q497 530 540 474.5Q583 419 583 280V0H395V260Q395 335 381.5 360Q368 385 333 385Q302 385 277.5 351Q253 317 253 270V0H63V520H238L242 450Z"/>
+        <path transform="translate(2970)" d="M323 340H353Q353 374 340 387Q327 400 293 400Q188 400 88 355L63 485Q173 530 303 530Q433 530 488 481.5Q543 433 543 320V140Q543 68 558 0H378Q372 34 368 70H366Q339 34 296 12Q253 -10 208 -10Q131 -10 84.5 32.5Q38 75 38 150Q38 236 111.5 288Q185 340 323 340ZM208 170Q208 125 258 125Q301 125 327 149Q353 173 353 215V230H323Q266 230 237 213.5Q208 197 208 170Z"/>
+      </g>
+    </mask>
   </defs>
-  <g clip-path="url(#letters)">
-    <rect x="130" y="40" width="640" height="180" fill="#c2a0ff"/>
-    <circle cx="475" cy="126" r="210" fill="#a66bea"/>
-    <circle cx="475" cy="126" r="135" fill="#8053b8"/>
-    <circle cx="475" cy="126" r="78" fill="#b6579a"/>
-    <circle cx="475" cy="126" r="56" fill="#f45b8b"/>
+  <g mask="url(#letters)">
+    <rect x="130" y="40" width="640" height="180" fill="#c4a1ff"/>
+    <circle cx="514" cy="138" r="210" fill="#9b42ef"/>
+    <circle cx="514" cy="138" r="135" fill="#6f00d9"/>
+    <circle cx="514" cy="138" r="78" fill="#9b42ef"/>
+    <circle cx="514" cy="138" r="56" fill="#ff4081"/>
   </g>
 </svg>

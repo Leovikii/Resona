@@ -678,8 +678,8 @@ input {
 }
 
 .brand-lockup {
-  min-height: 44px;
-  padding: 0 8px;
+  min-height: 52px;
+  padding: 0 4px;
   display: flex;
   align-items: center;
 }
@@ -692,7 +692,7 @@ input {
 }
 
 .brand-wordmark-sidebar {
-  width: 132px;
+  width: 100%;
 }
 
 .topbar-title,
@@ -2164,7 +2164,7 @@ h2.page-heading {
 }
 
 .compact-brand-wordmark {
-  width: 108px;
+  width: 120px;
   flex: 0 1 auto;
 }
 

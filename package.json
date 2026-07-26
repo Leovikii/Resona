@@ -9,6 +9,7 @@
     "build:exe": "tauri build --no-bundle",
     "licenses": "node scripts/generate-license-report.mjs",
     "lint:workflow": "go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -ignore \"unexpected key .queue. for .concurrency. section\"",
+    "icons:sources": "node scripts/generate-file-icon-sources.mjs",
     "icons:windows": "node scripts/generate-windows-shell-icons.mjs",
     "preview": "vite preview --port 1421",
     "test": "node --test scripts/release-channel.test.mjs scripts/preference-value.test.mjs scripts/full-player-paging.test.mjs scripts/compression-root-expansion.test.mjs scripts/playlist-ordering.test.mjs scripts/playlist-tree.test.mjs scripts/edge-auto-scroll.test.mjs",

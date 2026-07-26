@@ -342,13 +342,15 @@ pub fn run() {
                                     continue;
                                 };
                                 let resource_dir = app_handle.path().resource_dir();
-                                let logo_path = resource_dir
+                                let artwork_placeholder_path = resource_dir
                                     .as_ref()
-                                    .map(|directory| directory.join("icons").join("128x128.png"))
+                                    .map(|directory| {
+                                        directory.join("icons").join("default-artwork.png")
+                                    })
                                     .unwrap_or_else(|_| {
                                         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                                             .join("icons")
-                                            .join("128x128.png")
+                                            .join("default-artwork.png")
                                     });
                                 let artwork_cache_dir = app_handle
                                     .path()
@@ -360,7 +362,7 @@ pub fn run() {
                                 match platform::media_session::MediaSessionAdapter::start(
                                     hwnd.0 as isize,
                                     Arc::clone(&playback),
-                                    &logo_path,
+                                    &artwork_placeholder_path,
                                     artwork_cache_dir,
                                     app_handle
                                         .state::<Arc<NativePlaybackProjection>>()

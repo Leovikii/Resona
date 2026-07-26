@@ -53,6 +53,7 @@ Resona/
 │  └─ tauri.conf.json
 ├─ scripts/                        # Node 构建/测试工具
 ├─ tests/                          # 前端与发布规则测试
+├─ assets/                         # 品牌 SVG、图标规范与直接引用正式资源的预览页
 ├─ docs/                           # 当前规范、ADR 和活动计划
 └─ .github/workflows/              # PR 门禁与 main 自动交付
 ```
