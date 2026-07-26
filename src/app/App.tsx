@@ -12,7 +12,6 @@ import {
   Loader,
   Menu,
   Modal,
-  Notification,
   NumberInput,
   Paper,
   Popover,
@@ -29,7 +28,6 @@ import {
   ThemeIcon,
   Title,
   Tooltip,
-  Transition,
   UnstyledButton,
   useMantineColorScheme,
 } from "@mantine/core";
@@ -39,7 +37,6 @@ import {
   ArrowRight,
   ArrowUp,
   Check,
-  CircleAlert,
   ChevronLeft,
   ChevronRight,
   Disc3,
@@ -110,6 +107,11 @@ import {
 import { BrandWordmark } from "../shared/ui/BrandWordmark";
 import { CompactTopNavigation, type CompactNavigationSelection } from "../shared/ui/CompactTopNavigation";
 import { OverflowMarquee } from "../shared/ui/OverflowMarquee";
+import {
+  TransientNotice,
+  type TransientNoticeMessage,
+  type TransientNoticeTone,
+} from "../shared/ui/TransientNotice";
 import { AudioFileInfoDialog } from "./AudioFileInfoDialog";
 import { accentColors, type AccentColor, usePreferences } from "./preferences";
 import {
@@ -158,8 +160,7 @@ export default function App() {
   const [playerExpanded, setPlayerExpanded] = useState(false);
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
   const [updateDialogMounted, setUpdateDialogMounted] = useState(false);
-  const [importNoticeCount, setImportNoticeCount] = useState(0);
-  const [importNoticeReasons, setImportNoticeReasons] = useState("");
+  const [notice, setNotice] = useState<TransientNoticeMessage | null>(null);
   const [fileInfoPath, setFileInfoPath] = useState<string | null>(null);
   const [playlistFolderStates, setPlaylistFolderStates] = useState<Map<string, PlaylistFolderState>>(
     () => new Map(),
@@ -168,6 +169,7 @@ export default function App() {
     PlaylistTrackLocateRequest & { treeKey: string }
   ) | null>(null);
   const playlistLocateRequestIdRef = useRef(0);
+  const noticeIdRef = useRef(0);
   const dropActionsRef = useRef({ library, playback, t });
   const autoLyricsPathRef = useRef<string | null>(null);
   dropActionsRef.current = { library, playback, t };
@@ -176,6 +178,11 @@ export default function App() {
     setUpdateDialogMounted(true);
     setUpdateDialogOpen(true);
   }, []);
+  const publishNotice = useCallback((message: string, tone: TransientNoticeTone = "error") => {
+    noticeIdRef.current += 1;
+    setNotice({ id: noticeIdRef.current, message, tone });
+  }, []);
+  const dismissNotice = useCallback(() => setNotice(null), []);
 
   useEffect(() => {
     if (applicationLifetime.closePromptOpen) setRememberCloseDecision(false);
@@ -219,11 +226,31 @@ export default function App() {
   }, [library.dismissRejected, playback.dismissDefaultRejected]);
   useEffect(() => {
     if (rejectedImportCount <= 0) return;
-    setImportNoticeCount(rejectedImportCount);
-    setImportNoticeReasons(rejectedImportReasons);
-    const timer = window.setTimeout(dismissImportNotice, 4_000);
-    return () => window.clearTimeout(timer);
-  }, [dismissImportNotice, rejectedImportCount, rejectedImportReasons]);
+    publishNotice(
+      t("import.rejected", { count: rejectedImportCount, reasons: rejectedImportReasons }),
+      "warning",
+    );
+    dismissImportNotice();
+  }, [
+    dismissImportNotice,
+    publishNotice,
+    rejectedImportCount,
+    rejectedImportReasons,
+    t,
+  ]);
+
+  const playbackFailure = playback.snapshot.error ?? playback.refreshError;
+  useEffect(() => {
+    if (playbackFailure) publishNotice(localizeFailure(playbackFailure, t));
+  }, [playbackFailure, publishNotice, t]);
+
+  useEffect(() => {
+    if (library.error) publishNotice(library.error.message);
+  }, [library.error, publishNotice]);
+
+  useEffect(() => {
+    if (mainWindow.error) publishNotice(mainWindow.error.message);
+  }, [mainWindow.error, publishNotice]);
 
   const hasCurrentTrack = playback.snapshot.currentItemId !== null
     && playback.selectedPath !== null;
@@ -622,7 +649,7 @@ export default function App() {
                 playlist={selectedPlaylist}
               />
             )}
-            {selection.kind === "tools" && <MemoToolsView />}
+            {selection.kind === "tools" && <MemoToolsView onNotify={publishNotice} />}
             {selection.kind === "settings" && (
               <MemoSettingsView
                 applicationLifetime={applicationLifetime}
@@ -642,28 +669,11 @@ export default function App() {
           </section>
         )}
 
-        {(playback.snapshot.error ?? playback.refreshError) && (
-          <ErrorBanner failure={(playback.snapshot.error ?? playback.refreshError)!} />
-        )}
-        {library.error && <div className="error-banner" role="alert">{library.error}</div>}
-        {mainWindow.error && <div className="error-banner" role="alert">{mainWindow.error.message}</div>}
-        <Transition duration={160} mounted={rejectedImportCount > 0} transition="slide-left">
-          {(transitionStyles) => (
-            <Notification
-              className="import-notice"
-              closeButtonProps={{ "aria-label": t("common.close") }}
-              color="orange"
-              icon={<CircleAlert size={16} />}
-              onClose={dismissImportNotice}
-              role="status"
-              style={transitionStyles}
-              withCloseButton
-              withBorder={false}
-            >
-              {t("import.rejected", { count: importNoticeCount, reasons: importNoticeReasons })}
-            </Notification>
-          )}
-        </Transition>
+        <TransientNotice
+          closeLabel={t("common.close")}
+          notice={notice}
+          onDismiss={dismissNotice}
+        />
       </section>
 
       <PlayerBar
@@ -1370,11 +1380,20 @@ function UserPlaylistView({
   );
 }
 
-function ToolsView() {
+function ToolsView({ onNotify }: {
+  onNotify: (message: string, tone?: TransientNoticeTone) => void;
+}) {
   const { t } = useTranslation();
   const compression = useAudioCompression();
   const dependency = useFfmpegDependency();
   const [openError, setOpenError] = useState<string | null>(null);
+  useEffect(() => {
+    const error = openError || dependency.commandError;
+    if (!error) return;
+    onNotify(error);
+    setOpenError(null);
+    dependency.dismissCommandError();
+  }, [dependency.commandError, dependency.dismissCommandError, onNotify, openError]);
   const running = compression.snapshot.status === "running" || compression.snapshot.status === "cancelling";
   const progress = compression.snapshot.total > 0
     ? (compression.snapshot.items.reduce((total, item) => total + item.progress, 0)
@@ -1449,11 +1468,6 @@ function ToolsView() {
               : t("tools.downloadFfmpeg")}</Button>
           )}
         </Paper>
-        {(openError || dependency.commandError) && (
-          <div className="error-banner" role="alert">
-            {openError || dependency.commandError}
-          </div>
-        )}
         <Paper className="tool-row" data-deferred>
           <ThemeIcon color="gray" size={38} variant="light"><Tags size={19} /></ThemeIcon>
           <Text fw={600}>{t("tools.tagEditor")}</Text>
@@ -2498,11 +2512,6 @@ function EmptyView({ icon, label }: { icon: ReactNode; label: string }) {
       <Text c="dimmed" size="sm">{label}</Text>
     </div>
   );
-}
-
-function ErrorBanner({ failure }: { failure: PlaybackFailure }) {
-  const { t } = useTranslation();
-  return <div className="error-banner" role="alert">{localizeFailure(failure, t)}</div>;
 }
 
 function localizeFailure(

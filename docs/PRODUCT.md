@@ -47,7 +47,7 @@ FFmpeg 是按需下载的固定运行时依赖，不进入安装包。扫描和�
 
 应用首帧后每进程静默检查一次更新，不静默下载、不强制安装、不上传遥测。发现更高 SemVer 后显示 Markdown 更新日志，用户可直接安装；设置仍提供主动检查和预览版本开关。网络、GitHub 或签名失败不得影响本地播放。
 
-0.1.0 只发布 Tauri NSIS `currentUser` x64 安装包。Updater 签名负责更新完整性；正式 Windows 发布者身份由独立 Authenticode 方案负责。
+0.1.0 只发布 Tauri NSIS `currentUser` x64 安装包。Tauri updater 签名负责更新完整性；Windows Authenticode 是可选的发布者身份能力，不作为 0.1.0 门禁，也不进入跨平台构建边界。
 
 ## 非目标
 

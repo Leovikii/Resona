@@ -1,7 +1,7 @@
 # ADR 0024：Windows 生命周期、分发与更新
 
-- 状态：Accepted；rc.2 修订启动更新检查
-- 日期：2026-07-23，修订于 2026-07-24
+- 状态：Accepted；rc.2 修订启动更新检查，0.1.0 修订发布签名策略
+- 日期：2026-07-23，修订于 2026-07-24、2026-07-26
 
 ## 托盘与退出
 
@@ -15,7 +15,8 @@
 - 0.1.0 只发布 Tauri 官方 NSIS `currentUser` x64 安装包，稳定标识为 `io.github.vki.resona`；不并行维护 MSI。
 - 注册 MP3/WAV/FLAC 文件关联与品牌图标。覆盖升级保留应用数据；卸载只清理应用拥有的安装、注册、缓存、数据库、偏好和下载依赖，绝不删除用户音频。
 - FFmpeg/ffprobe 不进入安装包。用户明确下载依赖后，`FfmpegDependencyService` 从固定 GitHub Release 获取归档，验证归档和二进制 SHA-256、安全解压并原子启用。缺失、下载中或验证失败时不能开始转换。
-- Updater 完整性签名与 Windows Authenticode 发布者签名是独立信任边界；私钥不进入仓库、安装包或日志。
+- Updater 完整性签名与平台发布者签名是独立信任边界；私钥不进入仓库、安装包或日志。
+- 0.1.0 必须使用 Tauri updater 签名，但不把 Windows Authenticode 设为发布门禁，也不使用不能建立公开信任的自签名证书占位。未签名安装包需在发布说明中披露 SmartScreen 提示，并只从 GitHub Releases 分发且提供 SHA-256。将来可按实际需求独立引入受信任 Authenticode；Linux 发布时另行选择 GPG/仓库签名，不让 Windows 证书进入跨平台构建边界。
 
 ## 更新
 

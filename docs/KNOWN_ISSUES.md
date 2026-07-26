@@ -21,4 +21,4 @@ Windows 原生文件选择窗口曾低频阻塞，当前没有稳定复现。应
 ## 发布外部条件
 
 - 正式 GitHub Release 覆盖更新尚需用受保护密钥和真实托管产物完成一次。
-- 正式 Windows 发布仍需要 Authenticode 发布者方案；updater `.sig` 只证明更新完整性。
+- 0.1.0 安装包不使用 Authenticode，Windows 首次安装可能显示 SmartScreen 提示；仅从 GitHub Releases 下载并核对 SHA-256。updater `.sig` 仍是自动更新的强制完整性门禁。

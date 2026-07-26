@@ -59,6 +59,12 @@ jobs:
       - name: Build the frontend
         run: npm run build
 
+      - name: Verify generated branding
+        run: |
+          node scripts/generate-file-icon-sources.mjs --check
+          node scripts/generate-windows-shell-icons.mjs --check
+          node scripts/generate-nsis-artwork.mjs --check
+
       - name: Verify the third-party license report
         run: |
           npm run licenses

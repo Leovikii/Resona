@@ -22,6 +22,7 @@ instead of introducing an unrelated visual language.
 | WAV association | `resona-file-wav.svg` | Generated yellow mapping plus format band |
 | FLAC association | `resona-file-flac.svg` | Generated canonical-violet mapping plus format band |
 | Visual reference | `icon-lab.html` | Direct references to the canonical SVG files |
+| NSIS artwork | `src-tauri/windows/nsis/*.bmp` | Generated from the icon and wordmark foundations |
 
 ## Semantic color hierarchy
 
@@ -85,6 +86,7 @@ Run:
 ```text
 npm run icons:sources
 npm run icons:windows
+npm run installer:artwork
 ```
 
 `icons:sources` applies the palette mappings and regenerates the three file SVGs.
@@ -95,9 +97,14 @@ npm run icons:windows
 - MP3, WAV, and FLAC association ICO files;
 - native taskbar control ICO files.
 
+`installer:artwork` produces the standard 24-bit NSIS header and sidebar BMPs.
+They contain only the canonical icon, wordmark, and record-groove motif, so the
+bitmaps do not duplicate language-specific installer copy.
+
 Use `node scripts/generate-file-icon-sources.mjs --check` and
-`node scripts/generate-windows-shell-icons.mjs --check` in release validation to
-detect generated files that no longer match their sources.
+`node scripts/generate-windows-shell-icons.mjs --check` together with
+`node scripts/generate-nsis-artwork.mjs --check` in release validation to detect
+generated files that no longer match their sources.
 
 With the Vite development server running, open
 `http://127.0.0.1:1420/assets/icon-lab.html`. The page contains no inline copies

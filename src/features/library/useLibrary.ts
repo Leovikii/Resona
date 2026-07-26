@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { selectAudioFiles, selectAudioFolders } from "../../shared/bridge/audioDialog";
 import { invokeTauri, isTauriRuntime } from "../../shared/bridge/tauri";
@@ -39,7 +39,12 @@ export function useLibrary() {
   const [loading, setLoading] = useState(false);
   const [itemsLoading, setItemsLoading] = useState(false);
   const [rejectedPaths, setRejectedPaths] = useState<RejectedPath[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const errorSequenceRef = useRef(0);
+  const [error, setError] = useState<{ id: number; message: string } | null>(null);
+  const reportError = useCallback((cause: unknown) => {
+    errorSequenceRef.current += 1;
+    setError({ id: errorSequenceRef.current, message: messageFrom(cause) });
+  }, []);
 
   const selectedPlaylist = useMemo(
     () => playlists.find((playlist) => playlist.id === selectedPlaylistId) ?? null,
@@ -59,11 +64,11 @@ export function useLibrary() {
       );
       setError(null);
     } catch (cause) {
-      setError(messageFrom(cause));
+      reportError(cause);
     } finally {
       setLoading(false);
     }
-  }, [preview]);
+  }, [preview, reportError]);
 
   useEffect(() => {
     void refresh();
@@ -85,11 +90,11 @@ export function useLibrary() {
       setError(null);
     } catch (cause) {
       setSelectedItems([]);
-      setError(messageFrom(cause));
+      reportError(cause);
     } finally {
       setItemsLoading(false);
     }
-  }, [preview, previewItemsByPlaylist]);
+  }, [preview, previewItemsByPlaylist, reportError]);
 
   const createPlaylist = useCallback(async ({
     ensureUniqueName = false,
@@ -146,12 +151,12 @@ export function useLibrary() {
       setError(null);
       return result;
     } catch (cause) {
-      setError(messageFrom(cause));
+      reportError(cause);
       return null;
     } finally {
       setLoading(false);
     }
-  }, [playlists, preview, previewItemsByPlaylist, refresh]);
+  }, [playlists, preview, previewItemsByPlaylist, refresh, reportError]);
 
   const renamePlaylist = useCallback(async (id: number, name: string) => {
     setLoading(true);
@@ -166,12 +171,12 @@ export function useLibrary() {
       setError(null);
       return true;
     } catch (cause) {
-      setError(messageFrom(cause));
+      reportError(cause);
       return false;
     } finally {
       setLoading(false);
     }
-  }, [preview, refresh]);
+  }, [preview, refresh, reportError]);
 
   const deletePlaylist = useCallback(async (id: number) => {
     setLoading(true);
@@ -194,12 +199,12 @@ export function useLibrary() {
       setError(null);
       return true;
     } catch (cause) {
-      setError(messageFrom(cause));
+      reportError(cause);
       return false;
     } finally {
       setLoading(false);
     }
-  }, [preview, refresh, selectedPlaylistId]);
+  }, [preview, refresh, reportError, selectedPlaylistId]);
 
   const deleteOtherPlaylists = useCallback(async (keepId: number | null) => {
     setLoading(true);
@@ -223,12 +228,12 @@ export function useLibrary() {
       setError(null);
       return true;
     } catch (cause) {
-      setError(messageFrom(cause));
+      reportError(cause);
       return false;
     } finally {
       setLoading(false);
     }
-  }, [playlists, preview, selectedPlaylistId]);
+  }, [playlists, preview, reportError, selectedPlaylistId]);
 
   const movePlaylist = useCallback(async (id: number, toPosition: number) => {
     setLoading(true);
@@ -241,12 +246,12 @@ export function useLibrary() {
       setError(null);
       return true;
     } catch (cause) {
-      setError(messageFrom(cause));
+      reportError(cause);
       return false;
     } finally {
       setLoading(false);
     }
-  }, [preview]);
+  }, [preview, reportError]);
 
   const addItems = useCallback(async (
     playlistId: number,
@@ -288,12 +293,12 @@ export function useLibrary() {
       setError(null);
       return result;
     } catch (cause) {
-      setError(messageFrom(cause));
+      reportError(cause);
       return null;
     } finally {
       setItemsLoading(false);
     }
-  }, [playlists, preview, previewItemsByPlaylist, refresh]);
+  }, [playlists, preview, previewItemsByPlaylist, refresh, reportError]);
 
   const chooseAndAddItems = useCallback(async (playlistId: number, position: number | null = null) => {
     const paths = preview
@@ -330,12 +335,12 @@ export function useLibrary() {
       setError(null);
       return true;
     } catch (cause) {
-      setError(messageFrom(cause));
+      reportError(cause);
       return false;
     } finally {
       setItemsLoading(false);
     }
-  }, [preview, previewItemsByPlaylist, refresh]);
+  }, [preview, previewItemsByPlaylist, refresh, reportError]);
 
   const removeItems = useCallback(async (playlistId: number, itemIds: number[]) => {
     if (itemIds.length === 0) return false;
@@ -359,12 +364,12 @@ export function useLibrary() {
       setError(null);
       return true;
     } catch (cause) {
-      setError(messageFrom(cause));
+      reportError(cause);
       return false;
     } finally {
       setItemsLoading(false);
     }
-  }, [preview, previewItemsByPlaylist, refresh]);
+  }, [preview, previewItemsByPlaylist, refresh, reportError]);
 
   const clearItems = useCallback(async (playlistId: number) => {
     setItemsLoading(true);
@@ -381,12 +386,12 @@ export function useLibrary() {
       setError(null);
       return true;
     } catch (cause) {
-      setError(messageFrom(cause));
+      reportError(cause);
       return false;
     } finally {
       setItemsLoading(false);
     }
-  }, [preview, refresh]);
+  }, [preview, refresh, reportError]);
 
   const moveItem = useCallback(async (
     playlistId: number,
@@ -414,12 +419,12 @@ export function useLibrary() {
       setError(null);
       return true;
     } catch (cause) {
-      setError(messageFrom(cause));
+      reportError(cause);
       return false;
     } finally {
       setItemsLoading(false);
     }
-  }, [preview, previewItemsByPlaylist]);
+  }, [preview, previewItemsByPlaylist, reportError]);
 
   const dismissRejected = useCallback(() => setRejectedPaths([]), []);
 

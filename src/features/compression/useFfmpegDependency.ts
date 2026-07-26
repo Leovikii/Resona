@@ -101,9 +101,12 @@ export function useFfmpegDependency() {
     }
   }, [preview]);
 
+  const dismissCommandError = useCallback(() => setCommandError(null), []);
+
   return {
     cancel,
     commandError,
+    dismissCommandError,
     install,
     refresh,
     snapshot,

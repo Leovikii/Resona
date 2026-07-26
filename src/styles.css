@@ -2100,22 +2100,7 @@ h2.page-heading {
   min-height: 0;
 }
 
-.error-banner {
-  max-width: calc(100% - 32px);
-  padding: 9px 12px;
-  position: absolute;
-  right: 16px;
-  bottom: 14px;
-  z-index: 5;
-  border-radius: var(--mantine-radius-sm);
-  color: var(--mantine-color-white);
-  background: var(--mantine-color-red-7);
-  box-shadow: var(--mantine-shadow-md);
-  font-size: 13px;
-  animation: notice-in 160ms ease both;
-}
-
-.import-notice {
+.app-notice {
   width: max-content;
   max-width: calc(100% - 32px);
   position: absolute;
@@ -2124,7 +2109,7 @@ h2.page-heading {
   z-index: 5;
 }
 
-.main-region[data-player-expanded] .import-notice {
+.main-region[data-player-expanded] .app-notice {
   bottom: 58px;
 }
 
