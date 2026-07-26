@@ -1222,7 +1222,7 @@ input {
   font-size: 18px;
   line-height: 1.45;
   text-align: left;
-  transition: color 160ms ease, transform 160ms ease;
+  transition: color 160ms ease;
 }
 
 .full-player-lyric-line:hover:not(:disabled),
@@ -1237,7 +1237,6 @@ input {
 .full-player-lyric-line[data-active] {
   color: var(--mantine-primary-color-filled);
   font-weight: 700;
-  transform: translateX(8px);
 }
 
 .content-viewport {
@@ -1466,33 +1465,6 @@ h2.page-heading {
   align-items: center;
   gap: 2px;
 }
-
-.app-context-menu {
-  min-width: 168px;
-  padding: 4px;
-  position: fixed;
-  z-index: 1000;
-}
-
-.app-context-menu button {
-  width: 100%;
-  min-height: 30px;
-  padding: 5px 8px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  border: 0;
-  border-radius: 4px;
-  color: var(--mantine-color-text);
-  background: transparent;
-  cursor: pointer;
-  font: inherit;
-  font-size: 13px;
-  text-align: left;
-}
-
-.app-context-menu button:hover:not(:disabled) { background: var(--mantine-color-default-hover); }
-.app-context-menu button:disabled { opacity: 0.45; cursor: default; }
 
 .saved-track-gap {
   height: 6px;

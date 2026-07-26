@@ -37,6 +37,11 @@ Windows WebView2 本身采用多进程架构；增加第二个 WebView 可能增
 - helper 需要 layered alpha、mouse leave 和短时 timer 动画；透明状态的首次命中必须实机验证。
 - 未来加入系统托盘、后台播放或文件关联时必须扩展生命周期和第二实例参数转发协议，不能修改 UI 即宣称支持。
 
+## 2026-07-26 置顶恢复补充
+
+- 歌词 WebView 与原生 helper 的 topmost 属于 `DesktopLyricsWindowService` 平台资源状态，不因锁定与否改变。失去焦点、系统恢复或 DPI 变化只触发一次无激活原生校正，不创建后台保活任务。
+- helper 的 38 px 逻辑命中区域保持不变；图标改用系统矢量字体并沿用歌词工具按钮的小圆角、白色图标和 hover 层级。组件库样式可作为视觉规范，但原生 helper 不为复用 React 组件增加 WebView。
+
 ## 2026-07-20 视觉交互补充
 
 - 桌面歌词增加独立文字透明度偏好；它只影响歌词文字，不改变窗口或背景 alpha。

@@ -213,11 +213,14 @@ pub async fn sync_window_theme(
 pub async fn show_audio_compression_window(
     app: AppHandle,
     dependency: State<'_, ManagedFfmpegDependencyService>,
+    service: State<'_, ManagedCompressionService>,
 ) -> Result<(), CompressionFailure> {
     dependency
         .require_ready()
         .map_err(compression_dependency_failure)?;
-    compression_window::show(&app)
+    compression_window::show(&app)?;
+    service.window_opened();
+    Ok(())
 }
 
 #[tauri::command]
@@ -746,9 +749,33 @@ pub async fn delete_playlist(
             .delete_playlist(id)
             .map_err(|error| error.failure())?;
         media_import
-            .detach_deleted_user_playlist(id)
+            .detach_deleted_user_playlists(&[id])
             .map_err(playlist_sync_failure)?;
         Ok(())
+    })
+    .await
+    .map_err(|error| PersistenceFailure {
+        code: "playlist_task_failed".to_owned(),
+        message: format!("playlist task failed: {error}"),
+    })?
+}
+
+#[tauri::command]
+pub async fn delete_other_playlists(
+    keep_id: Option<i64>,
+    persistence: State<'_, ManagedPersistence>,
+    media_import: State<'_, ManagedMediaImportService>,
+) -> Result<Vec<PlaylistSummary>, PersistenceFailure> {
+    let database = Arc::clone(persistence.inner());
+    let media_import = Arc::clone(media_import.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let deleted_ids = database
+            .delete_other_playlists(keep_id)
+            .map_err(|error| error.failure())?;
+        media_import
+            .detach_deleted_user_playlists(&deleted_ids)
+            .map_err(playlist_sync_failure)?;
+        database.list_playlists().map_err(|error| error.failure())
     })
     .await
     .map_err(|error| PersistenceFailure {

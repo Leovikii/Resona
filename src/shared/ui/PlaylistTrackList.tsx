@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActionIcon, Paper, Portal, Text } from "@mantine/core";
-import { Play, Trash2, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActionIcon, Paper, Text } from "@mantine/core";
+import { Eraser, FileAudio, FolderPlus, ListChecks, Play, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { usePointerReorder } from "./usePointerReorder";
 import { OverflowMarquee } from "./OverflowMarquee";
+import { AppContextMenu, type AppContextMenuItem } from "./AppContextMenu";
 
 export interface PlaylistTrackListItem {
   id: number;
@@ -42,8 +43,7 @@ export function PlaylistTrackList({
   const { t } = useTranslation();
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const [anchor, setAnchor] = useState<number | null>(null);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; trackId: number | null } | null>(null);
-  const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  const [contextTrackId, setContextTrackId] = useState<number | null>(null);
   const selectDraggedTrack = useCallback((itemId: number) => {
     setSelected(new Set([itemId]));
     setAnchor(itemId);
@@ -64,20 +64,6 @@ export function PlaylistTrackList({
     });
     setAnchor((current) => current !== null && items.some((item) => item.id === current) ? current : null);
   }, [items]);
-
-  useEffect(() => {
-    const dismiss = (event: PointerEvent) => {
-      if (event.target instanceof Node && contextMenuRef.current?.contains(event.target)) return;
-      setContextMenu(null);
-    };
-    window.addEventListener("pointerdown", dismiss);
-    const dismissOnBlur = () => setContextMenu(null);
-    window.addEventListener("blur", dismissOnBlur);
-    return () => {
-      window.removeEventListener("pointerdown", dismiss);
-      window.removeEventListener("blur", dismissOnBlur);
-    };
-  }, []);
 
   const selectedIds = useMemo(() => [...selected], [selected]);
   const clearSelection = useCallback(() => {
@@ -110,19 +96,17 @@ export function PlaylistTrackList({
   }, [anchor, items]);
 
   const openTrackMenu = useCallback((event: React.MouseEvent, itemId: number) => {
-    event.preventDefault();
     if (!selected.has(itemId)) {
       setSelected(new Set([itemId]));
       setAnchor(itemId);
     }
-    setContextMenu({ x: event.clientX, y: event.clientY, trackId: itemId });
+    setContextTrackId(itemId);
   }, [selected]);
 
   const openBlankMenu = useCallback((event: React.MouseEvent) => {
     const target = event.target as Element;
-    if (target.closest("[data-track-id], .playlist-selection-actions")) return;
-    event.preventDefault();
-    setContextMenu({ x: event.clientX, y: event.clientY, trackId: null });
+    if (target.closest("[data-track-id]")) return;
+    setContextTrackId(null);
   }, []);
 
   const removeSelected = useCallback(() => {
@@ -130,16 +114,73 @@ export function PlaylistTrackList({
     onRemove(selectedIds);
     clearSelection();
   }, [clearSelection, onRemove, selectedIds]);
+  const contextMenuItems: AppContextMenuItem[] = [
+    ...(contextTrackId !== null ? [{
+      icon: Play,
+      id: "play",
+      label: t("playback.play"),
+      onSelect: () => onPlay(contextTrackId),
+    }] : []),
+    {
+      destructive: true,
+      disabled: selectedIds.length === 0,
+      dividerBefore: contextTrackId !== null,
+      icon: Trash2,
+      id: "remove",
+      label: t("common.remove"),
+      onSelect: removeSelected,
+    },
+    {
+      icon: ListChecks,
+      id: "select-all",
+      label: t("library.selectAll"),
+      onSelect: () => {
+        setSelected(new Set(items.map((item) => item.id)));
+        setAnchor(items[0]?.id ?? null);
+      },
+    },
+    {
+      disabled: selectedIds.length === 0,
+      icon: X,
+      id: "clear-selection",
+      label: t("library.clearSelection"),
+      onSelect: clearSelection,
+    },
+    ...(contextTrackId === null ? [
+      {
+        dividerBefore: true,
+        icon: FileAudio,
+        id: "add-files",
+        label: t("library.addFiles"),
+        onSelect: onAddFiles,
+      },
+      {
+        icon: FolderPlus,
+        id: "add-folder",
+        label: t("library.addFolder"),
+        onSelect: onAddFolders,
+      },
+      {
+        destructive: true,
+        dividerBefore: true,
+        icon: Eraser,
+        id: "clear",
+        label: t("common.clear"),
+        onSelect: onClear,
+      },
+    ] : []),
+  ];
 
   return (
-    <div
-      className="playlist-track-area"
-      onClick={(event) => {
-        if ((event.target as Element).closest("[data-track-id], button, input, [role='button']")) return;
-        clearSelection();
-      }}
-      onContextMenu={openBlankMenu}
-    >
+    <AppContextMenu items={contextMenuItems}>
+      <div
+        className="playlist-track-area"
+        onClick={(event) => {
+          if ((event.target as Element).closest("[data-track-id], button, input, [role='button']")) return;
+          clearSelection();
+        }}
+        onContextMenu={openBlankMenu}
+      >
       <div className="playlist-selection-actions">
         <Text c="dimmed" size="sm">{t("common.tracks", { count: items.length })}</Text>
         <div className="playlist-selection-buttons">
@@ -209,21 +250,7 @@ export function PlaylistTrackList({
           data-active={reorder.insertionPosition === items.length || externalInsertionPosition === items.length || undefined}
         ><span /></div>
       </div>
-      {contextMenu && <Portal>
-        <Paper className="app-context-menu" ref={contextMenuRef} shadow="md" style={{ left: contextMenu.x, top: contextMenu.y }} withBorder>
-          {contextMenu.trackId !== null && (
-            <button onClick={() => { onPlay(contextMenu.trackId!); setContextMenu(null); }} type="button"><Play size={14} />{t("playback.play")}</button>
-          )}
-          <button disabled={selectedIds.length === 0} onClick={() => { removeSelected(); setContextMenu(null); }} type="button"><Trash2 size={14} />{t("common.remove")}</button>
-          <button onClick={() => { setSelected(new Set(items.map((item) => item.id))); setAnchor(items[0]?.id ?? null); setContextMenu(null); }} type="button">{t("library.selectAll")}</button>
-          <button onClick={() => { clearSelection(); setContextMenu(null); }} type="button"><X size={14} />{t("library.clearSelection")}</button>
-          {contextMenu.trackId === null && <>
-            <button onClick={() => { onAddFiles(); setContextMenu(null); }} type="button">{t("library.addFiles")}</button>
-            <button onClick={() => { onAddFolders(); setContextMenu(null); }} type="button">{t("library.addFolder")}</button>
-            <button onClick={() => { onClear(); setContextMenu(null); }} type="button">{t("common.clear")}</button>
-          </>}
-        </Paper>
-      </Portal>}
-    </div>
+      </div>
+    </AppContextMenu>
   );
 }

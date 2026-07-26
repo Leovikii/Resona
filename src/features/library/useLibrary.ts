@@ -201,6 +201,35 @@ export function useLibrary() {
     }
   }, [preview, refresh, selectedPlaylistId]);
 
+  const deleteOtherPlaylists = useCallback(async (keepId: number | null) => {
+    setLoading(true);
+    try {
+      const nextPlaylists = preview
+        ? playlists
+          .filter((playlist) => playlist.id === keepId)
+          .map((playlist, position) => ({ ...playlist, position }))
+        : await invokeTauri<PlaylistSummary[]>("delete_other_playlists", { keepId });
+      if (preview) {
+        const remainingIds = new Set(nextPlaylists.map((playlist) => playlist.id));
+        setPreviewItemsByPlaylist((current) => Object.fromEntries(
+          Object.entries(current).filter(([id]) => remainingIds.has(Number(id))),
+        ));
+      }
+      setPlaylists(nextPlaylists);
+      if (selectedPlaylistId !== keepId) {
+        setSelectedPlaylistId(null);
+        setSelectedItems([]);
+      }
+      setError(null);
+      return true;
+    } catch (cause) {
+      setError(messageFrom(cause));
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, [playlists, preview, selectedPlaylistId]);
+
   const movePlaylist = useCallback(async (id: number, toPosition: number) => {
     setLoading(true);
     try {
@@ -400,6 +429,7 @@ export function useLibrary() {
     chooseAndAddItems,
     clearItems,
     createPlaylist,
+    deleteOtherPlaylists,
     deletePlaylist,
     dismissRejected,
     error,

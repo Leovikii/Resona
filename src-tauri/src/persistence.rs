@@ -184,6 +184,52 @@ impl PersistenceService {
         transaction.commit().map_err(query_error)
     }
 
+    pub fn delete_other_playlists(
+        &self,
+        keep_id: Option<i64>,
+    ) -> Result<Vec<i64>, PersistenceError> {
+        let connection = self.connection.lock().map_err(|_| poisoned())?;
+        let transaction = connection.unchecked_transaction().map_err(query_error)?;
+        if let Some(id) = keep_id {
+            ensure_playlist_exists(&transaction, id)?;
+        }
+        let deleted_ids = {
+            let (query, parameter) = if let Some(id) = keep_id {
+                (
+                    "SELECT id FROM playlists WHERE id <> ?1 ORDER BY position, id",
+                    Some(id),
+                )
+            } else {
+                ("SELECT id FROM playlists ORDER BY position, id", None)
+            };
+            let mut statement = transaction.prepare(query).map_err(query_error)?;
+            match parameter {
+                Some(id) => statement
+                    .query_map(params![id], |row| row.get::<_, i64>(0))
+                    .map_err(query_error)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(query_error)?,
+                None => statement
+                    .query_map([], |row| row.get::<_, i64>(0))
+                    .map_err(query_error)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(query_error)?,
+            }
+        };
+        if let Some(id) = keep_id {
+            transaction
+                .execute("DELETE FROM playlists WHERE id <> ?1", params![id])
+                .map_err(query_error)?;
+        } else {
+            transaction
+                .execute("DELETE FROM playlists", [])
+                .map_err(query_error)?;
+        }
+        normalize_playlist_positions(&transaction)?;
+        transaction.commit().map_err(query_error)?;
+        Ok(deleted_ids)
+    }
+
     pub fn move_playlist(
         &self,
         id: i64,
@@ -1100,6 +1146,51 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![(second.playlist.id, 0), (first.playlist.id, 1)]
         );
+    }
+
+    #[test]
+    fn deletes_other_playlists_atomically_and_validates_the_kept_playlist() {
+        let service = service();
+        let first = service
+            .create_playlist_with_items("First", &[], None, false)
+            .expect("create first");
+        let kept = service
+            .create_playlist_with_items("Kept", &[], None, false)
+            .expect("create kept");
+        let last = service
+            .create_playlist_with_items("Last", &[], None, false)
+            .expect("create last");
+
+        assert!(matches!(
+            service.delete_other_playlists(Some(i64::MAX)),
+            Err(PersistenceError::PlaylistNotFound)
+        ));
+        assert_eq!(
+            service.list_playlists().expect("unchanged playlists").len(),
+            3
+        );
+
+        assert_eq!(
+            service
+                .delete_other_playlists(Some(kept.playlist.id))
+                .expect("delete other playlists"),
+            vec![first.playlist.id, last.playlist.id]
+        );
+        let remaining = service.list_playlists().expect("remaining playlist");
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, kept.playlist.id);
+        assert_eq!(remaining[0].position, 0);
+
+        assert_eq!(
+            service
+                .delete_other_playlists(None)
+                .expect("delete all user playlists"),
+            vec![kept.playlist.id]
+        );
+        assert!(service
+            .list_playlists()
+            .expect("no remaining playlists")
+            .is_empty());
     }
 
     #[test]

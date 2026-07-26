@@ -410,12 +410,17 @@ impl MediaImportService {
             .map_err(|error| error.failure())
     }
 
-    pub fn detach_deleted_user_playlist(
+    pub fn detach_deleted_user_playlists(
         &self,
-        playlist_id: i64,
+        playlist_ids: &[i64],
     ) -> Result<Option<DefaultPlaylistSnapshot>, PlaybackFailure> {
         let mut state = self.state.lock().map_err(|_| state_poisoned())?;
-        if state.active_playlist != Some(ActivePlaylistSnapshot::user_playlist(playlist_id)) {
+        let deleted_active_playlist = state
+            .active_playlist
+            .as_ref()
+            .and_then(|playlist| playlist.playlist_id)
+            .is_some_and(|playlist_id| playlist_ids.contains(&playlist_id));
+        if !deleted_active_playlist {
             return Ok(None);
         }
         let playback = self.engine.snapshot().map_err(|error| error.failure())?;
@@ -927,6 +932,30 @@ mod tests {
             .is_none());
         assert_eq!(engine.snapshot().expect("sequence snapshot").queue.len(), 1);
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn batch_playlist_deletion_detaches_the_active_playlist_once() {
+        let engine = Arc::new(RodioPlaybackEngine::new());
+        let service = MediaImportService::new(engine);
+        service
+            .state
+            .lock()
+            .expect("playlist state")
+            .active_playlist = Some(ActivePlaylistSnapshot::user_playlist(7));
+
+        assert!(service
+            .detach_deleted_user_playlists(&[5, 6])
+            .expect("ignore retained active playlist")
+            .is_none());
+        assert!(service
+            .detach_deleted_user_playlists(&[6, 7, 8])
+            .expect("detach deleted active playlist")
+            .is_some());
+        assert_eq!(
+            service.active_playlist().expect("active playlist"),
+            Some(ActivePlaylistSnapshot::default_playlist())
+        );
     }
 
     fn test_directory() -> PathBuf {
