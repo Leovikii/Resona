@@ -112,7 +112,7 @@ function labelPaths(format) {
 function renderFileIcon(mainIcon, format) {
   const geometry = mainIcon.match(
     /  <g transform="translate\(-6\.3158 -6\.3158\) scale\(1\.2632\)">\r?\n([\s\S]*?)\r?\n  <\/g>/,
-  )?.[1];
+  )?.[1].replaceAll("\r\n", "\n");
   if (!geometry) {
     throw new Error("Could not locate the main icon geometry group");
   }

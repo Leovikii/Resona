@@ -42,6 +42,21 @@
 - 交付仍使用受保护 PR 合并与单一 `main-merge-delivery.yml`；本地不保存发布密钥，
   不提供 PowerShell 发布脚本或平台专属签名依赖。
 
+## 最终本地门禁
+
+- 模拟 PR 流程通过：干净 `npm ci`、35/35 前端与发布规则测试、生产构建、39 个
+  音频夹具、三套品牌资源复现、许可证无差异、工作流 lint、Rust format 和 Clippy。
+- Rust 全量测试为 102 通过、9 个依赖真实音频设备或固定 FFmpeg 工具的用例按设计
+  忽略。稳定版默认关闭预览更新，预览构建默认开启，两种默认值与偏好持久化均有覆盖。
+- 文件图标生成器已在模拟 Windows CRLF checkout 中验证，主 SVG 的换行格式不再
+  影响 MP3/WAV/FLAC 派生 SVG 的字节复现。
+- 本地 unsigned 验证安装包：
+  `src-tauri/target/release/bundle/nsis/Resona_0.1.0_x64-setup.exe`，
+  6,308,037 bytes，SHA-256
+  `1F5DE37BD6FFB875A11FAB5D42B2B9722CF9F9343F7172C5C93C5A47BD906E40`。
+  它只用于本机验证；正式 Release 必须由受保护环境生成 updater `.sig` 与
+  `latest.json`。
+
 ## 已知限制
 
 - Windows 原生文件选择窗口仍存在无稳定复现的低频阻塞，重新调查条件见

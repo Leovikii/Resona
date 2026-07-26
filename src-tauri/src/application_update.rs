@@ -113,7 +113,7 @@ impl ApplicationUpdateService {
     pub fn load(data_dir: &Path) -> Self {
         let path = data_dir.join(STATE_FILE);
         let current_is_prerelease = current_version()
-            .map(|version| !version.pre.is_empty())
+            .map(|version| receive_prerelease_updates_default(&version))
             .unwrap_or(false);
         let state = match std::fs::read(&path) {
             Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|error| {
@@ -395,6 +395,10 @@ fn current_version() -> Result<Version, ApplicationUpdateFailure> {
     })
 }
 
+fn receive_prerelease_updates_default(version: &Version) -> bool {
+    !version.pre.is_empty()
+}
+
 fn fetch_github_releases() -> Result<Vec<GithubRelease>, ApplicationUpdateFailure> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_connect(Some(Duration::from_secs(5)))
@@ -561,24 +565,35 @@ mod tests {
     }
 
     #[test]
-    fn preference_defaults_to_preview_for_prerelease_build_and_round_trips() {
+    fn preference_default_matches_build_channel_and_round_trips() {
+        assert!(!receive_prerelease_updates_default(
+            &Version::parse("0.1.0").unwrap()
+        ));
+        assert!(receive_prerelease_updates_default(
+            &Version::parse("0.1.1-rc.1").unwrap()
+        ));
+
         let directory = temporary_directory();
         let service = ApplicationUpdateService::load(&directory);
-        assert!(
+        let expected_default =
+            receive_prerelease_updates_default(&Version::parse(env!("CARGO_PKG_VERSION")).unwrap());
+        assert_eq!(
             service
                 .snapshot()
                 .expect("default update snapshot")
-                .receive_prerelease_updates
+                .receive_prerelease_updates,
+            expected_default
         );
         service
-            .set_receive_prerelease_updates(false)
+            .set_receive_prerelease_updates(!expected_default)
             .expect("persist update preference");
         let restored = ApplicationUpdateService::load(&directory);
-        assert!(
-            !restored
+        assert_eq!(
+            restored
                 .snapshot()
                 .expect("restored update snapshot")
-                .receive_prerelease_updates
+                .receive_prerelease_updates,
+            !expected_default
         );
         std::fs::remove_dir_all(directory).expect("remove update fixture");
     }
