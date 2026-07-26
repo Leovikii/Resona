@@ -5,6 +5,7 @@ All SVG files in this directory are the canonical source artwork for the confirm
 | Purpose | Asset | Design |
 | --- | --- | --- |
 | Application icon | `resona-icon.svg` | Violet turntable, black record, rose-red hairpin stylus |
+| Default artwork | `resona-default-artwork.svg` | Standalone black record with the canonical violet rim and rose-red center label |
 | Standalone mark | `resona-turntable-mark.svg` | Same transparent 48 × 48 turntable mark |
 | Wordmark | `resona-resonance-wordmark.svg` | `Resona` as a window onto nested violet, plum, and rose record-label fields |
 | MP3 file association | `resona-file-mp3.svg` | Blue turntable with dark lower band and white `MP3` label |

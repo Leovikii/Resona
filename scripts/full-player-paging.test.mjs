@@ -9,7 +9,9 @@ import {
 } from "../src/app/fullPlayerPaging.ts";
 
 const input = (overrides = {}) => ({
+  artworkResolved: false,
   compact: false,
+  hasArtwork: false,
   lineCount: 0,
   lyricsStatus: "idle",
   trackKey: "track-a",
@@ -19,7 +21,17 @@ const input = (overrides = {}) => ({
 test("resolved lyrics choose the expected wide and compact defaults", () => {
   assert.equal(createFullPlayerPagingState(input({ lyricsStatus: "ready", lineCount: 2 })).page, "lyrics");
   assert.equal(createFullPlayerPagingState(input({ lyricsStatus: "missing" })).page, "details");
-  assert.equal(createFullPlayerPagingState(input({ compact: true, lyricsStatus: "missing" })).page, "artwork");
+  assert.equal(createFullPlayerPagingState(input({
+    artworkResolved: true,
+    compact: true,
+    hasArtwork: true,
+    lyricsStatus: "missing",
+  })).page, "artwork");
+  assert.equal(createFullPlayerPagingState(input({
+    artworkResolved: true,
+    compact: true,
+    lyricsStatus: "missing",
+  })).page, "details");
 });
 
 test("late lyrics resolution does not replace a manual page selection", () => {
@@ -34,22 +46,71 @@ test("a new track receives its own default page", () => {
     createFullPlayerPagingState(input({ lyricsStatus: "ready", lineCount: 3 })),
     "details",
   );
-  const next = reconcileFullPlayerPaging(selected, input({ compact: true, lyricsStatus: "missing", trackKey: "track-b" }));
+  const next = reconcileFullPlayerPaging(selected, input({
+    artworkResolved: true,
+    compact: true,
+    hasArtwork: true,
+    lyricsStatus: "missing",
+    trackKey: "track-b",
+  }));
   assert.equal(next.page, "artwork");
   assert.equal(next.manuallySelected, false);
 });
 
 test("a new track waits for its own lyrics result before applying the no-lyrics default", () => {
-  const previous = createFullPlayerPagingState(input({ lyricsStatus: "ready", lineCount: 3 }));
+  const previous = selectFullPlayerPage(
+    createFullPlayerPagingState(input({ lyricsStatus: "ready", lineCount: 3 })),
+    "details",
+  );
   const loading = reconcileFullPlayerPaging(previous, input({ compact: true, trackKey: "track-b" }));
-  assert.equal(loading.page, "lyrics");
+  assert.equal(loading.page, "details");
   assert.equal(loading.lyricsResolved, false);
 
   const missing = reconcileFullPlayerPaging(
     loading,
-    input({ compact: true, lyricsStatus: "missing", trackKey: "track-b" }),
+    input({
+      artworkResolved: true,
+      compact: true,
+      hasArtwork: true,
+      lyricsStatus: "missing",
+      trackKey: "track-b",
+    }),
   );
   assert.equal(missing.page, "artwork");
+});
+
+test("an unresolved track change preserves the current available page", () => {
+  const previous = selectFullPlayerPage(createFullPlayerPagingState(input()), "details");
+  const loading = reconcileFullPlayerPaging(previous, input({ trackKey: "track-b" }));
+  assert.equal(loading.page, "details");
+  assert.equal(loading.manuallySelected, false);
+
+  const ready = reconcileFullPlayerPaging(
+    loading,
+    input({ lyricsStatus: "ready", lineCount: 3, trackKey: "track-b" }),
+  );
+  assert.equal(ready.page, "lyrics");
+});
+
+test("compact playback falls back to details when lyrics and artwork are both absent", () => {
+  const previous = selectFullPlayerPage(createFullPlayerPagingState(input()), "details");
+  const loading = reconcileFullPlayerPaging(
+    previous,
+    input({ compact: true, trackKey: "track-b" }),
+  );
+  assert.equal(loading.page, "details");
+
+  const resolved = reconcileFullPlayerPaging(
+    loading,
+    input({
+      artworkResolved: true,
+      compact: true,
+      lyricsStatus: "missing",
+      trackKey: "track-b",
+    }),
+  );
+  assert.equal(resolved.page, "details");
+  assert.equal(resolved.defaultResolved, true);
 });
 
 test("page arrows stop at both boundaries", () => {

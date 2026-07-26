@@ -120,7 +120,7 @@ import {
   selectFullPlayerPage,
   type FullPlayerPage,
 } from "./fullPlayerPaging";
-import artworkPlaceholder from "../../assets/resona-icon.svg";
+import artworkPlaceholder from "../../assets/resona-default-artwork.svg";
 
 type Selection = CompactNavigationSelection;
 
@@ -2250,8 +2250,13 @@ function FullPlayerView({ compact, details, error, loading, lyrics, onClose, onS
   const lyricsMatchTrack = lyrics.audioPath === trackKey;
   const lyricsStatus = lyricsMatchTrack ? lyrics.status : "idle";
   const lines = lyricsMatchTrack ? lyrics.document?.lines ?? [] : [];
+  const detailsMatchTrack = details?.path === trackKey;
+  const artworkResolved = !loading && (detailsMatchTrack || error !== null);
+  const hasArtwork = detailsMatchTrack && Boolean(details.artworkDataUrl);
   const [paging, setPaging] = useState(() => createFullPlayerPagingState({
+    artworkResolved,
     compact,
+    hasArtwork,
     lineCount: lines.length,
     lyricsStatus,
     trackKey,
@@ -2262,14 +2267,16 @@ function FullPlayerView({ compact, details, error, loading, lyrics, onClose, onS
   const previousPage = adjacentFullPlayerPage(pages, paging.page, -1);
   const nextPage = adjacentFullPlayerPage(pages, paging.page, 1);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setPaging((current) => reconcileFullPlayerPaging(current, {
+      artworkResolved,
       compact,
+      hasArtwork,
       lineCount: lines.length,
       lyricsStatus,
       trackKey,
     }));
-  }, [compact, lines.length, lyricsStatus, trackKey]);
+  }, [artworkResolved, compact, hasArtwork, lines.length, lyricsStatus, trackKey]);
 
   useEffect(() => {
     if (paging.page !== "lyrics" || !lyricsMatchTrack || lyrics.activeLineIndex === null) return;

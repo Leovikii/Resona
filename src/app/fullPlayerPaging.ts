@@ -4,6 +4,7 @@ export type FullPlayerPage = "artwork" | "lyrics" | "details";
 
 export interface FullPlayerPagingState {
   compact: boolean;
+  defaultResolved: boolean;
   lyricsResolved: boolean;
   manuallySelected: boolean;
   page: FullPlayerPage;
@@ -11,7 +12,9 @@ export interface FullPlayerPagingState {
 }
 
 interface FullPlayerPagingInput {
+  artworkResolved: boolean;
   compact: boolean;
+  hasArtwork: boolean;
   lineCount: number;
   lyricsStatus: LyricsStatus;
   trackKey: string | null;
@@ -25,9 +28,10 @@ export function defaultFullPlayerPage(
   compact: boolean,
   lyricsStatus: LyricsStatus,
   lineCount: number,
+  hasArtwork: boolean,
 ): FullPlayerPage {
   if (lyricsStatus === "ready" && lineCount > 0) return "lyrics";
-  if (isLyricsResolved(lyricsStatus)) return compact ? "artwork" : "details";
+  if (isLyricsResolved(lyricsStatus)) return compact && hasArtwork ? "artwork" : "details";
   return "lyrics";
 }
 
@@ -36,9 +40,15 @@ export function createFullPlayerPagingState(
 ): FullPlayerPagingState {
   return {
     compact: input.compact,
+    defaultResolved: isDefaultResolved(input),
     lyricsResolved: isLyricsResolved(input.lyricsStatus),
     manuallySelected: false,
-    page: defaultFullPlayerPage(input.compact, input.lyricsStatus, input.lineCount),
+    page: defaultFullPlayerPage(
+      input.compact,
+      input.lyricsStatus,
+      input.lineCount,
+      input.hasArtwork,
+    ),
     trackKey: input.trackKey,
   };
 }
@@ -47,20 +57,34 @@ export function reconcileFullPlayerPaging(
   current: FullPlayerPagingState,
   input: FullPlayerPagingInput,
 ): FullPlayerPagingState {
-  if (current.trackKey !== input.trackKey) return createFullPlayerPagingState(input);
+  if (current.trackKey !== input.trackKey) {
+    const next = createFullPlayerPagingState(input);
+    const currentPageAvailable = fullPlayerPages(input.compact).includes(current.page);
+    return {
+      ...next,
+      page: next.defaultResolved || !currentPageAvailable ? next.page : current.page,
+    };
+  }
 
-  const resolved = isLyricsResolved(input.lyricsStatus);
+  const defaultResolved = isDefaultResolved(input);
+  const lyricsResolved = isLyricsResolved(input.lyricsStatus);
   const pages = fullPlayerPages(input.compact);
   const layoutChanged = current.compact !== input.compact;
   const pageUnavailable = !pages.includes(current.page);
-  const applyResolvedDefault = !current.lyricsResolved && resolved && !current.manuallySelected;
+  const applyResolvedDefault = !current.defaultResolved && defaultResolved && !current.manuallySelected;
 
   return {
     ...current,
     compact: input.compact,
-    lyricsResolved: current.lyricsResolved || resolved,
+    defaultResolved,
+    lyricsResolved: current.lyricsResolved || lyricsResolved,
     page: pageUnavailable || applyResolvedDefault
-      ? defaultFullPlayerPage(input.compact, input.lyricsStatus, input.lineCount)
+      ? defaultFullPlayerPage(
+        input.compact,
+        input.lyricsStatus,
+        input.lineCount,
+        input.hasArtwork,
+      )
       : current.page,
     manuallySelected: layoutChanged && pageUnavailable ? false : current.manuallySelected,
   };
@@ -85,4 +109,10 @@ export function adjacentFullPlayerPage(
 
 function isLyricsResolved(status: LyricsStatus) {
   return status === "missing" || status === "empty" || status === "ready" || status === "failed";
+}
+
+function isDefaultResolved(input: FullPlayerPagingInput) {
+  if (!isLyricsResolved(input.lyricsStatus)) return false;
+  if (input.lyricsStatus === "ready" && input.lineCount > 0) return true;
+  return !input.compact || input.artworkResolved;
 }

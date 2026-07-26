@@ -51,7 +51,9 @@ export function useTrackDetails(path: string | null) {
     let disposed = false;
     setState((current) => ({ ...current, loading: true, error: null }));
     void invokeTauri<TrackDetails>("get_track_details", { path })
-      .then((details) => {
+      .then(async (details) => {
+        if (disposed) return;
+        await decodeArtwork(details.artworkDataUrl);
         if (!disposed) setState({ details, loading: false, error: null });
       })
       .catch((error) => {
@@ -61,4 +63,15 @@ export function useTrackDetails(path: string | null) {
   }, [path]);
 
   return state;
+}
+
+async function decodeArtwork(source: string | null) {
+  if (!source) return;
+  const image = new Image();
+  image.src = source;
+  try {
+    await image.decode();
+  } catch (error) {
+    console.warn("track artwork pre-decode failed", error);
+  }
 }
