@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode, WheelEvent } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen } from "@tauri-apps/api/event";
@@ -97,7 +97,11 @@ import { listInsertionPositionAtY, usePointerReorder } from "../shared/ui/usePoi
 import { scrollViewportAtPointer, type ScrollAxis } from "../shared/ui/edgeAutoScroll";
 import { PlaylistTrackList } from "../shared/ui/PlaylistTrackList";
 import { AddMediaMenu } from "../shared/ui/AddMediaMenu";
-import { AppContextMenu, type AppContextMenuItem } from "../shared/ui/AppContextMenu";
+import {
+  AppContextMenu,
+  closeActiveContextMenu,
+  type AppContextMenuItem,
+} from "../shared/ui/AppContextMenu";
 import { BrandWordmark } from "../shared/ui/BrandWordmark";
 import { CompactTopNavigation, type CompactNavigationSelection } from "../shared/ui/CompactTopNavigation";
 import { OverflowMarquee } from "../shared/ui/OverflowMarquee";
@@ -162,6 +166,12 @@ export default function App() {
   useEffect(() => {
     if (applicationLifetime.closePromptOpen) setRememberCloseDecision(false);
   }, [applicationLifetime.closePromptOpen]);
+
+  useLayoutEffect(() => {
+    if (applicationLifetime.closePromptOpen || applicationLifetime.exitConfirmationOpen) {
+      closeActiveContextMenu();
+    }
+  }, [applicationLifetime.closePromptOpen, applicationLifetime.exitConfirmationOpen]);
 
   useEffect(() => {
     let timer = 0;
