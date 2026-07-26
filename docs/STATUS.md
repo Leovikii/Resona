@@ -4,8 +4,8 @@
 
 ## 当前版本
 
-包版本已统一为 `0.1.0`，状态为 **Ready for owner release**。功能、品牌和文档收口
-已完成；项目所有者发布正式 GitHub Release 后再标记为 Completed。
+`0.1.0` 已通过受保护的交付链发布为首个 Windows x64 正式版，状态为
+**Completed**。本版本的开发、验收和发行工作已经结束。
 
 当前门禁见 [0.1.0 计划](plans/0.1.0.md)，公开说明见
 [0.1.0 release notes](releases/0.1.0.md)。
@@ -64,8 +64,7 @@
 - 32-bit integer/float WAV 转换为 24-bit FLAC；不支持播放 32-bit FLAC。
 - 多显示器、DPI、睡眠和音频设备恢复仍应随实际环境与问题报告继续抽查。
 
-## 所有者待办
+## 发行结果
 
-1. 确认受保护 GitHub `release` Environment 中的 updater 公钥、私钥和可选密码。
-2. 经 PR 将 `0.1.0` 合并到 `main`，由交付工作流生成 stable Release 和签名更新产物。
-3. 公布安装包 SHA-256，并从正式渠道验证下载、安装、文件关联和一次应用内更新。
+- `v0.1.0` stable Release 已由受保护的 `main` 交付链成功发布。
+- 0.1.0 计划已关闭；后续修复和功能分别进入 0.1.x 或新的版本计划。
