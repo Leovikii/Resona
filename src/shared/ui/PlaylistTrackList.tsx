@@ -1,15 +1,44 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActionIcon, Paper, Text } from "@mantine/core";
-import { Eraser, FileAudio, FolderPlus, ListChecks, Play, Trash2, X } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ActionIcon, Paper, Text, UnstyledButton } from "@mantine/core";
+import {
+  ChevronDown,
+  ChevronRight,
+  Eraser,
+  FileAudio,
+  Info,
+  Folder,
+  FolderOpen,
+  FolderPlus,
+  ListChecks,
+  Play,
+  Trash2,
+  X,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { usePointerReorder } from "./usePointerReorder";
 import { OverflowMarquee } from "./OverflowMarquee";
 import { AppContextMenu, type AppContextMenuItem } from "./AppContextMenu";
+import {
+  buildPlaylistTree,
+  playlistFolderPaths,
+  playlistRootPaths,
+  playlistTrackFolderPaths,
+  playlistTrackTitle,
+  resolvePlaylistFolderState,
+  type PlaylistFolderState,
+  type PlaylistTreeNode,
+} from "./playlistTree";
 
 export interface PlaylistTrackListItem {
   id: number;
   displayName: string;
+  path: string;
+  folderRoot: string | null;
+}
+
+export interface PlaylistTrackLocateRequest {
+  id: number;
   path: string;
 }
 
@@ -17,33 +46,63 @@ interface PlaylistTrackListProps {
   busy: boolean;
   currentPath: string | null;
   externalInsertionPosition: number | null;
+  folderState: PlaylistFolderState | undefined;
   items: PlaylistTrackListItem[];
+  locateRequest: PlaylistTrackLocateRequest | null;
   onAddFiles: () => void;
   onAddFolders: () => void;
   onClear: () => void;
+  onFolderStateChange: (state: PlaylistFolderState) => void;
+  onLocateHandled: (requestId: number) => void;
   onMove: (itemId: number, toPosition: number) => void;
   onPlay: (itemId: number) => void;
   onRemove: (itemIds: number[]) => void;
+  onShowInfo: (path: string) => void;
+  onVisiblePaths: (paths: string[]) => void;
   scrollViewportRef: { current: HTMLDivElement | null };
+  summaries: Map<string, import("../model/metadata").TrackSummary>;
+  treeKey: string;
 }
 
 export function PlaylistTrackList({
   busy,
   currentPath,
   externalInsertionPosition,
+  folderState,
   items,
+  locateRequest,
   onAddFiles,
   onAddFolders,
   onClear,
+  onFolderStateChange,
+  onLocateHandled,
   onMove,
   onPlay,
   onRemove,
+  onShowInfo,
+  onVisiblePaths,
   scrollViewportRef,
+  summaries,
+  treeKey,
 }: PlaylistTrackListProps) {
   const { t } = useTranslation();
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const [anchor, setAnchor] = useState<number | null>(null);
   const [contextTrackId, setContextTrackId] = useState<number | null>(null);
+  const handledLocateRequestRef = useRef<number | null>(null);
+  const tree = useMemo(() => buildPlaylistTree(items), [items]);
+  const rootPaths = useMemo(() => playlistRootPaths(items), [items]);
+  const folderPaths = useMemo(() => playlistFolderPaths(tree), [tree]);
+  const rootPathKey = rootPaths.join("\0");
+  const folderPathKey = folderPaths.join("\0");
+  const resolvedFolderState = useMemo(
+    () => resolvePlaylistFolderState(folderState, rootPaths, folderPaths),
+    [folderPathKey, folderPaths, folderState, rootPathKey, rootPaths],
+  );
+  const expandedFolders = useMemo(
+    () => new Set(resolvedFolderState.expandedPaths),
+    [resolvedFolderState.expandedPaths],
+  );
   const selectDraggedTrack = useCallback((itemId: number) => {
     setSelected(new Set([itemId]));
     setAnchor(itemId);
@@ -64,6 +123,68 @@ export function PlaylistTrackList({
     });
     setAnchor((current) => current !== null && items.some((item) => item.id === current) ? current : null);
   }, [items]);
+
+  useEffect(() => {
+    if (!folderStatesEqual(folderState, resolvedFolderState)) {
+      onFolderStateChange(resolvedFolderState);
+    }
+  }, [folderState, onFolderStateChange, resolvedFolderState, treeKey]);
+
+  useEffect(() => {
+    if (!locateRequest) return;
+    const item = items.find((candidate) => candidate.path === locateRequest.path);
+    if (!item) return;
+    const expanded = new Set(resolvedFolderState.expandedPaths);
+    const ancestors = playlistTrackFolderPaths(item);
+    if (ancestors.every((path) => expanded.has(path))) return;
+    for (const path of ancestors) expanded.add(path);
+    onFolderStateChange({
+      expandedPaths: folderPaths.filter((path) => expanded.has(path)),
+      seenRootPaths: resolvedFolderState.seenRootPaths,
+    });
+  }, [folderPaths, items, locateRequest, onFolderStateChange, resolvedFolderState]);
+
+  useLayoutEffect(() => {
+    if (!locateRequest || handledLocateRequestRef.current === locateRequest.id) return;
+    const item = items.find((candidate) => candidate.path === locateRequest.path);
+    const viewport = scrollViewportRef.current;
+    const row = item
+      ? reorder.listRef.current?.querySelector<HTMLElement>(`[data-track-id="${item.id}"]`)
+      : null;
+    if (!viewport || !row) return;
+    const viewportBounds = viewport.getBoundingClientRect();
+    const rowBounds = row.getBoundingClientRect();
+    const top = viewport.scrollTop
+      + rowBounds.top
+      - viewportBounds.top
+      - (viewportBounds.height - rowBounds.height) / 2;
+    viewport.scrollTo({ behavior: "smooth", top: Math.max(0, top) });
+    row.focus({ preventScroll: true });
+    handledLocateRequestRef.current = locateRequest.id;
+    onLocateHandled(locateRequest.id);
+  }, [expandedFolders, items, locateRequest, onLocateHandled, reorder.listRef, scrollViewportRef]);
+
+  useEffect(() => {
+    const container = reorder.listRef.current;
+    const root = scrollViewportRef.current;
+    if (!container || !root || typeof IntersectionObserver === "undefined") {
+      onVisiblePaths(items.slice(0, 32).map((item) => item.path));
+      return;
+    }
+    const itemsById = new Map(items.map((item) => [String(item.id), item]));
+    const visiblePaths = new Set<string>();
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        const path = itemsById.get((entry.target as HTMLElement).dataset.trackId ?? "")?.path;
+        if (!path) continue;
+        if (entry.isIntersecting) visiblePaths.add(path);
+        else visiblePaths.delete(path);
+      }
+      onVisiblePaths([...visiblePaths]);
+    }, { root, rootMargin: "160px 0px" });
+    container.querySelectorAll<HTMLElement>("[data-track-id]").forEach((row) => observer.observe(row));
+    return () => observer.disconnect();
+  }, [expandedFolders, items, onVisiblePaths, reorder.listRef, scrollViewportRef, tree]);
 
   const selectedIds = useMemo(() => [...selected], [selected]);
   const clearSelection = useCallback(() => {
@@ -114,12 +235,29 @@ export function PlaylistTrackList({
     onRemove(selectedIds);
     clearSelection();
   }, [clearSelection, onRemove, selectedIds]);
+  const toggleFolder = useCallback((path: string) => {
+    const expanded = new Set(resolvedFolderState.expandedPaths);
+    if (expanded.has(path)) expanded.delete(path);
+    else expanded.add(path);
+    onFolderStateChange({
+      expandedPaths: folderPaths.filter((folderPath) => expanded.has(folderPath)),
+      seenRootPaths: resolvedFolderState.seenRootPaths,
+    });
+  }, [folderPaths, onFolderStateChange, resolvedFolderState]);
   const contextMenuItems: AppContextMenuItem[] = [
     ...(contextTrackId !== null ? [{
       icon: Play,
       id: "play",
       label: t("playback.play"),
       onSelect: () => onPlay(contextTrackId),
+    }, {
+      icon: Info,
+      id: "file-info",
+      label: t("metadata.fileInfo"),
+      onSelect: () => {
+        const item = items.find((candidate) => candidate.id === contextTrackId);
+        if (item) onShowInfo(item.path);
+      },
     }] : []),
     {
       destructive: true,
@@ -193,57 +331,19 @@ export function PlaylistTrackList({
         data-internal-drag={reorder.draggedId !== null || undefined}
         ref={reorder.listRef}
       >
-        {items.map((item, index) => {
-          const current = currentPath === item.path;
-          return <div className="saved-track-slot" key={item.id}>
-          <div
-            className="saved-track-gap"
-            data-active={reorder.insertionPosition === index || externalInsertionPosition === index || undefined}
-          ><span /></div>
-          <Paper
-            className="saved-track-row"
-            data-current={current || undefined}
-            data-dragging={reorder.draggedId === item.id || undefined}
-            data-reorder-position={index}
-            data-selected={selected.has(item.id) || undefined}
-            data-track-id={item.id}
-            data-track-position={index}
-            aria-selected={selected.has(item.id)}
-            onClick={(event) => {
-              if (!reorder.consumeClick()) selectTrack(event, item.id);
-            }}
-            onContextMenu={(event) => openTrackMenu(event, item.id)}
-            onDoubleClick={() => onPlay(item.id)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") onPlay(item.id);
-              if (event.key === " " && !event.repeat) {
-                event.preventDefault();
-                selectTrack(event as unknown as React.MouseEvent, item.id);
-              }
-            }}
-            onPointerCancel={reorder.onPointerCancel}
-            onPointerDown={(event) => {
-              if (event.ctrlKey || event.metaKey || event.shiftKey) return;
-              reorder.onPointerDown(event, item.id);
-            }}
-            onPointerMove={reorder.onPointerMove}
-            onPointerUp={reorder.onPointerUp}
-            role="option"
-            tabIndex={0}
-          >
-            <span className="track-index">
-              {current ? (
-                <span aria-label={t("playback.playing")} className="playlist-playing-indicator track-playing-indicator">
-                  <i /><i /><i />
-                </span>
-              ) : index + 1}
-            </span>
-            <div className="track-copy">
-              <OverflowMarquee className="track-title" observe={false} text={item.displayName} />
-              <OverflowMarquee className="track-path" observe={false} text={item.path} />
-            </div>
-          </Paper>
-        </div>;
+        {renderTreeNodes(tree, 0, {
+          currentPath,
+          expandedFolders,
+          externalInsertionPosition,
+          items,
+          onPlay,
+          openTrackMenu,
+          reorder,
+          selectTrack,
+          selected,
+          summaries,
+          t,
+          toggleFolder,
         })}
         <div
           className="saved-track-gap"
@@ -253,4 +353,129 @@ export function PlaylistTrackList({
       </div>
     </AppContextMenu>
   );
+}
+
+function folderStatesEqual(left: PlaylistFolderState | undefined, right: PlaylistFolderState) {
+  return Boolean(left)
+    && arraysEqual(left!.expandedPaths, right.expandedPaths)
+    && arraysEqual(left!.seenRootPaths, right.seenRootPaths);
+}
+
+function arraysEqual(left: string[], right: string[]) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+interface TreeRenderContext {
+  currentPath: string | null;
+  expandedFolders: Set<string>;
+  externalInsertionPosition: number | null;
+  items: PlaylistTrackListItem[];
+  onPlay: (itemId: number) => void;
+  openTrackMenu: (event: React.MouseEvent, itemId: number) => void;
+  reorder: ReturnType<typeof usePointerReorder<PlaylistTrackListItem>>;
+  selectTrack: (event: React.MouseEvent, itemId: number) => void;
+  selected: Set<number>;
+  summaries: Map<string, import("../model/metadata").TrackSummary>;
+  t: ReturnType<typeof useTranslation>["t"];
+  toggleFolder: (path: string) => void;
+}
+
+function renderTreeNodes(
+  nodes: PlaylistTreeNode<PlaylistTrackListItem>[],
+  level: number,
+  context: TreeRenderContext,
+): React.ReactNode {
+  return nodes.map((node) => {
+    if (node.kind === "folder") {
+      const open = context.expandedFolders.has(node.path);
+      const insertionPosition = context.reorder.insertionPosition ?? context.externalInsertionPosition;
+      const insertionEdge = insertionPosition === node.startPosition
+        ? "before"
+        : insertionPosition === node.endPosition ? "after" : undefined;
+      return (
+        <div className="playlist-folder-branch" key={node.id}>
+          <UnstyledButton
+            aria-expanded={open}
+            className="playlist-folder-row"
+            data-insertion-edge={insertionEdge}
+            data-reorder-end-position={node.endPosition}
+            data-reorder-position={node.startPosition}
+            data-track-end-position={node.endPosition}
+            data-track-position={node.startPosition}
+            onClick={() => context.toggleFolder(node.path)}
+            style={{ "--playlist-tree-level": level } as React.CSSProperties}
+            title={node.path}
+          >
+            <span className="playlist-folder-toggle">
+              {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+            </span>
+            {open ? <FolderOpen size={17} /> : <Folder size={17} />}
+            <Text className="playlist-folder-name" lineClamp={1} size="sm">{node.name}</Text>
+            <Text c="dimmed" size="xs">{node.itemCount}</Text>
+          </UnstyledButton>
+          {open && (
+            <div className="playlist-folder-children">
+              {renderTreeNodes(node.children, level + 1, context)}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const { item, position } = node;
+    const current = context.currentPath === item.path;
+    return <div className="saved-track-slot" key={item.id}>
+          <div
+            className="saved-track-gap"
+            data-active={context.reorder.insertionPosition === position || context.externalInsertionPosition === position || undefined}
+          ><span /></div>
+          <Paper
+            className="saved-track-row"
+            data-current={current || undefined}
+            data-dragging={context.reorder.draggedId === item.id || undefined}
+            data-reorder-position={position}
+            data-selected={context.selected.has(item.id) || undefined}
+            data-track-id={item.id}
+            data-track-position={position}
+            aria-selected={context.selected.has(item.id)}
+            onClick={(event) => {
+              if (!context.reorder.consumeClick()) context.selectTrack(event, item.id);
+            }}
+            onContextMenu={(event) => context.openTrackMenu(event, item.id)}
+            onDoubleClick={() => context.onPlay(item.id)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") context.onPlay(item.id);
+              if (event.key === " " && !event.repeat) {
+                event.preventDefault();
+                context.selectTrack(event as unknown as React.MouseEvent, item.id);
+              }
+            }}
+            onPointerCancel={context.reorder.onPointerCancel}
+            onPointerDown={(event) => {
+              if (event.ctrlKey || event.metaKey || event.shiftKey) return;
+              context.reorder.onPointerDown(event, item.id);
+            }}
+            onPointerMove={context.reorder.onPointerMove}
+            onPointerUp={context.reorder.onPointerUp}
+            role="option"
+            style={{ "--playlist-tree-level": level } as React.CSSProperties}
+            tabIndex={0}
+          >
+            <span className="track-index">
+              {current ? (
+                <span aria-label={context.t("playback.playing")} className="playlist-playing-indicator track-playing-indicator">
+                  <i /><i /><i />
+                </span>
+              ) : position + 1}
+            </span>
+            <div className="track-copy">
+              <OverflowMarquee
+                className="track-title"
+                observe={false}
+                text={playlistTrackTitle(item, context.summaries.get(item.path))}
+              />
+            </div>
+          </Paper>
+        </div>;
+  });
 }

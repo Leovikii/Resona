@@ -6,7 +6,8 @@ use serde::Serialize;
 
 use crate::filesystem::{self, RejectedPath};
 use crate::persistence::{
-    PersistenceError, PersistenceService, PlaylistDetails, PlaylistItemRecord, PlaylistSummary,
+    PersistenceError, PersistenceService, PlaylistDetails, PlaylistItemInput, PlaylistItemRecord,
+    PlaylistSummary,
 };
 
 #[derive(Clone, Debug, Serialize)]
@@ -31,15 +32,15 @@ pub fn create_playlist(
         name.to_owned()
     };
     let resolved = filesystem::resolve_audio_paths(paths);
-    if require_items && resolved.paths.is_empty() {
+    if require_items && resolved.items.is_empty() {
         return Err(PersistenceError::Query(
             "没有可加入播放列表的受支持音频".to_owned(),
         ));
     }
-    let path_strings = path_strings(resolved.paths);
+    let item_inputs = item_inputs(resolved.items);
     let PlaylistDetails { playlist, items } = persistence.create_playlist_with_items(
         &name,
-        &path_strings,
+        &item_inputs,
         position,
         ensure_unique_name,
     )?;
@@ -78,8 +79,8 @@ pub fn add_playlist_items(
     position: Option<i64>,
 ) -> Result<PlaylistMutationResult, PersistenceError> {
     let resolved = filesystem::resolve_audio_paths(paths);
-    let path_strings = path_strings(resolved.paths);
-    let items = persistence.add_playlist_items(playlist_id, &path_strings, position)?;
+    let item_inputs = item_inputs(resolved.items);
+    let items = persistence.add_playlist_items(playlist_id, &item_inputs, position)?;
     let playlist = persistence
         .list_playlists()?
         .into_iter()
@@ -92,9 +93,14 @@ pub fn add_playlist_items(
     })
 }
 
-fn path_strings(paths: Vec<PathBuf>) -> Vec<String> {
-    paths
+fn item_inputs(items: Vec<filesystem::ResolvedAudioItem>) -> Vec<PlaylistItemInput> {
+    items
         .into_iter()
-        .map(|path| path.to_string_lossy().into_owned())
+        .map(|item| PlaylistItemInput {
+            path: item.path.to_string_lossy().into_owned(),
+            folder_root: item
+                .folder_root
+                .map(|path| path.to_string_lossy().into_owned()),
+        })
         .collect()
 }

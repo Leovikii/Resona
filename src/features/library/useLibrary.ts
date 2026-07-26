@@ -21,9 +21,9 @@ const previewPlaylists: PlaylistSummary[] = [
 
 const previewItems: Record<number, PlaylistItem[]> = {
   1: [
-    item(1, 1, "C:\\Music\\First Light.wav", 0),
-    item(2, 1, "C:\\Music\\Midnight Signal.flac", 1),
-    item(3, 1, "C:\\Music\\Blue Transit.mp3", 2),
+    item(1, 1, "C:\\Music\\Local Sessions\\First Light.wav", 0, "C:\\Music\\Local Sessions"),
+    item(2, 1, "C:\\Music\\Local Sessions\\Disc 1\\Midnight Signal.flac", 1, "C:\\Music\\Local Sessions"),
+    item(3, 1, "C:\\Music\\Local Sessions\\Disc 2\\Blue Transit.mp3", 2, "C:\\Music\\Local Sessions"),
   ],
   2: [item(4, 2, "C:\\Music\\Afterimage.flac", 0)],
 };
@@ -451,13 +451,20 @@ export function useLibrary() {
   };
 }
 
-function item(id: number, playlistId: number, path: string, position: number): PlaylistItem {
+function item(
+  id: number,
+  playlistId: number,
+  path: string,
+  position: number,
+  folderRoot: string | null = null,
+): PlaylistItem {
   return {
     id,
     playlistId,
     path,
     displayName: path.split(/[\\/]/).pop() ?? path,
     position,
+    folderRoot,
   };
 }
 

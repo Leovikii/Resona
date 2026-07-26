@@ -30,7 +30,9 @@ use crate::media_import::{
     ActivePlaylistSnapshot, DefaultPlaylistMutationResult, DefaultPlaylistSnapshot,
     MediaImportService, OpenMediaResult, PlaylistPlaybackResult,
 };
-use crate::metadata::{normalized_path, MetadataService, TrackDetails};
+use crate::metadata::{
+    normalized_path, MetadataService, TrackDetails, TrackSummary, MAX_SUMMARY_BATCH_SIZE,
+};
 use crate::persistence::{
     PersistenceFailure, PersistenceService, PlaylistItemRecord, PlaylistSummary,
 };
@@ -328,6 +330,47 @@ pub async fn get_track_details(
     tauri::async_runtime::spawn_blocking(move || service.load(&normalized_path(path)).details)
         .await
         .map_err(|error| format!("metadata task failed: {error}"))
+}
+
+#[tauri::command]
+pub async fn get_audio_file_info(
+    path: String,
+    service: State<'_, ManagedMetadataService>,
+) -> Result<TrackDetails, String> {
+    let service = Arc::clone(service.inner());
+    tauri::async_runtime::spawn_blocking(move || service.load_info(&normalized_path(path)))
+        .await
+        .map_err(|error| format!("metadata task failed: {error}"))
+}
+
+#[tauri::command]
+pub async fn get_track_summaries(
+    paths: Vec<String>,
+    service: State<'_, ManagedMetadataService>,
+) -> Result<Vec<TrackSummary>, String> {
+    if paths.len() > MAX_SUMMARY_BATCH_SIZE {
+        return Err(format!(
+            "track summary batch exceeds {MAX_SUMMARY_BATCH_SIZE} items"
+        ));
+    }
+    let service = Arc::clone(service.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let paths = paths.into_iter().map(normalized_path).collect::<Vec<_>>();
+        service.load_summaries(&paths)
+    })
+    .await
+    .map_err(|error| format!("metadata summary task failed: {error}"))
+}
+
+#[tauri::command]
+pub async fn reveal_audio_file(path: String, app: AppHandle) -> Result<(), String> {
+    let path = normalized_path(path);
+    if !path.is_file() {
+        return Err(format!("音频文件不存在：{}", path.display()));
+    }
+    app.opener()
+        .reveal_item_in_dir(&path)
+        .map_err(|error| format!("无法在文件管理器中定位文件：{error}"))
 }
 
 #[derive(Clone, Debug, serde::Serialize)]

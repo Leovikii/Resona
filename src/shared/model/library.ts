@@ -16,6 +16,7 @@ export interface DefaultPlaylistItem {
   id: number;
   path: string;
   displayName: string;
+  folderRoot: string | null;
 }
 
 export interface DefaultPlaylistSnapshot {
@@ -52,11 +53,12 @@ export interface PlaylistItem {
   path: string;
   displayName: string;
   position: number;
+  folderRoot: string | null;
 }
 
 export interface RejectedPath {
   path: string;
-  reason: "missing" | "unsupported" | "unreadable" | "empty_folder" | "duplicate";
+  reason: "missing" | "unsupported" | "unreadable" | "linked_path" | "empty_folder" | "duplicate";
 }
 
 export interface PlaylistMutationResult extends PlaylistDetails {

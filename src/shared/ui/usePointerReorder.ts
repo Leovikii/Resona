@@ -174,14 +174,18 @@ export function usePointerReorder<T extends ReorderItem>({
 export function listInsertionPositionAtY(container: HTMLElement | null, clientY: number) {
   if (!container) return 0;
   const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-track-position]"));
+  let fallback = 0;
   for (const row of rows) {
     const bounds = row.getBoundingClientRect();
+    const position = Number(row.dataset.trackPosition);
+    const endPosition = Number(row.dataset.trackEndPosition);
+    if (Number.isFinite(endPosition)) fallback = endPosition;
+    else if (Number.isFinite(position)) fallback = position + 1;
     if (clientY < bounds.top + bounds.height / 2) {
-      const position = Number(row.dataset.trackPosition);
       return Number.isFinite(position) ? position : 0;
     }
   }
-  return rows.length;
+  return fallback;
 }
 
 function listInsertionPosition(
@@ -191,17 +195,21 @@ function listInsertionPosition(
 ) {
   if (!container) return 0;
   const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-reorder-position]"));
+  let fallback = 0;
   for (const row of rows) {
     const bounds = row.getBoundingClientRect();
+    const position = Number(row.dataset.reorderPosition);
+    const endPosition = Number(row.dataset.reorderEndPosition);
+    if (Number.isFinite(endPosition)) fallback = endPosition;
+    else if (Number.isFinite(position)) fallback = position + 1;
     const midpoint = axis === "horizontal"
       ? bounds.left + bounds.width / 2
       : bounds.top + bounds.height / 2;
     if (coordinate < midpoint) {
-      const position = Number(row.dataset.reorderPosition);
       return Number.isFinite(position) ? position : 0;
     }
   }
-  return rows.length;
+  return fallback;
 }
 
 function movedItemIndex(itemCount: number, from: number, insertion: number) {

@@ -76,6 +76,7 @@ import { useAudioCompression } from "../features/compression/useAudioCompression
 import { useFfmpegDependency } from "../features/compression/useFfmpegDependency";
 import { useLibrary } from "../features/library/useLibrary";
 import { useTrackDetails } from "../features/metadata/useTrackDetails";
+import { useTrackSummaries } from "../features/metadata/useTrackSummaries";
 import { showAudioCompressionWindow } from "../shared/bridge/compressionWindow";
 import { usePlaybackController } from "../features/playback/usePlaybackController";
 import { useSeekTransaction } from "../features/playback/useSeekTransaction";
@@ -95,7 +96,11 @@ import type { TrackDetails } from "../shared/model/metadata";
 import { fileNameFromPath, formatBytes, formatDuration } from "../shared/utils/format";
 import { listInsertionPositionAtY, usePointerReorder } from "../shared/ui/usePointerReorder";
 import { scrollViewportAtPointer, type ScrollAxis } from "../shared/ui/edgeAutoScroll";
-import { PlaylistTrackList } from "../shared/ui/PlaylistTrackList";
+import {
+  PlaylistTrackList,
+  type PlaylistTrackLocateRequest,
+} from "../shared/ui/PlaylistTrackList";
+import type { PlaylistFolderState } from "../shared/ui/playlistTree";
 import { AddMediaMenu } from "../shared/ui/AddMediaMenu";
 import {
   AppContextMenu,
@@ -105,6 +110,7 @@ import {
 import { BrandWordmark } from "../shared/ui/BrandWordmark";
 import { CompactTopNavigation, type CompactNavigationSelection } from "../shared/ui/CompactTopNavigation";
 import { OverflowMarquee } from "../shared/ui/OverflowMarquee";
+import { AudioFileInfoDialog } from "./AudioFileInfoDialog";
 import { accentColors, type AccentColor, usePreferences } from "./preferences";
 import {
   adjacentFullPlayerPage,
@@ -154,6 +160,14 @@ export default function App() {
   const [updateDialogMounted, setUpdateDialogMounted] = useState(false);
   const [importNoticeCount, setImportNoticeCount] = useState(0);
   const [importNoticeReasons, setImportNoticeReasons] = useState("");
+  const [fileInfoPath, setFileInfoPath] = useState<string | null>(null);
+  const [playlistFolderStates, setPlaylistFolderStates] = useState<Map<string, PlaylistFolderState>>(
+    () => new Map(),
+  );
+  const [playlistLocateRequest, setPlaylistLocateRequest] = useState<(
+    PlaylistTrackLocateRequest & { treeKey: string }
+  ) | null>(null);
+  const playlistLocateRequestIdRef = useRef(0);
   const dropActionsRef = useRef({ library, playback, t });
   const autoLyricsPathRef = useRef<string | null>(null);
   dropActionsRef.current = { library, playback, t };
@@ -396,6 +410,38 @@ export default function App() {
     else setSelection(next);
   }, [selectUserPlaylist]);
 
+  const updatePlaylistFolderState = useCallback((treeKey: string, state: PlaylistFolderState) => {
+    setPlaylistFolderStates((current) => {
+      const next = new Map(current);
+      next.set(treeKey, state);
+      return next;
+    });
+  }, []);
+  const updateDefaultFolderState = useCallback((state: PlaylistFolderState) => {
+    updatePlaylistFolderState("default", state);
+  }, [updatePlaylistFolderState]);
+  const selectedPlaylistTreeKey = selection.kind === "user" ? `playlist-${selection.playlistId}` : null;
+  const updateSelectedFolderState = useCallback((state: PlaylistFolderState) => {
+    if (selectedPlaylistTreeKey) updatePlaylistFolderState(selectedPlaylistTreeKey, state);
+  }, [selectedPlaylistTreeKey, updatePlaylistFolderState]);
+  const handleLocateRequest = useCallback((requestId: number) => {
+    setPlaylistLocateRequest((current) => current?.id === requestId ? null : current);
+  }, []);
+  const locateCurrentTrack = useCallback(() => {
+    const active = playback.activePlaylist;
+    const path = playback.selectedPath;
+    if (!active || !path) return;
+    const treeKey = active.kind === "default" ? "default" : `playlist-${active.playlistId}`;
+    setPlayerExpanded(false);
+    if (active.kind === "user" && active.playlistId !== null) {
+      selectUserPlaylist(active.playlistId);
+    } else {
+      setSelection({ kind: "default" });
+    }
+    playlistLocateRequestIdRef.current += 1;
+    setPlaylistLocateRequest({ id: playlistLocateRequestIdRef.current, path, treeKey });
+  }, [playback.activePlaylist, playback.selectedPath, selectUserPlaylist]);
+
   const closePlayer = useCallback(() => setPlayerExpanded(false), []);
   const togglePlayer = useCallback(() => setPlayerExpanded((value) => !value), []);
   const selectedUserId = selection.kind === "user" ? selection.playlistId : null;
@@ -538,13 +584,18 @@ export default function App() {
                 busy={playback.busy}
                 currentPath={playback.selectedPath}
                 dropTarget={dropTarget}
+                folderState={playlistFolderStates.get("default")}
                 items={playback.defaultPlaylist.items}
+                locateRequest={playlistLocateRequest?.treeKey === "default" ? playlistLocateRequest : null}
                 onAddFiles={playback.chooseAndAddDefaultFiles}
                 onAddFolders={playback.chooseAndAddDefaultFolders}
                 onPlay={playback.playDefaultItem}
                 onClear={clearDefaultItems}
+                onFolderStateChange={updateDefaultFolderState}
+                onLocateHandled={handleLocateRequest}
                 onMove={playback.moveDefaultItem}
                 onRemove={playback.removeDefaultItems}
+                onShowInfo={setFileInfoPath}
                 sourceDirectory={playback.defaultPlaylist.sourceDirectory}
               />
             )}
@@ -554,15 +605,20 @@ export default function App() {
                 currentPath={playback.selectedPath}
                 dropTarget={dropTarget}
                 externalDragActive={externalDragActive}
+                folderState={selectedPlaylistTreeKey ? playlistFolderStates.get(selectedPlaylistTreeKey) : undefined}
                 items={library.selectedItems}
                 itemsLoading={library.itemsLoading}
+                locateRequest={playlistLocateRequest?.treeKey === selectedPlaylistTreeKey ? playlistLocateRequest : null}
                 onAddFiles={addUserFiles}
                 onAddFolders={addUserFolders}
                 onMove={moveUserItem}
                 onPlay={playUserItem}
                 onClear={clearUserItems}
+                onFolderStateChange={updateSelectedFolderState}
+                onLocateHandled={handleLocateRequest}
                 onRemove={removeUserItems}
                 onRename={renameUserPlaylist}
+                onShowInfo={setFileInfoPath}
                 playlist={selectedPlaylist}
               />
             )}
@@ -616,6 +672,8 @@ export default function App() {
         details={trackDetails.details}
         hasCurrentTrack={hasCurrentTrack}
         expanded={playerExpanded}
+        canLocateCurrentTrack={Boolean(playback.activePlaylist && playback.selectedPath)}
+        onLocateCurrentTrack={locateCurrentTrack}
         onToggleExpanded={togglePlayer}
         onRun={playback.run}
         seek={seek}
@@ -810,6 +868,7 @@ export default function App() {
           />
         </Suspense>
       )}
+      <AudioFileInfoDialog onClose={() => setFileInfoPath(null)} path={fileInfoPath} />
     </main>
   );
 }
@@ -1084,29 +1143,41 @@ function DefaultPlaylistView({
   busy,
   currentPath,
   dropTarget,
+  folderState,
   items,
+  locateRequest,
   onAddFiles,
   onAddFolders,
   onClear,
+  onFolderStateChange,
+  onLocateHandled,
   onMove,
   onPlay,
   onRemove,
+  onShowInfo,
   sourceDirectory,
 }: {
   busy: boolean;
   currentPath: string | null;
   dropTarget: DropTarget | null;
+  folderState: PlaylistFolderState | undefined;
   items: DefaultPlaylistItem[];
+  locateRequest: PlaylistTrackLocateRequest | null;
   onAddFiles: () => Promise<void>;
   onAddFolders: () => Promise<void>;
   onClear: () => void;
+  onFolderStateChange: (state: PlaylistFolderState) => void;
+  onLocateHandled: (requestId: number) => void;
   onMove: (itemId: number, toPosition: number) => Promise<unknown>;
   onPlay: (itemId: number) => Promise<PlaybackSnapshot | null>;
   onRemove: (itemIds: number[]) => Promise<DefaultPlaylistSnapshot | null>;
+  onShowInfo: (path: string) => void;
   sourceDirectory: string | null;
 }) {
   const { t } = useTranslation();
   const trackViewportRef = useRef<HTMLDivElement | null>(null);
+  const [visiblePaths, setVisiblePaths] = useState<string[]>([]);
+  const summaries = useTrackSummaries(visiblePaths);
   return (
     <div className="page-content list-page">
       <div className="playlist-detail-heading">
@@ -1150,14 +1221,22 @@ function DefaultPlaylistView({
             busy={busy}
             currentPath={currentPath}
             externalInsertionPosition={dropTarget?.kind === "default-track-gap" ? dropTarget.position : null}
+            folderState={folderState}
             items={items}
+            locateRequest={locateRequest}
             onAddFiles={() => void onAddFiles()}
             onAddFolders={() => void onAddFolders()}
             onClear={onClear}
+            onFolderStateChange={onFolderStateChange}
+            onLocateHandled={onLocateHandled}
             onMove={(itemId, position) => void onMove(itemId, position)}
             onPlay={(itemId) => void onPlay(itemId)}
             onRemove={(itemIds) => void onRemove(itemIds)}
+            onShowInfo={onShowInfo}
+            onVisiblePaths={setVisiblePaths}
             scrollViewportRef={trackViewportRef}
+            summaries={summaries}
+            treeKey="default"
           />
         </ScrollArea>
       )}
@@ -1170,36 +1249,49 @@ function UserPlaylistView({
   currentPath,
   dropTarget,
   externalDragActive,
+  folderState,
   items,
   itemsLoading,
+  locateRequest,
   onAddFiles,
   onAddFolders,
   onMove,
   onPlay,
   onClear,
+  onFolderStateChange,
+  onLocateHandled,
   onRemove,
   onRename,
+  onShowInfo,
   playlist,
 }: {
   busy: boolean;
   currentPath: string | null;
   dropTarget: DropTarget | null;
   externalDragActive: boolean;
+  folderState: PlaylistFolderState | undefined;
   items: PlaylistItem[];
   itemsLoading: boolean;
+  locateRequest: PlaylistTrackLocateRequest | null;
   onAddFiles: () => void;
   onAddFolders: () => void;
   onMove: (itemId: number, toPosition: number) => void;
   onPlay: (itemId: number) => void;
   onClear: () => void;
+  onFolderStateChange: (state: PlaylistFolderState) => void;
+  onLocateHandled: (requestId: number) => void;
   onRemove: (itemIds: number[]) => void;
   onRename: (name: string) => Promise<boolean>;
+  onShowInfo: (path: string) => void;
   playlist: PlaylistSummary | null;
 }) {
   const { t } = useTranslation();
   const [name, setName] = useState(playlist?.name ?? "");
   const trackViewportRef = useRef<HTMLDivElement | null>(null);
+  const [visiblePaths, setVisiblePaths] = useState<string[]>([]);
+  const summaries = useTrackSummaries(visiblePaths);
   useEffect(() => setName(playlist?.name ?? ""), [playlist?.id, playlist?.name]);
+  useEffect(() => setVisiblePaths([]), [playlist?.id]);
 
   if (!playlist) return <EmptyView icon={<ListMusic />} label={t("library.selectPrompt")} />;
   return (
@@ -1254,14 +1346,22 @@ function UserPlaylistView({
               externalInsertionPosition={externalDragActive && dropTarget?.kind === "track-gap" && dropTarget.playlistId === playlist.id
                 ? dropTarget.position
                 : null}
+              folderState={folderState}
               items={items}
+              locateRequest={locateRequest}
               onAddFiles={onAddFiles}
               onAddFolders={onAddFolders}
               onClear={onClear}
+              onFolderStateChange={onFolderStateChange}
+              onLocateHandled={onLocateHandled}
               onMove={onMove}
               onPlay={onPlay}
               onRemove={onRemove}
+              onShowInfo={onShowInfo}
+              onVisiblePaths={setVisiblePaths}
               scrollViewportRef={trackViewportRef}
+              summaries={summaries}
+              treeKey={`playlist-${playlist.id}`}
             />
           </div>
         </ScrollArea>
@@ -1689,13 +1789,15 @@ function SettingRow({ children, className, label }: { children: ReactNode; class
   );
 }
 
-function PlayerBar({ busy, compact, desktopLyrics, details, expanded, hasCurrentTrack, onRun, onToggleExpanded, seek, snapshot, title }: {
+function PlayerBar({ busy, canLocateCurrentTrack, compact, desktopLyrics, details, expanded, hasCurrentTrack, onLocateCurrentTrack, onRun, onToggleExpanded, seek, snapshot, title }: {
   busy: boolean;
+  canLocateCurrentTrack: boolean;
   compact: boolean;
   desktopLyrics: ReturnType<typeof useDesktopLyricsWindow>;
   details: ReturnType<typeof useTrackDetails>["details"];
   expanded: boolean;
   hasCurrentTrack: boolean;
+  onLocateCurrentTrack: () => void;
   onRun: ReturnType<typeof usePlaybackController>["run"];
   onToggleExpanded: () => void;
   seek: ReturnType<typeof useSeekTransaction>;
@@ -1711,6 +1813,45 @@ function PlayerBar({ busy, compact, desktopLyrics, details, expanded, hasCurrent
 
   const canControl = snapshot.status === "playing" || snapshot.status === "paused";
   const currentId = snapshot.currentItemId ?? snapshot.queue[0]?.id;
+  const changeVolume = (value: number) => {
+    setChangingVolume(true);
+    setVolume(value);
+  };
+  const commitVolume = (value: number) => {
+    setChangingVolume(false);
+    void onRun("set_playback_volume", { volume: value / 100 });
+  };
+  const track = (
+    <div className="player-track">
+      <UnstyledButton
+        aria-label={expanded ? t("playback.collapse") : t("playback.expand")}
+        className="mini-artwork"
+        data-testid="player-expand"
+        disabled={!hasCurrentTrack}
+        onClick={onToggleExpanded}
+      >
+        <img
+          alt=""
+          className="mini-artwork-image"
+          data-placeholder={!details?.artworkDataUrl || undefined}
+          draggable={false}
+          src={details?.artworkDataUrl ?? artworkPlaceholder}
+        />
+        <span className="mini-artwork-action">
+          {expanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+        </span>
+      </UnstyledButton>
+      <div className="player-track-copy">
+        <OverflowMarquee className="player-track-title" text={title} />
+        <div className="player-track-meta">
+          <Text c="dimmed" size="xs">
+            {formatDuration(seek.displayPositionMs)} / {formatDuration(snapshot.durationMs)}
+          </Text>
+          {!compact && <AudioQualityBadge quality={details?.quality ?? null} />}
+        </div>
+      </div>
+    </div>
+  );
   return (
     <footer
       className="player-bar"
@@ -1730,79 +1871,52 @@ function PlayerBar({ busy, compact, desktopLyrics, details, expanded, hasCurrent
         size="xs"
         value={Math.min(seek.displayPositionMs, Math.max(snapshot.durationMs ?? 0, 1))}
       />
-      <div className="player-track">
-        <UnstyledButton
-          aria-label={expanded ? t("playback.collapse") : t("playback.expand")}
-          className="mini-artwork"
-          data-testid="player-expand"
-          disabled={!hasCurrentTrack}
-          onClick={onToggleExpanded}
-        >
-          <img
-            alt=""
-            className="mini-artwork-image"
-            data-placeholder={!details?.artworkDataUrl || undefined}
-            draggable={false}
-            src={details?.artworkDataUrl ?? artworkPlaceholder}
-          />
-          <span className="mini-artwork-action">
-            {expanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
-          </span>
-        </UnstyledButton>
-        <div className="player-track-copy">
-          <OverflowMarquee className="player-track-title" text={title} />
-          <Text c="dimmed" size="xs">
-            {formatDuration(seek.displayPositionMs)} / {formatDuration(snapshot.durationMs)}
-          </Text>
-        </div>
-      </div>
+      {compact ? (
+        <div className="compact-player-top-row">{track}</div>
+      ) : track}
       {compact ? (
         <CompactPlayerControls
           busy={busy}
           canControl={canControl}
+          canLocateCurrentTrack={canLocateCurrentTrack}
           currentId={currentId}
-          desktopLyrics={desktopLyrics}
           details={details}
+          desktopLyrics={desktopLyrics}
           hasCurrentTrack={hasCurrentTrack}
-          mode={snapshot.playbackMode}
+          onLocateCurrentTrack={onLocateCurrentTrack}
           onRun={onRun}
           snapshot={snapshot}
-          onVolumeChange={(value) => {
-            setChangingVolume(true);
-            setVolume(value);
-          }}
-          onVolumeChangeEnd={(value) => {
-            setChangingVolume(false);
-            void onRun("set_playback_volume", { volume: value / 100 });
-          }}
+          onVolumeChange={changeVolume}
+          onVolumeChangeEnd={commitVolume}
           volume={volume}
         />
-      ) : <>
-        <PlaybackCoreControls
-          busy={busy}
-          canControl={canControl}
-          currentId={currentId}
-          onRun={onRun}
-          snapshot={snapshot}
-        />
-        <div className="player-actions">
-          <AudioQualityBadge quality={details?.quality ?? null} />
-          <PlaybackModeButton busy={busy} mode={snapshot.playbackMode} onRun={onRun} />
-          <DesktopLyricsButton busy={busy} controller={desktopLyrics} hasCurrentTrack={hasCurrentTrack} />
-          <VolumeButton
+      ) : (
+        <>
+          <PlaybackCoreControls
             busy={busy}
-            onChange={(value) => {
-              setChangingVolume(true);
-              setVolume(value);
-            }}
-            onChangeEnd={(value) => {
-              setChangingVolume(false);
-              void onRun("set_playback_volume", { volume: value / 100 });
-            }}
-            volume={volume}
+            canControl={canControl}
+            currentId={currentId}
+            onRun={onRun}
+            snapshot={snapshot}
           />
-        </div>
-      </>}
+          <div className="wide-player-actions">
+            <VolumeButton
+              busy={busy}
+              onChange={changeVolume}
+              onChangeEnd={commitVolume}
+              volume={volume}
+            />
+            <div className="player-actions">
+              <PlaybackModeButton busy={busy} mode={snapshot.playbackMode} onRun={onRun} />
+              <DesktopLyricsButton busy={busy} controller={desktopLyrics} hasCurrentTrack={hasCurrentTrack} />
+              <CurrentPlaylistButton
+                disabled={!canLocateCurrentTrack}
+                onClick={onLocateCurrentTrack}
+              />
+            </div>
+          </div>
+        </>
+      )}
     </footer>
   );
 }
@@ -1851,14 +1965,15 @@ function PlaybackCoreControls({ busy, canControl, currentId, onRun, snapshot }: 
   );
 }
 
-function CompactPlayerControls({ busy, canControl, currentId, desktopLyrics, details, hasCurrentTrack, mode, onRun, onVolumeChange, onVolumeChangeEnd, snapshot, volume }: {
+function CompactPlayerControls({ busy, canControl, canLocateCurrentTrack, currentId, details, desktopLyrics, hasCurrentTrack, onLocateCurrentTrack, onRun, onVolumeChange, onVolumeChangeEnd, snapshot, volume }: {
   busy: boolean;
   canControl: boolean;
+  canLocateCurrentTrack: boolean;
   currentId: number | undefined;
-  desktopLyrics: ReturnType<typeof useDesktopLyricsWindow>;
   details: TrackDetails | null;
+  desktopLyrics: ReturnType<typeof useDesktopLyricsWindow>;
   hasCurrentTrack: boolean;
-  mode: PlaybackSnapshot["playbackMode"];
+  onLocateCurrentTrack: () => void;
   onRun: ReturnType<typeof usePlaybackController>["run"];
   onVolumeChange: (value: number) => void;
   onVolumeChangeEnd: (value: number) => void;
@@ -1868,7 +1983,17 @@ function CompactPlayerControls({ busy, canControl, currentId, desktopLyrics, det
   return (
     <div className="compact-player-controls">
       <div className="compact-player-side compact-player-side-left">
-        <AudioQualityBadge quality={details?.quality ?? null} />
+        <div className="compact-player-quality">
+          <AudioQualityBadge quality={details?.quality ?? null} />
+        </div>
+        <div className="compact-player-volume">
+          <VolumeButton
+            busy={busy}
+            onChange={onVolumeChange}
+            onChangeEnd={onVolumeChangeEnd}
+            volume={volume}
+          />
+        </div>
       </div>
       <PlaybackCoreControls
         busy={busy}
@@ -1878,14 +2003,18 @@ function CompactPlayerControls({ busy, canControl, currentId, desktopLyrics, det
         snapshot={snapshot}
       />
       <div className="compact-player-side compact-player-side-right">
-        <PlaybackModeButton busy={busy} mode={mode} onRun={onRun} />
-        <DesktopLyricsButton busy={busy} controller={desktopLyrics} hasCurrentTrack={hasCurrentTrack} />
-        <VolumeButton
-          busy={busy}
-          onChange={onVolumeChange}
-          onChangeEnd={onVolumeChangeEnd}
-          volume={volume}
-        />
+        <div className="compact-player-mode">
+          <PlaybackModeButton busy={busy} mode={snapshot.playbackMode} onRun={onRun} />
+        </div>
+        <div className="compact-player-lyrics">
+          <DesktopLyricsButton busy={busy} controller={desktopLyrics} hasCurrentTrack={hasCurrentTrack} />
+        </div>
+        <div className="compact-player-playlist">
+          <CurrentPlaylistButton
+            disabled={!canLocateCurrentTrack}
+            onClick={onLocateCurrentTrack}
+          />
+        </div>
       </div>
     </div>
   );
@@ -1913,7 +2042,7 @@ function VolumeButton({ busy, onChange, onChangeEnd, volume }: {
     <Popover onChange={setOpen} opened={open} position="top" shadow="md" width={76} withArrow>
       <Popover.Target>
         <Tooltip label={t("playback.volume")}>
-          <ActionIcon aria-label={t("playback.volume")} disabled={busy} onClick={() => setOpen((value) => !value)} size="xl" variant="subtle">
+          <ActionIcon aria-label={t("playback.volume")} disabled={busy} onClick={() => setOpen((value) => !value)} size="xl" variant={open ? "light" : "subtle"}>
             <VolumeIcon size={19} />
           </ActionIcon>
         </Tooltip>
@@ -1974,16 +2103,17 @@ function AudioQualityBadge({ quality }: { quality: TrackDetails["quality"] }) {
   if (!quality) return <span aria-hidden="true" className="audio-quality-slot" />;
   const label = quality === "hi_res" ? "Hi-Res" : quality === "sq" ? "SQ" : "HQ";
   return (
-    <svg
+    <span
       aria-label={label}
       className="audio-quality-badge"
       data-quality={quality}
       role="img"
-      viewBox="0 0 46 26"
     >
-      <rect height="24.5" rx="3" width="44.5" x="0.75" y="0.75" />
-      <text x="23" y="13">{quality === "hi_res" ? "HI-RES" : label}</text>
-    </svg>
+      <span className="audio-quality-label-full">{quality === "hi_res" ? "HI-RES" : label}</span>
+      <span aria-hidden="true" className="audio-quality-label-compact">
+        {quality === "hi_res" ? "HR" : label}
+      </span>
+    </span>
   );
 }
 
@@ -2027,6 +2157,26 @@ function PlaybackModeButton({ busy, mode, onRun }: {
         ))}
       </Menu.Dropdown>
     </Menu>
+  );
+}
+
+function CurrentPlaylistButton({ disabled, onClick }: {
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Tooltip label={t("library.locateCurrentTrack")}>
+      <ActionIcon
+        aria-label={t("library.locateCurrentTrack")}
+        disabled={disabled}
+        onClick={onClick}
+        size="xl"
+        variant="subtle"
+      >
+        <ListMusic size={19} />
+      </ActionIcon>
+    </Tooltip>
   );
 }
 
@@ -2153,30 +2303,36 @@ function FullPlayerView({ compact, details, error, loading, lyrics, onClose, onS
             </Tabs.Panel>
           )}
           <Tabs.Panel className="full-player-page" value="lyrics">
-            <ScrollArea
-              aria-label={t("lyrics.region")}
-              className="full-player-panel full-player-lyrics"
-              type="never"
-              viewportRef={lyricsViewportRef}
-            >
-              <div className="full-player-lyrics-content">
-              {lines.length === 0 ? (
+            {lines.length === 0 ? (
+              <div
+                aria-label={t("lyrics.region")}
+                className="full-player-panel full-player-lyrics-empty"
+                role="region"
+              >
                 <EmptyView icon={<Captions />} label={t("playback.noLyrics")} />
-              ) : (
-                lines.map((line, index) => (
-                  <UnstyledButton
-                    aria-label={`${line.text} · ${formatDuration(line.startMs)}`}
-                    className="full-player-lyric-line"
-                    data-active={index === lyrics.activeLineIndex || undefined}
-                    disabled={!seekable}
-                    key={`${line.startMs}-${index}`}
-                    onClick={() => void onSeek(line.startMs)}
-                    ref={index === lyrics.activeLineIndex ? activeLyricRef : undefined}
-                  >{line.text}</UnstyledButton>
-                ))
-              )}
               </div>
-            </ScrollArea>
+            ) : (
+              <ScrollArea
+                aria-label={t("lyrics.region")}
+                className="full-player-panel full-player-lyrics"
+                type="never"
+                viewportRef={lyricsViewportRef}
+              >
+                <div className="full-player-lyrics-content">
+                  {lines.map((line, index) => (
+                    <UnstyledButton
+                      aria-label={`${line.text} · ${formatDuration(line.startMs)}`}
+                      className="full-player-lyric-line"
+                      data-active={index === lyrics.activeLineIndex || undefined}
+                      disabled={!seekable}
+                      key={`${line.startMs}-${index}`}
+                      onClick={() => void onSeek(line.startMs)}
+                      ref={index === lyrics.activeLineIndex ? activeLyricRef : undefined}
+                    >{line.text}</UnstyledButton>
+                  ))}
+                </div>
+              </ScrollArea>
+            )}
           </Tabs.Panel>
           <Tabs.Panel className="full-player-page" value="details">
             <ScrollArea className="full-player-panel full-player-details" scrollHideDelay={700} type="scroll">

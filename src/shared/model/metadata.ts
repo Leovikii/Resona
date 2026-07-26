@@ -4,6 +4,12 @@ export interface TrackDetails {
   title: string | null;
   artist: string | null;
   album: string | null;
+  genre: string | null;
+  trackNumber: number | null;
+  trackTotal: number | null;
+  discNumber: number | null;
+  discTotal: number | null;
+  date: string | null;
   durationMs: number | null;
   sampleRate: number | null;
   bitDepth: number | null;
@@ -14,4 +20,11 @@ export interface TrackDetails {
   artworkDataUrl: string | null;
   metadataWarning: string | null;
   quality: "hi_res" | "sq" | "hq" | null;
+}
+
+export interface TrackSummary {
+  path: string;
+  title: string | null;
+  trackNumber: number | null;
+  metadataWarning: string | null;
 }

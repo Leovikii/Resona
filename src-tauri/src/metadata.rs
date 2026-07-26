@@ -9,7 +9,9 @@ use std::time::SystemTime;
 
 use base64::Engine;
 use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader};
+use lofty::config::ParseOptions;
 use lofty::file::{AudioFile, TaggedFileExt};
+use lofty::probe::Probe;
 use lofty::tag::Accessor;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -30,6 +32,12 @@ pub struct TrackDetails {
     pub title: Option<String>,
     pub artist: Option<String>,
     pub album: Option<String>,
+    pub genre: Option<String>,
+    pub track_number: Option<u32>,
+    pub track_total: Option<u32>,
+    pub disc_number: Option<u32>,
+    pub disc_total: Option<u32>,
+    pub date: Option<String>,
     pub duration_ms: Option<u64>,
     pub sample_rate: Option<u32>,
     pub bit_depth: Option<u8>,
@@ -50,6 +58,12 @@ impl TrackDetails {
             title: None,
             artist: None,
             album: None,
+            genre: None,
+            track_number: None,
+            track_total: None,
+            disc_number: None,
+            disc_total: None,
+            date: None,
             duration_ms: None,
             sample_rate: None,
             bit_depth: None,
@@ -64,7 +78,18 @@ impl TrackDetails {
     }
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackSummary {
+    pub path: String,
+    pub title: Option<String>,
+    pub track_number: Option<u32>,
+    pub metadata_warning: Option<String>,
+}
+
 const MAX_CACHE_ENTRIES: usize = 4;
+const MAX_SUMMARY_CACHE_ENTRIES: usize = 256;
+pub const MAX_SUMMARY_BATCH_SIZE: usize = 64;
 const MAX_ARTWORK_CACHE_ENTRIES: usize = 8;
 const MAX_ARTWORK_BYTES: usize = 16 * 1024 * 1024;
 const MAX_ARTWORK_DIMENSION: u32 = 8_192;
@@ -119,6 +144,12 @@ struct CacheEntry {
 }
 
 #[derive(Clone)]
+struct SummaryCacheEntry {
+    revision: FileRevision,
+    summary: TrackSummary,
+}
+
+#[derive(Clone)]
 struct ArtworkCacheEntry {
     source_fingerprint: [u8; 32],
     artwork: Arc<Artwork>,
@@ -127,6 +158,7 @@ struct ArtworkCacheEntry {
 #[derive(Default)]
 pub struct MetadataService {
     cache: Mutex<VecDeque<CacheEntry>>,
+    summary_cache: Mutex<VecDeque<SummaryCacheEntry>>,
     artwork_cache: Mutex<VecDeque<ArtworkCacheEntry>>,
 }
 
@@ -145,7 +177,7 @@ impl MetadataService {
         }
         drop(cache);
 
-        let metadata = read_uncached_track_metadata(self, path);
+        let metadata = read_uncached_track_metadata(self, path, true);
         let mut cache = self
             .cache
             .lock()
@@ -159,6 +191,44 @@ impl MetadataService {
             cache.pop_front();
         }
         metadata
+    }
+
+    pub fn load_info(&self, path: &Path) -> TrackDetails {
+        read_uncached_track_metadata(self, path, false).details
+    }
+
+    pub fn load_summaries(&self, paths: &[PathBuf]) -> Vec<TrackSummary> {
+        paths.iter().map(|path| self.load_summary(path)).collect()
+    }
+
+    fn load_summary(&self, path: &Path) -> TrackSummary {
+        let revision = file_revision(path);
+        let mut cache = self
+            .summary_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(index) = cache.iter().position(|entry| entry.revision == revision) {
+            let entry = cache.remove(index).expect("summary cache index exists");
+            let summary = entry.summary.clone();
+            cache.push_back(entry);
+            return summary;
+        }
+        drop(cache);
+
+        let summary = read_track_summary(path);
+        let mut cache = self
+            .summary_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        cache.retain(|entry| entry.revision.path != revision.path);
+        cache.push_back(SummaryCacheEntry {
+            revision,
+            summary: summary.clone(),
+        });
+        while cache.len() > MAX_SUMMARY_CACHE_ENTRIES {
+            cache.pop_front();
+        }
+        summary
     }
 
     fn load_artwork(&self, mime_type: &str, bytes: &[u8]) -> Result<Arc<Artwork>, String> {
@@ -217,8 +287,16 @@ pub fn read_artwork_file(path: &Path) -> Result<Arc<Artwork>, String> {
     decode_artwork("image/png", &bytes)
 }
 
-fn read_uncached_track_metadata(service: &MetadataService, path: &Path) -> CachedTrackMetadata {
-    let tagged_file = match lofty::read_from_path(path) {
+fn read_uncached_track_metadata(
+    service: &MetadataService,
+    path: &Path,
+    include_artwork: bool,
+) -> CachedTrackMetadata {
+    let tagged_file = match Probe::open(path).and_then(|probe| {
+        probe
+            .options(ParseOptions::new().read_cover_art(include_artwork))
+            .read()
+    }) {
         Ok(value) => value,
         Err(error) => {
             return CachedTrackMetadata {
@@ -231,7 +309,9 @@ fn read_uncached_track_metadata(service: &MetadataService, path: &Path) -> Cache
         .primary_tag()
         .or_else(|| tagged_file.tags().first());
     let properties = tagged_file.properties();
-    let artwork = tag
+    let artwork = include_artwork
+        .then_some(tag)
+        .flatten()
         .and_then(|value| value.pictures().first())
         .and_then(|picture| {
             if picture.data().len() > MAX_ARTWORK_BYTES {
@@ -266,6 +346,12 @@ fn read_uncached_track_metadata(service: &MetadataService, path: &Path) -> Cache
         title: tag.and_then(|value| value.title().map(|text| text.into_owned())),
         artist: tag.and_then(|value| value.artist().map(|text| text.into_owned())),
         album: tag.and_then(|value| value.album().map(|text| text.into_owned())),
+        genre: tag.and_then(|value| value.genre().map(|text| text.into_owned())),
+        track_number: tag.and_then(Accessor::track),
+        track_total: tag.and_then(Accessor::track_total),
+        disc_number: tag.and_then(Accessor::disk),
+        disc_total: tag.and_then(Accessor::disk_total),
+        date: tag.and_then(|value| value.date().map(|date| date.to_string())),
         duration_ms: Some(properties.duration().as_millis().min(u128::from(u64::MAX)) as u64),
         sample_rate,
         bit_depth,
@@ -278,6 +364,29 @@ fn read_uncached_track_metadata(service: &MetadataService, path: &Path) -> Cache
         metadata_warning: None,
     };
     CachedTrackMetadata { details, artwork }
+}
+
+fn read_track_summary(path: &Path) -> TrackSummary {
+    let tagged_file = Probe::open(path).and_then(|probe| {
+        probe
+            .options(
+                ParseOptions::new()
+                    .read_properties(false)
+                    .read_cover_art(false),
+            )
+            .read()
+    });
+    let metadata_warning = tagged_file.as_ref().err().map(ToString::to_string);
+    let tag = tagged_file
+        .as_ref()
+        .ok()
+        .and_then(|file| file.primary_tag().or_else(|| file.tags().first()));
+    TrackSummary {
+        path: path.to_string_lossy().into_owned(),
+        title: tag.and_then(|value| value.title().map(|text| text.into_owned())),
+        track_number: tag.and_then(Accessor::track),
+        metadata_warning,
+    }
 }
 
 fn decode_artwork(_mime_type: &str, bytes: &[u8]) -> Result<Arc<Artwork>, String> {
@@ -401,6 +510,22 @@ mod tests {
         let metadata = read_track_details(Path::new("missing.wav"));
         assert_eq!(metadata.file_name, "missing.wav");
         assert!(metadata.metadata_warning.is_some());
+    }
+
+    #[test]
+    fn lightweight_summary_cache_is_bounded_and_omits_artwork_work() {
+        let service = MetadataService::default();
+        for index in 0..=MAX_SUMMARY_CACHE_ENTRIES {
+            let path = PathBuf::from(format!("missing-summary-{index}.flac"));
+            let summary = service.load_summary(&path);
+            assert_eq!(summary.path, path.to_string_lossy());
+            assert_eq!(summary.title, None);
+            assert!(summary.metadata_warning.is_some());
+        }
+        assert_eq!(
+            service.summary_cache.lock().expect("summary cache").len(),
+            MAX_SUMMARY_CACHE_ENTRIES
+        );
     }
 
     #[test]

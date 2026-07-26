@@ -47,6 +47,7 @@ pub struct DefaultPlaylistItem {
     pub id: u64,
     pub path: String,
     pub display_name: String,
+    pub folder_root: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
@@ -86,6 +87,7 @@ struct DefaultPlaylistState {
     source_directory: Option<PathBuf>,
     selected_index: Option<usize>,
     paths: Vec<PathBuf>,
+    folder_roots: Vec<Option<PathBuf>>,
     item_ids: Vec<u64>,
     next_item_id: u64,
     active_playlist: Option<ActivePlaylistSnapshot>,
@@ -213,6 +215,7 @@ impl MediaImportService {
         }
         for position in positions.iter().rev() {
             state.paths.remove(*position);
+            state.folder_roots.remove(*position);
             state.item_ids.remove(*position);
         }
         state.revision = state.revision.wrapping_add(1).max(1);
@@ -276,8 +279,10 @@ impl MediaImportService {
             .and_then(|index| state.item_ids.get(index))
             .copied();
         let path = state.paths.remove(from_position);
+        let folder_root = state.folder_roots.remove(from_position);
         let id = state.item_ids.remove(from_position);
         state.paths.insert(target, path);
+        state.folder_roots.insert(target, folder_root);
         state.item_ids.insert(target, id);
         state.selected_index = selected_id
             .and_then(|selected_id| state.item_ids.iter().position(|id| *id == selected_id));
@@ -504,12 +509,12 @@ fn insert_resolved_paths(
     let mut rejected = resolved.rejected;
     let mut known = state.paths.iter().cloned().collect::<HashSet<_>>();
     let mut accepted = Vec::new();
-    for path in resolved.paths {
-        if known.insert(path.clone()) {
-            accepted.push(path);
+    for item in resolved.items {
+        if known.insert(item.path.clone()) {
+            accepted.push(item);
         } else {
             rejected.push(RejectedPath {
-                path: path.to_string_lossy().into_owned(),
+                path: item.path.to_string_lossy().into_owned(),
                 reason: RejectedPathReason::Duplicate,
             });
         }
@@ -519,9 +524,14 @@ fn insert_resolved_paths(
         let item_ids = (0..accepted.len())
             .map(|_| next_default_item_id(state))
             .collect::<Vec<_>>();
-        state
-            .paths
-            .splice(insertion..insertion, accepted.iter().cloned());
+        state.paths.splice(
+            insertion..insertion,
+            accepted.iter().map(|item| item.path.clone()),
+        );
+        state.folder_roots.splice(
+            insertion..insertion,
+            accepted.iter().map(|item| item.folder_root.clone()),
+        );
         state.item_ids.splice(insertion..insertion, item_ids);
         if let Some(selected) = state.selected_index.as_mut() {
             if *selected >= insertion {
@@ -536,7 +546,7 @@ fn insert_resolved_paths(
             default_playlist: snapshot_from_state(state),
             rejected,
         },
-        accepted,
+        accepted.into_iter().map(|item| item.path).collect(),
         insertion,
     )
 }
@@ -615,14 +625,18 @@ fn snapshot_from_state(state: &DefaultPlaylistState) -> DefaultPlaylistSnapshot 
         items: state
             .paths
             .iter()
+            .zip(&state.folder_roots)
             .zip(&state.item_ids)
-            .map(|(path, id)| DefaultPlaylistItem {
+            .map(|((path, folder_root), id)| DefaultPlaylistItem {
                 id: *id,
                 path: path.to_string_lossy().into_owned(),
                 display_name: path
                     .file_name()
                     .map(|name| name.to_string_lossy().into_owned())
                     .unwrap_or_else(|| path.to_string_lossy().into_owned()),
+                folder_root: folder_root
+                    .as_ref()
+                    .map(|path| path.to_string_lossy().into_owned()),
             })
             .collect(),
     }
@@ -644,6 +658,7 @@ fn replace_default_paths(state: &mut DefaultPlaylistState, paths: Vec<PathBuf>) 
         })
         .collect();
     state.paths = paths;
+    state.folder_roots = vec![None; state.paths.len()];
     state.item_ids = item_ids;
 }
 

@@ -13,6 +13,8 @@ use std::time::Duration;
 use lofty::file::{AudioFile, FileType, TaggedFileExt};
 use serde::{Deserialize, Serialize};
 
+use crate::filesystem::is_link_like;
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CompressionPreset {
@@ -1303,22 +1305,6 @@ fn scan_warning(path: &Path, code: &str, error: impl std::fmt::Display) -> Compr
         path: path.to_string_lossy().into_owned(),
         code: code.to_owned(),
         message: error.to_string(),
-    }
-}
-
-fn is_link_like(metadata: &fs::Metadata) -> bool {
-    if metadata.file_type().is_symlink() {
-        return true;
-    }
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::fs::MetadataExt;
-        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        false
     }
 }
 
