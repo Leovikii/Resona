@@ -1067,7 +1067,7 @@ function NavButton({ active, icon, label, onClick }: {
   return (
     <UnstyledButton
       aria-current={active ? "page" : undefined}
-      className="nav-button"
+      className="nav-button resona-active"
       data-active={active || undefined}
       onClick={onClick}
     >
@@ -1489,9 +1489,11 @@ function SettingsView({ applicationLifetime, applicationUpdate, busy, desktopLyr
     setLocale,
   } = usePreferences();
   const [backgroundOpacity, setBackgroundOpacity] = useState(lyricsPreferences.backgroundOpacity);
+  const [textOpacity, setTextOpacity] = useState(lyricsPreferences.textOpacity);
   const [fontDraft, setFontDraft] = useState(String(lyricsPreferences.fontSize));
   const [aboutError, setAboutError] = useState<string | null>(null);
   useEffect(() => setBackgroundOpacity(lyricsPreferences.backgroundOpacity), [lyricsPreferences.backgroundOpacity]);
+  useEffect(() => setTextOpacity(lyricsPreferences.textOpacity), [lyricsPreferences.textOpacity]);
   useEffect(() => setFontDraft(String(lyricsPreferences.fontSize)), [lyricsPreferences.fontSize]);
   const openProjectPage = useCallback(async (page: "repository" | "releases") => {
     try {
@@ -1712,8 +1714,12 @@ function SettingsView({ applicationLifetime, applicationUpdate, busy, desktopLyr
             label={(value) => `${value}%`}
             max={100}
             min={10}
-            onChangeEnd={(value) => setDesktopLyrics({ textOpacity: value })}
-            value={lyricsPreferences.textOpacity}
+            onChange={(value) => {
+              setTextOpacity(value);
+              setDesktopLyrics({ textOpacity: value });
+            }}
+            step={10}
+            value={textOpacity}
           />
         </SettingRow>
         <SettingRow label={t("desktopLyrics.backgroundOpacity")}>
@@ -1721,10 +1727,13 @@ function SettingsView({ applicationLifetime, applicationUpdate, busy, desktopLyr
             aria-label={t("desktopLyrics.backgroundOpacity")}
             className="lyrics-opacity-setting"
             label={(value) => `${value}%`}
-            max={80}
+            max={90}
             min={0}
-            onChange={setBackgroundOpacity}
-            onChangeEnd={(value) => setDesktopLyrics({ backgroundOpacity: value })}
+            onChange={(value) => {
+              setBackgroundOpacity(value);
+              setDesktopLyrics({ backgroundOpacity: value });
+            }}
+            step={10}
             value={backgroundOpacity}
           />
         </SettingRow>
@@ -1807,19 +1816,44 @@ function PlayerBar({ busy, canLocateCurrentTrack, compact, desktopLyrics, detail
   const { t } = useTranslation();
   const [changingVolume, setChangingVolume] = useState(false);
   const [volume, setVolume] = useState(Math.round(snapshot.volume * 100));
+  const queuedVolumeRef = useRef<number | null>(null);
+  const volumeDrainRef = useRef<Promise<void> | null>(null);
+  const volumeInteractionRef = useRef(0);
   useEffect(() => {
     if (!changingVolume) setVolume(Math.round(snapshot.volume * 100));
   }, [changingVolume, snapshot.volume]);
 
   const canControl = snapshot.status === "playing" || snapshot.status === "paused";
   const currentId = snapshot.currentItemId ?? snapshot.queue[0]?.id;
+  const queueVolumeChange = useCallback((value: number) => {
+    queuedVolumeRef.current = value;
+    if (volumeDrainRef.current) return volumeDrainRef.current;
+
+    const drain = (async () => {
+      while (queuedVolumeRef.current !== null) {
+        const next = queuedVolumeRef.current;
+        queuedVolumeRef.current = null;
+        await onRun("set_playback_volume", { volume: next / 100 });
+      }
+    })();
+    volumeDrainRef.current = drain;
+    void drain.finally(() => {
+      if (volumeDrainRef.current === drain) volumeDrainRef.current = null;
+    });
+    return drain;
+  }, [onRun]);
   const changeVolume = (value: number) => {
+    volumeInteractionRef.current += 1;
     setChangingVolume(true);
     setVolume(value);
+    void queueVolumeChange(value);
   };
   const commitVolume = (value: number) => {
-    setChangingVolume(false);
-    void onRun("set_playback_volume", { volume: value / 100 });
+    const interaction = ++volumeInteractionRef.current;
+    setVolume(value);
+    void queueVolumeChange(value).finally(() => {
+      if (volumeInteractionRef.current === interaction) setChangingVolume(false);
+    });
   };
   const track = (
     <div className="player-track">
@@ -1847,7 +1881,7 @@ function PlayerBar({ busy, canLocateCurrentTrack, compact, desktopLyrics, detail
           <Text c="dimmed" size="xs">
             {formatDuration(seek.displayPositionMs)} / {formatDuration(snapshot.durationMs)}
           </Text>
-          {!compact && <AudioQualityBadge quality={details?.quality ?? null} />}
+          <AudioQualityBadge quality={details?.quality ?? null} />
         </div>
       </div>
     </div>
@@ -1880,7 +1914,6 @@ function PlayerBar({ busy, canLocateCurrentTrack, compact, desktopLyrics, detail
           canControl={canControl}
           canLocateCurrentTrack={canLocateCurrentTrack}
           currentId={currentId}
-          details={details}
           desktopLyrics={desktopLyrics}
           hasCurrentTrack={hasCurrentTrack}
           onLocateCurrentTrack={onLocateCurrentTrack}
@@ -1937,27 +1970,30 @@ function PlaybackCoreControls({ busy, canControl, currentId, onRun, snapshot }: 
   return (
     <Group className="player-controls" gap="xs" justify="center" wrap="nowrap">
       <Tooltip label={t("playback.previous")}>
-        <ActionIcon aria-label={t("playback.previous")} disabled={!canControl || busy} onClick={() => void onRun("previous_playback")} size="xl" variant="default">
+        <ActionIcon aria-label={t("playback.previous")} className="player-control-action" color="gray" disabled={!canControl || busy} onClick={() => void onRun("previous_playback")} size="xl" variant="transparent">
           <SkipBack fill="currentColor" size={18} />
         </ActionIcon>
       </Tooltip>
       <Tooltip label={toggleLabel}>
         <ActionIcon
           aria-label={toggleLabel}
+          className="player-control-action player-control-action-primary"
+          color={currentId === undefined ? "gray" : undefined}
           disabled={currentId === undefined || busy}
           onClick={() => {
             if (snapshot.status === "playing") void onRun("pause_playback");
             else if (snapshot.status === "paused") void onRun("resume_playback");
             else if (currentId !== undefined) void onRun("play_queue_item", { id: currentId });
           }}
+          radius="xl"
           size="xl"
           variant="filled"
         >
-          {snapshot.status === "playing" ? <Pause fill="currentColor" size={19} /> : <Play fill="currentColor" size={19} />}
+          {snapshot.status === "playing" ? <Pause fill="currentColor" size={20} /> : <Play fill="currentColor" size={20} />}
         </ActionIcon>
       </Tooltip>
       <Tooltip label={t("playback.next")}>
-        <ActionIcon aria-label={t("playback.next")} disabled={!canControl || busy} onClick={() => void onRun("next_playback")} size="xl" variant="default">
+        <ActionIcon aria-label={t("playback.next")} className="player-control-action" color="gray" disabled={!canControl || busy} onClick={() => void onRun("next_playback")} size="xl" variant="transparent">
           <SkipForward fill="currentColor" size={18} />
         </ActionIcon>
       </Tooltip>
@@ -1965,12 +2001,11 @@ function PlaybackCoreControls({ busy, canControl, currentId, onRun, snapshot }: 
   );
 }
 
-function CompactPlayerControls({ busy, canControl, canLocateCurrentTrack, currentId, details, desktopLyrics, hasCurrentTrack, onLocateCurrentTrack, onRun, onVolumeChange, onVolumeChangeEnd, snapshot, volume }: {
+function CompactPlayerControls({ busy, canControl, canLocateCurrentTrack, currentId, desktopLyrics, hasCurrentTrack, onLocateCurrentTrack, onRun, onVolumeChange, onVolumeChangeEnd, snapshot, volume }: {
   busy: boolean;
   canControl: boolean;
   canLocateCurrentTrack: boolean;
   currentId: number | undefined;
-  details: TrackDetails | null;
   desktopLyrics: ReturnType<typeof useDesktopLyricsWindow>;
   hasCurrentTrack: boolean;
   onLocateCurrentTrack: () => void;
@@ -1983,9 +2018,6 @@ function CompactPlayerControls({ busy, canControl, canLocateCurrentTrack, curren
   return (
     <div className="compact-player-controls">
       <div className="compact-player-side compact-player-side-left">
-        <div className="compact-player-quality">
-          <AudioQualityBadge quality={details?.quality ?? null} />
-        </div>
         <div className="compact-player-volume">
           <VolumeButton
             busy={busy}
@@ -1993,6 +2025,9 @@ function CompactPlayerControls({ busy, canControl, canLocateCurrentTrack, curren
             onChangeEnd={onVolumeChangeEnd}
             volume={volume}
           />
+        </div>
+        <div className="compact-player-mode">
+          <PlaybackModeButton busy={busy} mode={snapshot.playbackMode} onRun={onRun} />
         </div>
       </div>
       <PlaybackCoreControls
@@ -2003,9 +2038,6 @@ function CompactPlayerControls({ busy, canControl, canLocateCurrentTrack, curren
         snapshot={snapshot}
       />
       <div className="compact-player-side compact-player-side-right">
-        <div className="compact-player-mode">
-          <PlaybackModeButton busy={busy} mode={snapshot.playbackMode} onRun={onRun} />
-        </div>
         <div className="compact-player-lyrics">
           <DesktopLyricsButton busy={busy} controller={desktopLyrics} hasCurrentTrack={hasCurrentTrack} />
         </div>
@@ -2039,10 +2071,25 @@ function VolumeButton({ busy, onChange, onChangeEnd, volume }: {
     onChangeEnd(next);
   };
   return (
-    <Popover onChange={setOpen} opened={open} position="top" shadow="md" width={76} withArrow>
+    <Popover
+      onChange={setOpen}
+      opened={open}
+      position="top"
+      shadow="md"
+      width={76}
+      withArrow
+    >
       <Popover.Target>
         <Tooltip label={t("playback.volume")}>
-          <ActionIcon aria-label={t("playback.volume")} disabled={busy} onClick={() => setOpen((value) => !value)} size="xl" variant={open ? "light" : "subtle"}>
+          <ActionIcon
+            aria-label={t("playback.volume")}
+            className="player-control-action"
+            color="gray"
+            disabled={busy}
+            onClick={() => setOpen((value) => !value)}
+            size="xl"
+            variant="transparent"
+          >
             <VolumeIcon size={19} />
           </ActionIcon>
         </Tooltip>
@@ -2078,7 +2125,9 @@ function DesktopLyricsButton({ busy, controller, hasCurrentTrack }: {
     <Tooltip label={controller.snapshot.visible ? t("desktopLyrics.hide") : t("desktopLyrics.show")}>
       <ActionIcon
         aria-label={controller.snapshot.visible ? t("desktopLyrics.hide") : t("desktopLyrics.show")}
+        className="player-control-action"
         color={controller.snapshot.visible ? undefined : "gray"}
+        data-active={controller.snapshot.visible || undefined}
         disabled={busy || controller.busy || !hasCurrentTrack || !controller.snapshot.supported}
         onClick={() => {
           if (controller.snapshot.visible) {
@@ -2091,7 +2140,7 @@ function DesktopLyricsButton({ busy, controller, hasCurrentTrack }: {
           });
         }}
         size="xl"
-        variant={controller.snapshot.visible ? "light" : "subtle"}
+        variant="transparent"
       >
         <Captions size={19} />
       </ActionIcon>
@@ -2135,11 +2184,13 @@ function PlaybackModeButton({ busy, mode, onRun }: {
       <Menu.Target>
         <ActionIcon
           aria-label={t(`playback.modes.${mode}`)}
+          className="player-control-action"
           color={mode === "sequential" ? "gray" : undefined}
+          data-active={mode !== "sequential" || undefined}
           disabled={busy}
           size="xl"
           title={t(`playback.modes.${mode}`)}
-          variant={mode === "sequential" ? "subtle" : "light"}
+          variant="transparent"
         >
           {active.icon}
         </ActionIcon>
@@ -2169,10 +2220,12 @@ function CurrentPlaylistButton({ disabled, onClick }: {
     <Tooltip label={t("library.locateCurrentTrack")}>
       <ActionIcon
         aria-label={t("library.locateCurrentTrack")}
+        className="player-control-action"
+        color="gray"
         disabled={disabled}
         onClick={onClick}
         size="xl"
-        variant="subtle"
+        variant="transparent"
       >
         <ListMusic size={19} />
       </ActionIcon>

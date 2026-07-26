@@ -277,7 +277,7 @@ function DesktopLyricsButton({
   return (
     <button
       aria-label={ariaLabel}
-      className="desktop-lyrics-button"
+      className="desktop-lyrics-button resona-active"
       disabled={disabled}
       onClick={onClick}
       title={title}

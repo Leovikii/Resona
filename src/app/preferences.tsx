@@ -14,7 +14,7 @@ import i18n, { resolveLocale } from "../shared/i18n";
 import type { LocalePreference } from "../shared/i18n";
 import type { CompressionPreset } from "../shared/model/compression";
 import { syncCurrentWindowTheme } from "../shared/bridge/windowAppearance";
-import { parseNumberPreference } from "./preferenceValue";
+import { normalizeSteppedPreference, parseNumberPreference } from "./preferenceValue";
 
 export const accentColors = ["violet", "blue", "green", "pink", "yellow"] as const;
 export type AccentColor = (typeof accentColors)[number];
@@ -76,6 +76,7 @@ export function AppProvider({ children }: PropsWithChildren) {
   const theme = useMemo(
     () =>
       createTheme({
+        activeClassName: "resona-active",
         primaryColor: accentColor as MantineColor,
         primaryShade: { light: 7, dark: 5 },
         autoContrast: true,
@@ -239,8 +240,8 @@ function normalizeDesktopLyricsPreferences(value: DesktopLyricsPreferences): Des
     enabled: Boolean(value.enabled),
     fontSize: Math.round(Math.min(64, Math.max(16, value.fontSize))),
     color: /^#[0-9a-f]{6}$/i.test(value.color) ? value.color : defaultDesktopLyricsPreferences.color,
-    textOpacity: Math.round(Math.min(100, Math.max(10, value.textOpacity))),
-    backgroundOpacity: Math.round(Math.min(100, Math.max(0, value.backgroundOpacity))),
+    textOpacity: normalizeSteppedPreference(value.textOpacity, 10, 100, 10, 100),
+    backgroundOpacity: normalizeSteppedPreference(value.backgroundOpacity, 0, 90, 10, 20),
   };
 }
 
