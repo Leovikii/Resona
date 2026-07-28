@@ -11,6 +11,7 @@ mod filesystem;
 mod lyrics;
 mod main_window;
 mod media_import;
+mod media_source;
 mod metadata;
 mod persistence;
 mod platform;

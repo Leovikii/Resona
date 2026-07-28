@@ -463,6 +463,7 @@ mod tests {
                 duration_ms: Some(1_000),
                 status: crate::playback::QueueItemStatus::Playing,
                 error: None,
+                cue: None,
             }],
             ..Default::default()
         };
@@ -585,7 +586,13 @@ mod tests {
         let second = fixture_directory.join("mp3_44100_cbr128_stereo.mp3");
 
         let playing = engine
-            .replace_queue_and_play(vec![first.clone(), second], 0)
+            .replace_queue_and_play(
+                vec![
+                    crate::media_source::MediaSource::file(first.clone()),
+                    crate::media_source::MediaSource::file(second),
+                ],
+                0,
+            )
             .expect("start playback");
         assert_eq!(playing.status, PlaybackStatus::Playing);
 

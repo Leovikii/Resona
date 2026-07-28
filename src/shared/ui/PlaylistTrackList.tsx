@@ -22,29 +22,35 @@ import { AppContextMenu, type AppContextMenuItem } from "./AppContextMenu";
 import {
   buildPlaylistTree,
   playlistFolderPaths,
+  playlistDurationSummary,
   playlistRootPaths,
   playlistTrackFolderPaths,
+  playlistTrackDuration,
   playlistTrackTitle,
   resolvePlaylistFolderState,
   type PlaylistFolderState,
   type PlaylistTreeNode,
 } from "./playlistTree";
+import { formatDuration } from "../utils/format";
 
 export interface PlaylistTrackListItem {
   id: number;
   displayName: string;
   path: string;
   folderRoot: string | null;
+  cue?: import("../model/library").CueTrackSource | null;
 }
 
 export interface PlaylistTrackLocateRequest {
   id: number;
   path: string;
+  cue?: import("../model/library").CueTrackSource | null;
 }
 
 interface PlaylistTrackListProps {
   busy: boolean;
   currentPath: string | null;
+  currentCue?: import("../model/library").CueTrackSource | null;
   externalInsertionPosition: number | null;
   folderState: PlaylistFolderState | undefined;
   items: PlaylistTrackListItem[];
@@ -58,7 +64,6 @@ interface PlaylistTrackListProps {
   onPlay: (itemId: number) => void;
   onRemove: (itemIds: number[]) => void;
   onShowInfo: (path: string) => void;
-  onVisiblePaths: (paths: string[]) => void;
   scrollViewportRef: { current: HTMLDivElement | null };
   summaries: Map<string, import("../model/metadata").TrackSummary>;
   treeKey: string;
@@ -67,6 +72,7 @@ interface PlaylistTrackListProps {
 export function PlaylistTrackList({
   busy,
   currentPath,
+  currentCue,
   externalInsertionPosition,
   folderState,
   items,
@@ -80,7 +86,6 @@ export function PlaylistTrackList({
   onPlay,
   onRemove,
   onShowInfo,
-  onVisiblePaths,
   scrollViewportRef,
   summaries,
   treeKey,
@@ -132,7 +137,7 @@ export function PlaylistTrackList({
 
   useEffect(() => {
     if (!locateRequest) return;
-    const item = items.find((candidate) => candidate.path === locateRequest.path);
+    const item = items.find((candidate) => sameLogicalTrack(candidate, locateRequest));
     if (!item) return;
     const expanded = new Set(resolvedFolderState.expandedPaths);
     const ancestors = playlistTrackFolderPaths(item);
@@ -146,7 +151,7 @@ export function PlaylistTrackList({
 
   useLayoutEffect(() => {
     if (!locateRequest || handledLocateRequestRef.current === locateRequest.id) return;
-    const item = items.find((candidate) => candidate.path === locateRequest.path);
+    const item = items.find((candidate) => sameLogicalTrack(candidate, locateRequest));
     const viewport = scrollViewportRef.current;
     const row = item
       ? reorder.listRef.current?.querySelector<HTMLElement>(`[data-track-id="${item.id}"]`)
@@ -163,28 +168,6 @@ export function PlaylistTrackList({
     handledLocateRequestRef.current = locateRequest.id;
     onLocateHandled(locateRequest.id);
   }, [expandedFolders, items, locateRequest, onLocateHandled, reorder.listRef, scrollViewportRef]);
-
-  useEffect(() => {
-    const container = reorder.listRef.current;
-    const root = scrollViewportRef.current;
-    if (!container || !root || typeof IntersectionObserver === "undefined") {
-      onVisiblePaths(items.slice(0, 32).map((item) => item.path));
-      return;
-    }
-    const itemsById = new Map(items.map((item) => [String(item.id), item]));
-    const visiblePaths = new Set<string>();
-    const observer = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        const path = itemsById.get((entry.target as HTMLElement).dataset.trackId ?? "")?.path;
-        if (!path) continue;
-        if (entry.isIntersecting) visiblePaths.add(path);
-        else visiblePaths.delete(path);
-      }
-      onVisiblePaths([...visiblePaths]);
-    }, { root, rootMargin: "160px 0px" });
-    container.querySelectorAll<HTMLElement>("[data-track-id]").forEach((row) => observer.observe(row));
-    return () => observer.disconnect();
-  }, [expandedFolders, items, onVisiblePaths, reorder.listRef, scrollViewportRef, tree]);
 
   const selectedIds = useMemo(() => [...selected], [selected]);
   const clearSelection = useCallback(() => {
@@ -320,7 +303,9 @@ export function PlaylistTrackList({
         onContextMenu={openBlankMenu}
       >
       <div className="playlist-selection-actions">
-        <Text c="dimmed" size="sm">{t("common.tracks", { count: items.length })}</Text>
+        <Text c="dimmed" size="sm">
+          {t("common.tracks", { count: items.length })} · {formatAggregateDuration(playlistDurationSummary(items, summaries))}
+        </Text>
         <div className="playlist-selection-buttons">
           <ActionIcon aria-label={t("library.deleteSelected")} color="red" disabled={busy || selectedIds.length === 0} onClick={removeSelected} variant="subtle"><Trash2 size={16} /></ActionIcon>
         </div>
@@ -333,6 +318,7 @@ export function PlaylistTrackList({
       >
         {renderTreeNodes(tree, 0, {
           currentPath,
+          currentCue,
           expandedFolders,
           externalInsertionPosition,
           items,
@@ -367,6 +353,7 @@ function arraysEqual(left: string[], right: string[]) {
 
 interface TreeRenderContext {
   currentPath: string | null;
+  currentCue?: import("../model/library").CueTrackSource | null;
   expandedFolders: Set<string>;
   externalInsertionPosition: number | null;
   items: PlaylistTrackListItem[];
@@ -392,6 +379,12 @@ function renderTreeNodes(
       const insertionEdge = insertionPosition === node.startPosition
         ? "before"
         : insertionPosition === node.endPosition ? "after" : undefined;
+      const duration = playlistDurationSummary(
+        context.items,
+        context.summaries,
+        node.startPosition,
+        node.endPosition,
+      );
       return (
         <div className="playlist-folder-branch" key={node.id}>
           <UnstyledButton
@@ -411,7 +404,9 @@ function renderTreeNodes(
             </span>
             {open ? <FolderOpen size={17} /> : <Folder size={17} />}
             <Text className="playlist-folder-name" lineClamp={1} size="sm">{node.name}</Text>
-            <Text c="dimmed" size="xs">{node.itemCount}</Text>
+            <Text c="dimmed" className="playlist-folder-summary" size="xs">
+              {node.itemCount} · {formatAggregateDuration(duration)}
+            </Text>
           </UnstyledButton>
           {open && (
             <div className="playlist-folder-children">
@@ -423,7 +418,9 @@ function renderTreeNodes(
     }
 
     const { item, position } = node;
-    const current = context.currentPath === item.path;
+    const summary = context.summaries.get(item.path);
+    const duration = playlistTrackDuration(item, summary);
+    const current = sameLogicalTrack(item, { path: context.currentPath ?? "", cue: context.currentCue });
     return <div className="saved-track-slot" key={item.id}>
           <div
             className="saved-track-gap"
@@ -472,10 +469,30 @@ function renderTreeNodes(
               <OverflowMarquee
                 className="track-title"
                 observe={false}
-                text={playlistTrackTitle(item, context.summaries.get(item.path))}
+                text={playlistTrackTitle(item, summary)}
               />
             </div>
+            <Text c="dimmed" className="track-duration" size="xs">
+              {duration === null ? "—" : formatDuration(duration)}
+            </Text>
           </Paper>
         </div>;
   });
+}
+
+function formatAggregateDuration(summary: { complete: boolean; durationMs: number }) {
+  if (!summary.complete && summary.durationMs === 0) return "—";
+  const duration = formatDuration(summary.durationMs);
+  return summary.complete ? duration : `${duration}+`;
+}
+
+function sameLogicalTrack(
+  left: Pick<PlaylistTrackListItem, "path" | "cue">,
+  right: { path: string; cue?: import("../model/library").CueTrackSource | null },
+) {
+  if (left.path !== right.path) return false;
+  if (!left.cue && !right.cue) return true;
+  return left.cue?.cuePath === right.cue?.cuePath
+    && left.cue?.trackNumber === right.cue?.trackNumber
+    && left.cue?.startMs === right.cue?.startMs;
 }

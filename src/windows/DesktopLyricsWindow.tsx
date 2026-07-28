@@ -1,9 +1,15 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { CSSProperties, PointerEvent, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useDesktopLyricsNowPlaying } from "../features/lyrics/useDesktopLyricsNowPlaying";
 import { useDesktopLyricsLayout } from "../features/lyrics/useDesktopLyricsLayout";
+import {
+  desktopLyricsLineTiming,
+  desktopLyricsPlaybackNeedsResync,
+  type DesktopLyricsLineTiming,
+  type DesktopLyricsPlaybackObservation,
+} from "../features/lyrics/desktopLyricsTiming";
 import { useDesktopLyricsWindow } from "../features/lyrics/useDesktopLyricsWindow";
 import { usePreferences } from "../app/preferences";
 import {
@@ -88,6 +94,14 @@ export default function DesktopLyricsWindow() {
     : null;
   const fontSize = previewFontSize ?? preferences.fontSize;
   const layout = useDesktopLyricsLayout(display.current, fontSize);
+  const activeLineTiming = useStableDesktopLyricsTiming({
+    identity: `${playback.path ?? ""}\0${lyrics.revision}\0${lyrics.activeLineIndex ?? ""}\0${layout.mode}\0${layout.marqueeDistance}`,
+    lines: lyrics.document?.lines ?? [],
+    activeLineIndex: lyrics.activeLineIndex,
+    positionMs: playback.positionMs,
+    durationMs: playback.durationMs,
+    status: playback.status,
+  });
 
   const startDragging = (event: PointerEvent<HTMLElement>) => {
     if (event.button !== 0 || !isTauriRuntime()) return;
@@ -122,7 +136,9 @@ export default function DesktopLyricsWindow() {
     "--desktop-lyrics-text-opacity": preferences.textOpacity / 100,
     "--desktop-lyrics-background-opacity": preferences.backgroundOpacity / 100,
     "--desktop-lyrics-marquee-distance": `${layout.marqueeDistance}px`,
-    "--desktop-lyrics-marquee-duration": `${layout.marqueeDurationSeconds}s`,
+    "--desktop-lyrics-marquee-duration": `${activeLineTiming?.durationMs ?? layout.marqueeDurationSeconds * 1_000}ms`,
+    "--desktop-lyrics-marquee-delay": `${activeLineTiming?.delayMs ?? 0}ms`,
+    "--desktop-lyrics-marquee-play-state": playback.status === "playing" ? "running" : "paused",
     ...(previewWidth ? { width: `${previewWidth}px` } : {}),
   } as CSSProperties;
 
@@ -249,6 +265,42 @@ export default function DesktopLyricsWindow() {
       </div>
     </main>
   );
+}
+
+function useStableDesktopLyricsTiming({
+  identity,
+  lines,
+  activeLineIndex,
+  positionMs,
+  durationMs,
+  status,
+}: {
+  identity: string;
+  lines: import("../shared/model/lyrics").LyricsLine[];
+  activeLineIndex: number | null;
+  positionMs: number;
+  durationMs: number | null;
+  status: string;
+}): DesktopLyricsLineTiming | null {
+  const stateRef = useRef<{
+    identity: string;
+    observation: DesktopLyricsPlaybackObservation;
+    timing: DesktopLyricsLineTiming | null;
+  } | null>(null);
+  const observation = {
+    observedAtMs: performance.now(),
+    positionMs,
+    status,
+  };
+  const previous = stateRef.current;
+  const needsResync = previous === null
+    || previous.identity !== identity
+    || desktopLyricsPlaybackNeedsResync(previous.observation, observation);
+  const timing = needsResync
+    ? desktopLyricsLineTiming(lines, activeLineIndex, positionMs, durationMs)
+    : previous.timing;
+  stateRef.current = { identity, observation, timing };
+  return timing;
 }
 
 function normalizedPreviewNumber(

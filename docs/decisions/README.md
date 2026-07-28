@@ -30,5 +30,6 @@ ADR 记录会长期影响代码、依赖或产品边界且无法仅从实现看�
 - [0023 - Windows Shell 媒体与任务栏集成](0023-windows-shell-media-integration.md)
 - [0024 - Windows 托盘生命周期、分发与更新基线](0024-windows-tray-distribution-and-update.md)
 - [0025 - 公开仓库首页与 Agent 规范归位](0025-public-repository-surface-and-agent-guidance.md)
+- [0026 - CUE 逻辑音轨与本地封面回退](0026-cue-logical-tracks-and-artwork-fallback.md)
 
 新 ADR 不修改历史决定的原文；如果决定被替代，新增 ADR 并将旧记录标记为 `Superseded`。

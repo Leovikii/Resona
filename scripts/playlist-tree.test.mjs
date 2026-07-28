@@ -3,10 +3,12 @@ import test from "node:test";
 
 import {
   buildPlaylistTree,
+  playlistDurationSummary,
   playlistFolderPaths,
   playlistRootPaths,
   playlistTrackFolderPaths,
   playlistTrackTitle,
+  playlistTrackDuration,
   resolvePlaylistFolderState,
 } from "../src/shared/ui/playlistTree.ts";
 
@@ -37,6 +39,33 @@ test("folder imports become a recursive tree without changing track order", () =
   assert.deepEqual(playlistRootPaths(items), [root]);
 });
 
+test("track and folder durations preserve CUE logical intervals", () => {
+  const physical = { title: null, trackNumber: null, durationMs: 600_000 };
+  const cueTrack = {
+    ...item(1, "C:\\Music\\album.flac", "C:\\Music"),
+    cue: { trackNumber: 2, title: "Part 2", startMs: 180_000, endMs: 420_000 },
+  };
+  const finalCueTrack = {
+    ...item(2, "C:\\Music\\album.flac", "C:\\Music"),
+    cue: { trackNumber: 3, title: "Part 3", startMs: 420_000, endMs: null },
+  };
+  const summaries = new Map([[cueTrack.path, physical]]);
+
+  assert.equal(playlistTrackDuration(cueTrack, physical), 240_000);
+  assert.equal(playlistTrackDuration(finalCueTrack, physical), 180_000);
+  assert.deepEqual(playlistDurationSummary([cueTrack, finalCueTrack], summaries), {
+    complete: true,
+    durationMs: 420_000,
+  });
+});
+
+test("aggregate durations explicitly retain unknown items", () => {
+  const items = [item(1, "C:\\Music\\known.flac"), item(2, "C:\\Music\\unknown.flac")];
+  assert.deepEqual(playlistDurationSummary(items, new Map([
+    [items[0].path, { title: null, trackNumber: null, durationMs: 60_000 }],
+  ])), { complete: false, durationMs: 60_000 });
+});
+
 test("manual ordering keeps non-contiguous folder segments in sequence", () => {
   const root = "C:\\Music\\Album";
   const tree = buildPlaylistTree([
@@ -63,6 +92,18 @@ test("track titles use available tags and always retain a filename fallback", ()
   assert.equal(playlistTrackTitle(track, { title: "Signal", trackNumber: 1 }), "1 · Signal");
   assert.equal(playlistTrackTitle(track, { title: null, trackNumber: 1 }), "1 · 01 - Signal");
   assert.equal(playlistTrackTitle(track, undefined), "01 - Signal");
+});
+
+test("CUE metadata takes precedence for logical tracks sharing one file", () => {
+  const track = {
+    ...item(1, "C:\\Music\\album.flac"),
+    displayName: "Second movement",
+    cue: { trackNumber: 2, title: "Second movement" },
+  };
+  assert.equal(
+    playlistTrackTitle(track, { title: "Embedded album title", trackNumber: 1 }),
+    "2 · Second movement",
+  );
 });
 
 test("folder expansion survives remounts while new roots expand once", () => {

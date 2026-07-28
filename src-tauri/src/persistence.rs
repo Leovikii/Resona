@@ -8,7 +8,9 @@ use rusqlite::{params, Connection, ErrorCode, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-const SCHEMA_VERSION: i64 = 6;
+use crate::media_source::{CueTrackSource, MediaSource};
+
+const SCHEMA_VERSION: i64 = 7;
 
 #[derive(Debug, Error)]
 pub enum PersistenceError {
@@ -73,12 +75,22 @@ pub struct PlaylistItemRecord {
     pub display_name: String,
     pub position: i64,
     pub folder_root: Option<String>,
+    pub cue: Option<CueTrackSource>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlaylistItemInput {
-    pub path: String,
+    pub source: MediaSource,
     pub folder_root: Option<String>,
+}
+
+impl PlaylistItemRecord {
+    pub fn source(&self) -> MediaSource {
+        MediaSource {
+            path: self.path.clone().into(),
+            cue: self.cue.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -511,7 +523,14 @@ fn migrate(connection: &Connection) -> Result<(), PersistenceError> {
                    path TEXT NOT NULL,
                    display_name TEXT NOT NULL,
                    position INTEGER NOT NULL,
-                   folder_root TEXT
+                   folder_root TEXT,
+                   cue_path TEXT,
+                   cue_track_number INTEGER,
+                   cue_title TEXT,
+                   cue_performer TEXT,
+                   cue_album TEXT,
+                   cue_start_ms INTEGER,
+                   cue_end_ms INTEGER
                  );
                  CREATE INDEX idx_playlist_items_order
                    ON playlist_items(playlist_id, position, id);
@@ -519,7 +538,7 @@ fn migrate(connection: &Connection) -> Result<(), PersistenceError> {
                    key TEXT PRIMARY KEY,
                    value TEXT NOT NULL
                  );
-                 PRAGMA user_version = 6;
+                 PRAGMA user_version = 7;
                  COMMIT;",
             )
             .map_err(|error| PersistenceError::Migration(error.to_string()))?;
@@ -557,6 +576,22 @@ fn migrate(connection: &Connection) -> Result<(), PersistenceError> {
                 "BEGIN;
                  ALTER TABLE playlist_items ADD COLUMN folder_root TEXT;
                  PRAGMA user_version = 6;
+                 COMMIT;",
+            )
+            .map_err(|error| PersistenceError::Migration(error.to_string()))?;
+    }
+    if version < 7 {
+        connection
+            .execute_batch(
+                "BEGIN;
+                 ALTER TABLE playlist_items ADD COLUMN cue_path TEXT;
+                 ALTER TABLE playlist_items ADD COLUMN cue_track_number INTEGER;
+                 ALTER TABLE playlist_items ADD COLUMN cue_title TEXT;
+                 ALTER TABLE playlist_items ADD COLUMN cue_performer TEXT;
+                 ALTER TABLE playlist_items ADD COLUMN cue_album TEXT;
+                 ALTER TABLE playlist_items ADD COLUMN cue_start_ms INTEGER;
+                 ALTER TABLE playlist_items ADD COLUMN cue_end_ms INTEGER;
+                 PRAGMA user_version = 7;
                  COMMIT;",
             )
             .map_err(|error| PersistenceError::Migration(error.to_string()))?;
@@ -666,7 +701,9 @@ fn list_playlist_items_with_connection(
 ) -> Result<Vec<PlaylistItemRecord>, PersistenceError> {
     let mut statement = connection
         .prepare(
-            "SELECT id, playlist_id, path, display_name, position, folder_root
+            "SELECT id, playlist_id, path, display_name, position, folder_root,
+                    cue_path, cue_track_number, cue_title, cue_performer, cue_album,
+                    cue_start_ms, cue_end_ms
              FROM playlist_items
              WHERE playlist_id = ?1
              ORDER BY position, id",
@@ -674,6 +711,22 @@ fn list_playlist_items_with_connection(
         .map_err(query_error)?;
     let rows = statement
         .query_map(params![playlist_id], |row| {
+            let cue_path: Option<String> = row.get(6)?;
+            let cue = if let Some(cue_path) = cue_path {
+                Some(CueTrackSource {
+                    cue_path: cue_path.into(),
+                    track_number: row.get::<_, i64>(7)?.max(0) as u32,
+                    title: row.get(8)?,
+                    performer: row.get(9)?,
+                    album: row.get(10)?,
+                    start_ms: row.get::<_, i64>(11)?.max(0) as u64,
+                    end_ms: row
+                        .get::<_, Option<i64>>(12)?
+                        .map(|value| value.max(0) as u64),
+                })
+            } else {
+                None
+            };
             Ok(PlaylistItemRecord {
                 id: row.get(0)?,
                 playlist_id: row.get(1)?,
@@ -681,6 +734,7 @@ fn list_playlist_items_with_connection(
                 display_name: row.get(3)?,
                 position: row.get(4)?,
                 folder_root: row.get(5)?,
+                cue,
             })
         })
         .map_err(query_error)?;
@@ -704,21 +758,28 @@ fn insert_playlist_items(
         )
         .map_err(query_error)?;
     for (offset, item) in items.iter().enumerate() {
-        let display_name = Path::new(&item.path)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or(&item.path);
+        let display_name = item.source.display_name();
+        let cue = item.source.cue.as_ref();
         transaction
             .execute(
                 "INSERT INTO playlist_items
-                 (playlist_id, path, display_name, position, folder_root)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                 (playlist_id, path, display_name, position, folder_root, cue_path,
+                  cue_track_number, cue_title, cue_performer, cue_album, cue_start_ms, cue_end_ms)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 params![
                     playlist_id,
-                    item.path,
+                    item.source.path.to_string_lossy(),
                     display_name,
                     start_position + offset as i64,
                     item.folder_root,
+                    cue.map(|value| value.cue_path.to_string_lossy().into_owned()),
+                    cue.map(|value| i64::from(value.track_number)),
+                    cue.and_then(|value| value.title.as_deref()),
+                    cue.and_then(|value| value.performer.as_deref()),
+                    cue.and_then(|value| value.album.as_deref()),
+                    cue.map(|value| value.start_ms.min(i64::MAX as u64) as i64),
+                    cue.and_then(|value| value.end_ms)
+                        .map(|value| value.min(i64::MAX as u64) as i64),
                 ],
             )
             .map_err(query_error)?;
@@ -908,6 +969,8 @@ pub(crate) fn in_memory_for_test() -> PersistenceService {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
 
     fn service() -> PersistenceService {
@@ -916,9 +979,78 @@ mod tests {
 
     fn item(path: &str) -> PlaylistItemInput {
         PlaylistItemInput {
-            path: path.to_owned(),
+            source: MediaSource::file(path.into()),
             folder_root: None,
         }
+    }
+
+    #[test]
+    fn cue_tracks_sharing_one_file_round_trip_as_distinct_items() {
+        let service = service();
+        let cue_path = PathBuf::from("C:\\Music\\album.cue");
+        let audio_path = PathBuf::from("C:\\Music\\album.flac");
+        let inputs = [1_u32, 2_u32].map(|track_number| PlaylistItemInput {
+            source: MediaSource {
+                path: audio_path.clone(),
+                cue: Some(CueTrackSource {
+                    cue_path: cue_path.clone(),
+                    track_number,
+                    title: Some(format!("Track {track_number}")),
+                    performer: Some("Artist".to_owned()),
+                    album: Some("Album".to_owned()),
+                    start_ms: u64::from(track_number - 1) * 60_000,
+                    end_ms: Some(u64::from(track_number) * 60_000),
+                }),
+            },
+            folder_root: None,
+        });
+        let details = service
+            .create_playlist_with_items("CUE", &inputs, None, false)
+            .expect("persist CUE tracks");
+        assert_eq!(details.items.len(), 2);
+        assert_eq!(details.items[0].display_name, "Track 1");
+        assert_eq!(
+            details.items[1].cue.as_ref().map(|cue| cue.track_number),
+            Some(2)
+        );
+        assert_eq!(details.items[0].path, details.items[1].path);
+    }
+
+    #[test]
+    fn migrates_released_v6_playlists_before_adding_cue_tracks() {
+        let connection = Connection::open_in_memory().expect("open v6 database");
+        connection
+            .execute_batch(
+                "CREATE TABLE playlists (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   name TEXT NOT NULL UNIQUE,
+                   position INTEGER NOT NULL,
+                   created_at INTEGER NOT NULL,
+                   updated_at INTEGER NOT NULL
+                 );
+                 CREATE TABLE playlist_items (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+                   path TEXT NOT NULL,
+                   display_name TEXT NOT NULL,
+                   position INTEGER NOT NULL,
+                   folder_root TEXT
+                 );
+                 CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                 INSERT INTO playlists VALUES (1, 'Existing', 0, 1, 1);
+                 INSERT INTO playlist_items VALUES
+                   (1, 1, 'C:\\Music\\track.flac', 'track.flac', 0, 'C:\\Music');
+                 PRAGMA user_version = 6;",
+            )
+            .expect("create v6 schema");
+        migrate_for_test(&connection);
+        let service = PersistenceService {
+            connection: Mutex::new(connection),
+        };
+        let items = service.list_playlist_items(1).expect("read migrated items");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].folder_root.as_deref(), Some("C:\\Music"));
+        assert_eq!(items[0].cue, None);
     }
 
     #[test]
@@ -969,7 +1101,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read schema version");
-        assert_eq!(version, 6);
+        assert_eq!(version, 7);
         let service = PersistenceService {
             connection: Mutex::new(connection),
         };
@@ -1042,7 +1174,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read schema version");
-        assert_eq!(version, 6);
+        assert_eq!(version, 7);
         assert!(!table_exists(&connection, "recent_plays"));
         assert_eq!(
             connection
@@ -1112,7 +1244,7 @@ mod tests {
             .add_playlist_items(
                 1,
                 &[PlaylistItemInput {
-                    path: "C:\\Music\\Album\\nested.flac".to_owned(),
+                    source: MediaSource::file("C:\\Music\\Album\\nested.flac".into()),
                     folder_root: Some("C:\\Music\\Album".to_owned()),
                 }],
                 None,
@@ -1164,7 +1296,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("read schema version");
-        assert_eq!(version, 6);
+        assert_eq!(version, 7);
         assert!(table_exists(&connection, "app_state"));
         assert!(!table_exists(&connection, "recent_plays"));
         assert_eq!(

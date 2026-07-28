@@ -31,7 +31,8 @@ Resona/
 │  ├─ src/
 │  │  ├─ lib.rs                    # 服务装配、commands 注册、生命周期
 │  │  ├─ commands.rs               # 薄 IPC adapter
-│  │  ├─ playback.rs               # actor 与 Rodio 引擎
+│  │  ├─ playback/                 # actor、Rodio 引擎与输出设备
+│  │  ├─ media_source.rs           # 普通文件与 CUE 逻辑音轨模型/解析
 │  │  ├─ playlists.rs              # 用户/默认列表领域逻辑
 │  │  ├─ persistence.rs            # SQLite schema 与事务
 │  │  ├─ metadata.rs               # 按需元数据与有界封面缓存

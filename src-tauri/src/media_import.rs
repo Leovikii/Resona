@@ -9,6 +9,7 @@ use serde::Serialize;
 use crate::filesystem::{
     self, AudioFileContext, RejectedPath, RejectedPathReason, ResolvedAudioPaths,
 };
+use crate::media_source::MediaSource;
 use crate::playback::{PlaybackEngine, PlaybackFailure, PlaybackSnapshot, RodioPlaybackEngine};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -48,6 +49,7 @@ pub struct DefaultPlaylistItem {
     pub path: String,
     pub display_name: String,
     pub folder_root: Option<String>,
+    pub cue: Option<crate::media_source::CueTrackSource>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
@@ -86,7 +88,7 @@ struct DefaultPlaylistState {
     revision: u64,
     source_directory: Option<PathBuf>,
     selected_index: Option<usize>,
-    paths: Vec<PathBuf>,
+    sources: Vec<MediaSource>,
     folder_roots: Vec<Option<PathBuf>>,
     item_ids: Vec<u64>,
     next_item_id: u64,
@@ -119,7 +121,8 @@ impl MediaImportService {
     pub fn open_media_context(&self, path: &Path) -> Result<OpenMediaResult, PlaybackFailure> {
         let context = filesystem::audio_file_context(path)?;
         let mut state = self.state.lock().map_err(|_| state_poisoned())?;
-        let playback = self.play_paths(&state.paths, &context.paths, context.selected_index)?;
+        let playback =
+            self.play_sources(&state.sources, &context.sources, context.selected_index)?;
         commit_context(&mut state, context);
         state.active_playlist = Some(ActivePlaylistSnapshot::default_playlist());
         Ok(OpenMediaResult {
@@ -142,7 +145,7 @@ impl MediaImportService {
             && state.active_playlist == Some(ActivePlaylistSnapshot::default_playlist())
         {
             let queue = self.engine.snapshot().map_err(|error| error.failure())?;
-            if !queue_paths_match(&queue, &previous.paths) {
+            if !queue_sources_match(&queue, &previous.sources) {
                 *state = previous;
                 return Err(sequence_mismatch());
             }
@@ -163,7 +166,7 @@ impl MediaImportService {
             .ok_or_else(|| {
                 PlaybackFailure::task_failed("default playlist target is unavailable".to_owned())
             })?;
-        let playback = self.play_paths(&state.paths, &state.paths, selected_index)?;
+        let playback = self.play_sources(&state.sources, &state.sources, selected_index)?;
         state.selected_index = Some(selected_index);
         state.active_playlist = Some(ActivePlaylistSnapshot::default_playlist());
         Ok(OpenMediaResult {
@@ -200,10 +203,10 @@ impl MediaImportService {
                 "default playlist item selection contains duplicates".to_owned(),
             ));
         }
-        let previous_paths = state.paths.clone();
+        let previous_sources = state.sources.clone();
         if state.active_playlist == Some(ActivePlaylistSnapshot::default_playlist()) {
             let queue = self.engine.snapshot().map_err(|error| error.failure())?;
-            if !queue_paths_match(&queue, &previous_paths) {
+            if !queue_sources_match(&queue, &previous_sources) {
                 return Err(sequence_mismatch());
             }
             for position in positions.iter().rev() {
@@ -214,12 +217,12 @@ impl MediaImportService {
             }
         }
         for position in positions.iter().rev() {
-            state.paths.remove(*position);
+            state.sources.remove(*position);
             state.folder_roots.remove(*position);
             state.item_ids.remove(*position);
         }
         state.revision = state.revision.wrapping_add(1).max(1);
-        state.source_directory = common_parent(&state.paths);
+        state.source_directory = common_parent(&state.sources);
         state.selected_index = state.selected_index.and_then(|selected| {
             if positions.binary_search(&selected).is_ok() {
                 None
@@ -257,13 +260,13 @@ impl MediaImportService {
             .ok_or_else(|| {
                 PlaybackFailure::task_failed("default playlist item not found".to_owned())
             })?;
-        let target = to_position.min(state.paths.len().saturating_sub(1));
+        let target = to_position.min(state.sources.len().saturating_sub(1));
         if from_position == target {
             return Ok(snapshot_from_state(&state));
         }
         if state.active_playlist == Some(ActivePlaylistSnapshot::default_playlist()) {
             let queue = self.engine.snapshot().map_err(|error| error.failure())?;
-            if !queue_paths_match(&queue, &state.paths) {
+            if !queue_sources_match(&queue, &state.sources) {
                 return Err(sequence_mismatch());
             }
             let queue_item = queue
@@ -278,10 +281,10 @@ impl MediaImportService {
             .selected_index
             .and_then(|index| state.item_ids.get(index))
             .copied();
-        let path = state.paths.remove(from_position);
+        let source = state.sources.remove(from_position);
         let folder_root = state.folder_roots.remove(from_position);
         let id = state.item_ids.remove(from_position);
-        state.paths.insert(target, path);
+        state.sources.insert(target, source);
         state.folder_roots.insert(target, folder_root);
         state.item_ids.insert(target, id);
         state.selected_index = selected_id
@@ -293,10 +296,10 @@ impl MediaImportService {
     pub fn play_user_playlist(
         &self,
         playlist_id: i64,
-        paths: Vec<PathBuf>,
+        sources: Vec<MediaSource>,
         selected_index: usize,
     ) -> Result<PlaylistPlaybackResult, PlaybackFailure> {
-        if selected_index >= paths.len() {
+        if selected_index >= sources.len() {
             return Err(PlaybackFailure::task_failed(
                 "playlist target is unavailable".to_owned(),
             ));
@@ -304,7 +307,7 @@ impl MediaImportService {
         let mut state = self.state.lock().map_err(|_| state_poisoned())?;
         let playback = self
             .engine
-            .replace_queue_and_play(paths, selected_index)
+            .replace_queue_and_play(sources, selected_index)
             .map_err(|error| error.failure())?;
         let active_playlist = ActivePlaylistSnapshot::user_playlist(playlist_id);
         state.active_playlist = Some(active_playlist.clone());
@@ -317,20 +320,20 @@ impl MediaImportService {
     pub fn sync_user_insert(
         &self,
         playlist_id: i64,
-        previous_paths: &[PathBuf],
-        next_paths: &[PathBuf],
+        previous_sources: &[MediaSource],
+        next_sources: &[MediaSource],
     ) -> Result<Option<PlaybackSnapshot>, PlaybackFailure> {
         let state = self.state.lock().map_err(|_| state_poisoned())?;
         if state.active_playlist != Some(ActivePlaylistSnapshot::user_playlist(playlist_id)) {
             return Ok(None);
         }
         let queue = self.engine.snapshot().map_err(|error| error.failure())?;
-        if !queue_paths_match(&queue, previous_paths) {
+        if !queue_sources_match(&queue, previous_sources) {
             return Err(sequence_mismatch());
         }
         let (position, added) =
-            inserted_segment(previous_paths, next_paths).ok_or_else(sequence_mismatch)?;
-        let playback = if position == previous_paths.len() {
+            inserted_segment(previous_sources, next_sources).ok_or_else(sequence_mismatch)?;
+        let playback = if position == previous_sources.len() {
             self.engine.append_queue(added.to_vec())
         } else {
             self.engine.insert_queue(added.to_vec(), position)
@@ -342,19 +345,19 @@ impl MediaImportService {
     pub fn sync_user_remove(
         &self,
         playlist_id: i64,
-        previous_paths: &[PathBuf],
-        next_paths: &[PathBuf],
+        previous_sources: &[MediaSource],
+        next_sources: &[MediaSource],
     ) -> Result<Option<PlaybackSnapshot>, PlaybackFailure> {
         let state = self.state.lock().map_err(|_| state_poisoned())?;
         if state.active_playlist != Some(ActivePlaylistSnapshot::user_playlist(playlist_id)) {
             return Ok(None);
         }
         let queue = self.engine.snapshot().map_err(|error| error.failure())?;
-        if !queue_paths_match(&queue, previous_paths) {
+        if !queue_sources_match(&queue, previous_sources) {
             return Err(sequence_mismatch());
         }
         let position =
-            removed_position(previous_paths, next_paths).ok_or_else(sequence_mismatch)?;
+            removed_position(previous_sources, next_sources).ok_or_else(sequence_mismatch)?;
         let queue_item = queue.queue.get(position).ok_or_else(sequence_mismatch)?;
         self.engine
             .remove_queue_item(queue_item.id)
@@ -365,19 +368,19 @@ impl MediaImportService {
     pub fn sync_user_remove_many(
         &self,
         playlist_id: i64,
-        previous_paths: &[PathBuf],
-        next_paths: &[PathBuf],
+        previous_sources: &[MediaSource],
+        next_sources: &[MediaSource],
     ) -> Result<Option<PlaybackSnapshot>, PlaybackFailure> {
         let state = self.state.lock().map_err(|_| state_poisoned())?;
         if state.active_playlist != Some(ActivePlaylistSnapshot::user_playlist(playlist_id)) {
             return Ok(None);
         }
         let queue = self.engine.snapshot().map_err(|error| error.failure())?;
-        if !queue_paths_match(&queue, previous_paths) {
+        if !queue_sources_match(&queue, previous_sources) {
             return Err(sequence_mismatch());
         }
         let positions =
-            removed_positions(previous_paths, next_paths).ok_or_else(sequence_mismatch)?;
+            removed_positions(previous_sources, next_sources).ok_or_else(sequence_mismatch)?;
         let mut playback = None;
         for position in positions.into_iter().rev() {
             let queue_item = queue.queue.get(position).ok_or_else(sequence_mismatch)?;
@@ -393,7 +396,7 @@ impl MediaImportService {
     pub fn sync_user_move(
         &self,
         playlist_id: i64,
-        previous_paths: &[PathBuf],
+        previous_sources: &[MediaSource],
         from_position: usize,
         to_position: usize,
     ) -> Result<Option<PlaybackSnapshot>, PlaybackFailure> {
@@ -402,7 +405,7 @@ impl MediaImportService {
             return Ok(None);
         }
         let queue = self.engine.snapshot().map_err(|error| error.failure())?;
-        if !queue_paths_match(&queue, previous_paths) {
+        if !queue_sources_match(&queue, previous_sources) {
             return Err(sequence_mismatch());
         }
         let queue_item = queue
@@ -429,16 +432,19 @@ impl MediaImportService {
             return Ok(None);
         }
         let playback = self.engine.snapshot().map_err(|error| error.failure())?;
-        replace_default_paths(
+        replace_default_sources(
             &mut state,
             playback
                 .queue
                 .iter()
-                .map(|item| PathBuf::from(&item.path))
+                .map(|item| MediaSource {
+                    path: PathBuf::from(&item.path),
+                    cue: item.cue.clone(),
+                })
                 .collect(),
         );
         state.revision = state.revision.wrapping_add(1).max(1);
-        state.source_directory = common_parent(&state.paths);
+        state.source_directory = common_parent(&state.sources);
         state.selected_index = playback
             .current_item_id
             .and_then(|id| playback.queue.iter().position(|item| item.id == id));
@@ -446,14 +452,14 @@ impl MediaImportService {
         Ok(Some(snapshot_from_state(&state)))
     }
 
-    fn play_paths(
+    fn play_sources(
         &self,
-        current_paths: &[PathBuf],
-        target_paths: &[PathBuf],
+        current_sources: &[MediaSource],
+        target_sources: &[MediaSource],
         selected_index: usize,
     ) -> Result<PlaybackSnapshot, PlaybackFailure> {
         let queue = self.engine.snapshot().map_err(|error| error.failure())?;
-        if current_paths == target_paths && queue_paths_match(&queue, target_paths) {
+        if current_sources == target_sources && queue_sources_match(&queue, target_sources) {
             let item = queue.queue.get(selected_index).ok_or_else(|| {
                 PlaybackFailure::task_failed("default playlist target is unavailable".to_owned())
             })?;
@@ -462,7 +468,7 @@ impl MediaImportService {
                 .map_err(|error| error.failure())
         } else {
             self.engine
-                .replace_queue_and_play(target_paths.to_vec(), selected_index)
+                .replace_queue_and_play(target_sources.to_vec(), selected_index)
                 .map_err(|error| error.failure())
         }
     }
@@ -489,14 +495,14 @@ where
 }
 
 fn commit_context(state: &mut DefaultPlaylistState, context: AudioFileContext) {
-    if state.paths != context.paths {
+    if state.sources != context.sources {
         state.revision = state.revision.wrapping_add(1).max(1);
         state.source_directory = context
-            .paths
+            .sources
             .first()
-            .and_then(|path| path.parent())
+            .and_then(|source| source.path.parent())
             .map(Path::to_owned);
-        replace_default_paths(state, context.paths);
+        replace_default_sources(state, context.sources);
     }
     state.selected_index = Some(context.selected_index);
 }
@@ -505,28 +511,30 @@ fn insert_resolved_paths(
     state: &mut DefaultPlaylistState,
     resolved: ResolvedAudioPaths,
     position: Option<usize>,
-) -> (DefaultPlaylistMutationResult, Vec<PathBuf>, usize) {
+) -> (DefaultPlaylistMutationResult, Vec<MediaSource>, usize) {
     let mut rejected = resolved.rejected;
-    let mut known = state.paths.iter().cloned().collect::<HashSet<_>>();
+    let mut known = state.sources.iter().cloned().collect::<HashSet<_>>();
     let mut accepted = Vec::new();
     for item in resolved.items {
-        if known.insert(item.path.clone()) {
+        if known.insert(item.source.clone()) {
             accepted.push(item);
         } else {
             rejected.push(RejectedPath {
-                path: item.path.to_string_lossy().into_owned(),
+                path: item.source.path.to_string_lossy().into_owned(),
                 reason: RejectedPathReason::Duplicate,
             });
         }
     }
-    let insertion = position.unwrap_or(state.paths.len()).min(state.paths.len());
+    let insertion = position
+        .unwrap_or(state.sources.len())
+        .min(state.sources.len());
     if !accepted.is_empty() {
         let item_ids = (0..accepted.len())
             .map(|_| next_default_item_id(state))
             .collect::<Vec<_>>();
-        state.paths.splice(
+        state.sources.splice(
             insertion..insertion,
-            accepted.iter().map(|item| item.path.clone()),
+            accepted.iter().map(|item| item.source.clone()),
         );
         state.folder_roots.splice(
             insertion..insertion,
@@ -539,39 +547,39 @@ fn insert_resolved_paths(
             }
         }
         state.revision = state.revision.wrapping_add(1).max(1);
-        state.source_directory = common_parent(&state.paths);
+        state.source_directory = common_parent(&state.sources);
     }
     (
         DefaultPlaylistMutationResult {
             default_playlist: snapshot_from_state(state),
             rejected,
         },
-        accepted.into_iter().map(|item| item.path).collect(),
+        accepted.into_iter().map(|item| item.source).collect(),
         insertion,
     )
 }
 
-fn common_parent(paths: &[PathBuf]) -> Option<PathBuf> {
-    let first = paths.first()?.parent()?;
-    paths
+fn common_parent(sources: &[MediaSource]) -> Option<PathBuf> {
+    let first = sources.first()?.path.parent()?;
+    sources
         .iter()
-        .all(|path| path.parent() == Some(first))
+        .all(|source| source.path.parent() == Some(first))
         .then(|| first.to_owned())
 }
 
-fn queue_paths_match(snapshot: &PlaybackSnapshot, paths: &[PathBuf]) -> bool {
-    snapshot.queue.len() == paths.len()
+fn queue_sources_match(snapshot: &PlaybackSnapshot, sources: &[MediaSource]) -> bool {
+    snapshot.queue.len() == sources.len()
         && snapshot
             .queue
             .iter()
-            .zip(paths)
-            .all(|(item, path)| Path::new(&item.path) == path)
+            .zip(sources)
+            .all(|(item, source)| Path::new(&item.path) == source.path && item.cue == source.cue)
 }
 
 fn inserted_segment<'a>(
-    previous: &[PathBuf],
-    next: &'a [PathBuf],
-) -> Option<(usize, &'a [PathBuf])> {
+    previous: &[MediaSource],
+    next: &'a [MediaSource],
+) -> Option<(usize, &'a [MediaSource])> {
     let added_count = next.len().checked_sub(previous.len())?;
     if added_count == 0 {
         return Some((previous.len(), &next[next.len()..]));
@@ -585,7 +593,7 @@ fn inserted_segment<'a>(
         .then_some((prefix, &next[prefix..prefix + added_count]))
 }
 
-fn removed_position(previous: &[PathBuf], next: &[PathBuf]) -> Option<usize> {
+fn removed_position(previous: &[MediaSource], next: &[MediaSource]) -> Option<usize> {
     if previous.len() != next.len().saturating_add(1) {
         return None;
     }
@@ -597,7 +605,7 @@ fn removed_position(previous: &[PathBuf], next: &[PathBuf]) -> Option<usize> {
     (previous[prefix + 1..] == next[prefix..]).then_some(prefix)
 }
 
-fn removed_positions(previous: &[PathBuf], next: &[PathBuf]) -> Option<Vec<usize>> {
+fn removed_positions(previous: &[MediaSource], next: &[MediaSource]) -> Option<Vec<usize>> {
     if next.len() > previous.len() {
         return None;
     }
@@ -623,33 +631,31 @@ fn snapshot_from_state(state: &DefaultPlaylistState) -> DefaultPlaylistSnapshot 
             .map(|path| path.to_string_lossy().into_owned()),
         selected_index: state.selected_index,
         items: state
-            .paths
+            .sources
             .iter()
             .zip(&state.folder_roots)
             .zip(&state.item_ids)
-            .map(|((path, folder_root), id)| DefaultPlaylistItem {
+            .map(|((source, folder_root), id)| DefaultPlaylistItem {
                 id: *id,
-                path: path.to_string_lossy().into_owned(),
-                display_name: path
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| path.to_string_lossy().into_owned()),
+                path: source.path.to_string_lossy().into_owned(),
+                display_name: source.display_name(),
                 folder_root: folder_root
                     .as_ref()
                     .map(|path| path.to_string_lossy().into_owned()),
+                cue: source.cue.clone(),
             })
             .collect(),
     }
 }
 
-fn replace_default_paths(state: &mut DefaultPlaylistState, paths: Vec<PathBuf>) {
+fn replace_default_sources(state: &mut DefaultPlaylistState, sources: Vec<MediaSource>) {
     let mut known_ids = state
-        .paths
+        .sources
         .iter()
         .cloned()
         .zip(state.item_ids.iter().copied())
         .collect::<std::collections::HashMap<_, _>>();
-    let item_ids = paths
+    let item_ids = sources
         .iter()
         .map(|path| {
             known_ids
@@ -657,8 +663,8 @@ fn replace_default_paths(state: &mut DefaultPlaylistState, paths: Vec<PathBuf>) 
                 .unwrap_or_else(|| next_default_item_id(state))
         })
         .collect();
-    state.paths = paths;
-    state.folder_roots = vec![None; state.paths.len()];
+    state.sources = sources;
+    state.folder_roots = vec![None; state.sources.len()];
     state.item_ids = item_ids;
 }
 
@@ -713,7 +719,7 @@ mod tests {
             filesystem::audio_file_context(&second).expect("changed context"),
         );
         assert_eq!(state.revision, revision + 1);
-        assert_eq!(state.paths.len(), 3);
+        assert_eq!(state.sources.len(), 3);
         assert_eq!(state.item_ids[..2], ids);
         assert_ne!(state.item_ids[2], ids[0]);
         let _ = fs::remove_dir_all(root);
@@ -812,8 +818,15 @@ mod tests {
         );
 
         assert_eq!(position, 1);
-        assert_eq!(added, std::slice::from_ref(&inserted));
-        assert_eq!(state.paths, [first, inserted, second]);
+        assert_eq!(added, [MediaSource::file(inserted.clone())]);
+        assert_eq!(
+            state.sources,
+            [
+                MediaSource::file(first),
+                MediaSource::file(inserted),
+                MediaSource::file(second)
+            ]
+        );
         assert_eq!(state.selected_index, Some(2));
         let _ = fs::remove_dir_all(root);
     }
@@ -894,18 +907,41 @@ mod tests {
         service
             .sync_user_insert(
                 7,
-                &[first.clone(), second.clone()],
-                &[first.clone(), inserted.clone(), second.clone()],
+                &[
+                    MediaSource::file(first.clone()),
+                    MediaSource::file(second.clone()),
+                ],
+                &[
+                    MediaSource::file(first.clone()),
+                    MediaSource::file(inserted.clone()),
+                    MediaSource::file(second.clone()),
+                ],
             )
             .expect("insert active item");
         service
-            .sync_user_move(7, &[first.clone(), inserted.clone(), second.clone()], 2, 0)
+            .sync_user_move(
+                7,
+                &[
+                    MediaSource::file(first.clone()),
+                    MediaSource::file(inserted.clone()),
+                    MediaSource::file(second.clone()),
+                ],
+                2,
+                0,
+            )
             .expect("move active item");
         service
             .sync_user_remove(
                 7,
-                &[second.clone(), first.clone(), inserted.clone()],
-                &[second.clone(), inserted.clone()],
+                &[
+                    MediaSource::file(second.clone()),
+                    MediaSource::file(first.clone()),
+                    MediaSource::file(inserted.clone()),
+                ],
+                &[
+                    MediaSource::file(second.clone()),
+                    MediaSource::file(inserted.clone()),
+                ],
             )
             .expect("remove active item");
 
@@ -942,7 +978,11 @@ mod tests {
         let service = MediaImportService::new(Arc::clone(&engine));
 
         assert!(service
-            .sync_user_insert(7, std::slice::from_ref(&first), &[first.clone(), second])
+            .sync_user_insert(
+                7,
+                &[MediaSource::file(first.clone())],
+                &[MediaSource::file(first), MediaSource::file(second)]
+            )
             .expect("ignore inactive edit")
             .is_none());
         assert_eq!(engine.snapshot().expect("sequence snapshot").queue.len(), 1);
