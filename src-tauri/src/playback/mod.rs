@@ -18,6 +18,7 @@ use rodio::{ChannelCount, Decoder, Player, SampleRate, Source};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::media_source::MediaSource;
 use output::OutputDeviceManager;
 use output::OutputSnapshot;
 
@@ -85,6 +86,7 @@ pub struct QueueItemSnapshot {
     pub duration_ms: Option<u64>,
     pub status: QueueItemStatus,
     pub error: Option<PlaybackFailure>,
+    pub cue: Option<crate::media_source::CueTrackSource>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -223,15 +225,15 @@ impl PlaybackError {
 }
 
 pub trait PlaybackEngine {
-    fn append_queue(&self, paths: Vec<PathBuf>) -> Result<PlaybackSnapshot, PlaybackError>;
+    fn append_queue(&self, sources: Vec<MediaSource>) -> Result<PlaybackSnapshot, PlaybackError>;
     fn insert_queue(
         &self,
-        paths: Vec<PathBuf>,
+        sources: Vec<MediaSource>,
         at_index: usize,
     ) -> Result<PlaybackSnapshot, PlaybackError>;
     fn replace_queue_and_play(
         &self,
-        paths: Vec<PathBuf>,
+        sources: Vec<MediaSource>,
         selected_index: usize,
     ) -> Result<PlaybackSnapshot, PlaybackError>;
     fn play_queue_item(&self, id: u64) -> Result<PlaybackSnapshot, PlaybackError>;
@@ -262,16 +264,16 @@ type ResponseSender = Sender<CommandResult>;
 
 enum AudioCommand {
     AppendQueue {
-        paths: Vec<PathBuf>,
+        sources: Vec<MediaSource>,
         response: ResponseSender,
     },
     InsertQueue {
-        paths: Vec<PathBuf>,
+        sources: Vec<MediaSource>,
         at_index: usize,
         response: ResponseSender,
     },
     ReplaceQueueAndPlay {
-        paths: Vec<PathBuf>,
+        sources: Vec<MediaSource>,
         selected_index: usize,
         response: ResponseSender,
     },
@@ -362,21 +364,25 @@ impl Default for RodioPlaybackEngine {
 }
 
 impl PlaybackEngine for RodioPlaybackEngine {
-    fn append_queue(&self, paths: Vec<PathBuf>) -> CommandResult {
-        self.request(|response| AudioCommand::AppendQueue { paths, response })
+    fn append_queue(&self, sources: Vec<MediaSource>) -> CommandResult {
+        self.request(|response| AudioCommand::AppendQueue { sources, response })
     }
 
-    fn insert_queue(&self, paths: Vec<PathBuf>, at_index: usize) -> CommandResult {
+    fn insert_queue(&self, sources: Vec<MediaSource>, at_index: usize) -> CommandResult {
         self.request(|response| AudioCommand::InsertQueue {
-            paths,
+            sources,
             at_index,
             response,
         })
     }
 
-    fn replace_queue_and_play(&self, paths: Vec<PathBuf>, selected_index: usize) -> CommandResult {
+    fn replace_queue_and_play(
+        &self,
+        sources: Vec<MediaSource>,
+        selected_index: usize,
+    ) -> CommandResult {
         self.request(|response| AudioCommand::ReplaceQueueAndPlay {
-            paths,
+            sources,
             selected_index,
             response,
         })
@@ -579,38 +585,35 @@ struct OutputRecovery {
 #[derive(Clone, Debug)]
 struct QueueItem {
     id: u64,
-    path: PathBuf,
     display_name: String,
     duration_ms: Option<u64>,
     status: QueueItemStatus,
     error: Option<PlaybackFailure>,
+    source: MediaSource,
 }
 
 impl QueueItem {
-    fn new(id: u64, path: PathBuf) -> Self {
-        let display_name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .map(str::to_owned)
-            .unwrap_or_else(|| path.to_string_lossy().into_owned());
+    fn new(id: u64, source: MediaSource) -> Self {
+        let display_name = source.display_name();
         Self {
             id,
-            path,
             display_name,
             duration_ms: None,
             status: QueueItemStatus::Pending,
             error: None,
+            source,
         }
     }
 
     fn snapshot(&self) -> QueueItemSnapshot {
         QueueItemSnapshot {
             id: self.id,
-            path: self.path.to_string_lossy().into_owned(),
+            path: self.source.path.to_string_lossy().into_owned(),
             display_name: self.display_name.clone(),
             duration_ms: self.duration_ms,
             status: self.status,
             error: self.error.clone(),
+            cue: self.source.cue.clone(),
         }
     }
 }
@@ -654,20 +657,20 @@ impl AudioActor {
 
     fn handle(&mut self, command: AudioCommand) {
         let (result, response, replace_state_on_error) = match command {
-            AudioCommand::AppendQueue { paths, response } => {
-                (self.append_queue(paths), response, false)
+            AudioCommand::AppendQueue { sources, response } => {
+                (self.append_queue(sources), response, false)
             }
             AudioCommand::InsertQueue {
-                paths,
+                sources,
                 at_index,
                 response,
-            } => (self.insert_queue(paths, at_index), response, false),
+            } => (self.insert_queue(sources, at_index), response, false),
             AudioCommand::ReplaceQueueAndPlay {
-                paths,
+                sources,
                 selected_index,
                 response,
             } => (
-                self.replace_queue_and_play(paths, selected_index),
+                self.replace_queue_and_play(sources, selected_index),
                 response,
                 true,
             ),
@@ -724,14 +727,14 @@ impl AudioActor {
         let _ = response.send(result);
     }
 
-    fn replace_queue(&mut self, paths: Vec<PathBuf>) -> CommandResult {
+    fn replace_queue(&mut self, sources: Vec<MediaSource>) -> CommandResult {
         self.stop_player();
-        self.queue = paths
+        self.queue = sources
             .into_iter()
-            .map(|path| {
+            .map(|source| {
                 let id = self.next_queue_id;
                 self.next_queue_id = self.next_queue_id.saturating_add(1);
-                QueueItem::new(id, path)
+                QueueItem::new(id, source)
             })
             .collect();
         self.current_index = None;
@@ -751,10 +754,11 @@ impl AudioActor {
     }
 
     fn restore_session(&mut self, session: RestoredPlaybackSession) -> CommandResult {
-        let paths = session
+        let sources = session
             .paths
             .into_iter()
             .filter(|path| validate_audio_path(path).is_ok())
+            .map(MediaSource::file)
             .collect::<Vec<_>>();
         self.snapshot.playback_mode = session.playback_mode;
         self.snapshot.volume = if session.volume.is_finite() {
@@ -762,14 +766,18 @@ impl AudioActor {
         } else {
             1.0
         };
-        self.replace_queue(paths)?;
+        self.replace_queue(sources)?;
         let Some(current_path) = session.current_path else {
             return Ok(self.snapshot.clone());
         };
-        let Some(index) = self.queue.iter().position(|item| item.path == current_path) else {
+        let Some(index) = self
+            .queue
+            .iter()
+            .position(|item| item.source.path == current_path)
+        else {
             return Ok(self.snapshot.clone());
         };
-        let (_, duration_ms) = decode_path(&self.queue[index].path)?;
+        let (_, duration_ms) = decode_source(&self.queue[index].source)?;
         self.queue[index].duration_ms = duration_ms;
         self.current_index = Some(index);
         let position_ms = duration_ms.map_or(session.position_ms, |duration| {
@@ -782,11 +790,11 @@ impl AudioActor {
         Ok(self.snapshot.clone())
     }
 
-    fn append_queue(&mut self, paths: Vec<PathBuf>) -> CommandResult {
-        for path in paths {
+    fn append_queue(&mut self, sources: Vec<MediaSource>) -> CommandResult {
+        for source in sources {
             let id = self.next_queue_id;
             self.next_queue_id = self.next_queue_id.saturating_add(1);
-            self.queue.push(QueueItem::new(id, path));
+            self.queue.push(QueueItem::new(id, source));
         }
         if self.current_index.is_some() && self.player.is_some() {
             self.preload_next()?;
@@ -795,20 +803,20 @@ impl AudioActor {
         Ok(self.snapshot.clone())
     }
 
-    fn insert_queue(&mut self, paths: Vec<PathBuf>, at_index: usize) -> CommandResult {
-        if paths.is_empty() {
+    fn insert_queue(&mut self, sources: Vec<MediaSource>, at_index: usize) -> CommandResult {
+        if sources.is_empty() {
             return Ok(self.snapshot.clone());
         }
         let insertion = at_index.min(self.queue.len());
         if insertion == self.queue.len() {
-            return self.append_queue(paths);
+            return self.append_queue(sources);
         }
-        let added = paths
+        let added = sources
             .into_iter()
-            .map(|path| {
+            .map(|source| {
                 let id = self.next_queue_id;
                 self.next_queue_id = self.next_queue_id.saturating_add(1);
-                QueueItem::new(id, path)
+                QueueItem::new(id, source)
             })
             .collect::<Vec<_>>();
         let added_count = added.len();
@@ -832,13 +840,13 @@ impl AudioActor {
 
     fn replace_queue_and_play(
         &mut self,
-        paths: Vec<PathBuf>,
+        sources: Vec<MediaSource>,
         selected_index: usize,
     ) -> CommandResult {
-        if selected_index >= paths.len() {
+        if selected_index >= sources.len() {
             return Err(PlaybackError::QueueItemNotFound);
         }
-        self.replace_queue(paths)?;
+        self.replace_queue(sources)?;
         self.start_from_index(selected_index)
     }
 
@@ -1011,7 +1019,7 @@ impl AudioActor {
 
         let mut candidate = index;
         loop {
-            let (decoder, duration_ms) = match decode_path(&self.queue[candidate].path) {
+            let (decoder, duration_ms) = match decode_source(&self.queue[candidate].source) {
                 Ok(value) => value,
                 Err(error) => {
                     self.queue[candidate].status = QueueItemStatus::Failed;
@@ -1215,7 +1223,7 @@ impl AudioActor {
             if self.current_index == Some(index) {
                 return Ok(());
             }
-            let (decoder, duration_ms) = match decode_path(&self.queue[index].path) {
+            let (decoder, duration_ms) = match decode_source(&self.queue[index].source) {
                 Ok(value) => value,
                 Err(error) => {
                     self.queue[index].status = QueueItemStatus::Failed;
@@ -1245,7 +1253,7 @@ impl AudioActor {
             return;
         };
         let item = &self.queue[index];
-        self.snapshot.path = Some(item.path.to_string_lossy().into_owned());
+        self.snapshot.path = Some(item.source.path.to_string_lossy().into_owned());
         self.snapshot.duration_ms = item.duration_ms;
         self.snapshot.seekable = item.duration_ms.is_some();
         self.snapshot.current_item_id = Some(item.id);
@@ -1464,7 +1472,7 @@ impl AudioActor {
     }
 
     fn append_index(&mut self, index: usize) -> Result<(), PlaybackError> {
-        let (decoder, duration_ms) = decode_path(&self.queue[index].path)?;
+        let (decoder, duration_ms) = decode_source(&self.queue[index].source)?;
         self.queue[index].duration_ms = duration_ms;
         let player = self.player.as_ref().ok_or(PlaybackError::NothingLoaded)?;
         let signal = append_marked(player, decoder, index);
@@ -1525,6 +1533,25 @@ fn decode_path(path: &Path) -> Result<(Decoder<BufReader<File>>, Option<u64>), P
         Decoder::try_from(file).map_err(|error| PlaybackError::Decode(error.to_string()))?;
     let duration_ms = decoder.total_duration().map(duration_to_millis);
     Ok((decoder, duration_ms))
+}
+
+fn decode_source(
+    source: &MediaSource,
+) -> Result<(Box<dyn Source + Send>, Option<u64>), PlaybackError> {
+    let (decoder, physical_duration_ms) = decode_path(&source.path)?;
+    let duration_ms = source.duration_ms(physical_duration_ms);
+    let Some(cue) = &source.cue else {
+        return Ok((Box::new(decoder), duration_ms));
+    };
+    let skipped = decoder.skip_duration(Duration::from_millis(cue.start_ms));
+    if let Some(duration_ms) = duration_ms {
+        Ok((
+            Box::new(skipped.take_duration(Duration::from_millis(duration_ms))),
+            Some(duration_ms),
+        ))
+    } else {
+        Ok((Box::new(skipped), None))
+    }
 }
 
 fn append_marked<S>(player: &Player, source: S, index: usize) -> QueuedSourceSignal
@@ -1650,6 +1677,32 @@ mod tests {
     }
 
     #[test]
+    fn cue_source_exposes_relative_duration_and_seek() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("tests/fixtures/audio/wav_44100_16_stereo.wav");
+        let source = MediaSource {
+            path,
+            cue: Some(crate::media_source::CueTrackSource {
+                cue_path: PathBuf::from("album.cue"),
+                track_number: 1,
+                title: Some("Segment".to_owned()),
+                performer: None,
+                album: None,
+                start_ms: 20,
+                end_ms: Some(80),
+            }),
+        };
+        let (mut decoded, duration_ms) = decode_source(&source).expect("decode CUE segment");
+        assert_eq!(duration_ms, Some(60));
+        assert_eq!(decoded.total_duration().map(duration_to_millis), Some(60));
+        decoded
+            .try_seek(Duration::from_millis(30))
+            .expect("seek relative to CUE start");
+        assert!(decoded.take(32).count() > 0);
+    }
+
+    #[test]
     fn decodes_the_generated_format_matrix() {
         let fixture_directory = fixture_directory();
         let mut count = 0;
@@ -1759,14 +1812,19 @@ mod tests {
         let inserted = PathBuf::from("inserted.flac");
 
         let replaced = engine
-            .replace_queue(vec![first.clone(), second.clone()])
+            .replace_queue(vec![
+                MediaSource::file(first.clone()),
+                MediaSource::file(second.clone()),
+            ])
             .expect("replace queue");
         assert_eq!(replaced.queue.len(), 2);
         assert_eq!(replaced.queue[0].id, 1);
         assert_eq!(replaced.queue[1].id, 2);
         assert_eq!(replaced.queue[0].display_name, "first.wav");
 
-        let appended = engine.append_queue(vec![third]).expect("append queue");
+        let appended = engine
+            .append_queue(vec![MediaSource::file(third)])
+            .expect("append queue");
         assert_eq!(
             appended
                 .queue
@@ -1777,7 +1835,7 @@ mod tests {
         );
 
         let inserted = engine
-            .insert_queue(vec![inserted], 1)
+            .insert_queue(vec![MediaSource::file(inserted)], 1)
             .expect("insert queue item");
         assert_eq!(
             inserted
@@ -1805,7 +1863,7 @@ mod tests {
     fn next_without_a_target_preserves_the_active_playback_state() {
         let mut engine = AudioActor::new();
         engine
-            .replace_queue(vec![PathBuf::from("only-track.flac")])
+            .replace_queue(vec![MediaSource::file(PathBuf::from("only-track.flac"))])
             .expect("replace single-item queue");
         engine.current_index = Some(0);
         engine.snapshot.status = PlaybackStatus::Playing;
@@ -1870,7 +1928,7 @@ mod tests {
         let path = fixture_directory().join("seek_48000_24_stereo.flac");
         let engine = RodioPlaybackEngine::new();
         let result = engine
-            .replace_queue_and_play(vec![path], 0)
+            .replace_queue_and_play(vec![MediaSource::file(path)], 0)
             .expect("play FLAC fixture");
         assert_eq!(result.status, PlaybackStatus::Playing);
         assert_eq!(result.duration_ms, Some(4000));
@@ -1903,7 +1961,7 @@ mod tests {
         let path = fixture_directory().join("mp3_44100_cbr128_stereo.mp3");
         let engine = RodioPlaybackEngine::new();
         let result = engine
-            .replace_queue_and_play(vec![path], 0)
+            .replace_queue_and_play(vec![MediaSource::file(path)], 0)
             .expect("play MP3 fixture");
         assert_eq!(result.status, PlaybackStatus::Playing);
         assert!(result.duration_ms.is_some());
@@ -1916,7 +1974,7 @@ mod tests {
         let path = fixture_directory().join("wav_192000_32_stereo.wav");
         let engine = RodioPlaybackEngine::new();
         let result = engine
-            .replace_queue_and_play(vec![path], 0)
+            .replace_queue_and_play(vec![MediaSource::file(path)], 0)
             .expect("play 192 kHz/32-bit WAV fixture");
         assert_eq!(result.status, PlaybackStatus::Playing);
         engine.stop().expect("stop 192 kHz/32-bit WAV fixture");
@@ -1928,7 +1986,7 @@ mod tests {
         let engine = RodioPlaybackEngine::new();
         let unsupported = fixture_directory().join("flac_48000_32_stereo.flac");
         assert!(matches!(
-            engine.replace_queue_and_play(vec![unsupported], 0),
+            engine.replace_queue_and_play(vec![MediaSource::file(unsupported)], 0),
             Err(PlaybackError::Decode(_))
         ));
 
@@ -1941,7 +1999,7 @@ mod tests {
 
         let supported = fixture_directory().join("flac_48000_24_stereo.flac");
         let playing = engine
-            .replace_queue_and_play(vec![supported], 0)
+            .replace_queue_and_play(vec![MediaSource::file(supported)], 0)
             .expect("recover with supported FLAC");
         assert_eq!(playing.status, PlaybackStatus::Playing);
         assert_eq!(playing.error, None);
@@ -1955,7 +2013,7 @@ mod tests {
         let first = fixture_directory().join("seek_48000_24_stereo.flac");
         let second = fixture_directory().join("wav_44100_16_stereo.wav");
         let playing = engine
-            .replace_queue_and_play(vec![first, second], 0)
+            .replace_queue_and_play(vec![MediaSource::file(first), MediaSource::file(second)], 0)
             .expect("replace queue and play");
         assert_eq!(playing.status, PlaybackStatus::Playing);
         assert_eq!(playing.queue[1].status, QueueItemStatus::Pending);
@@ -1977,7 +2035,7 @@ mod tests {
         let first = fixture_directory().join("seek_48000_24_stereo.flac");
         let second = fixture_directory().join("wav_44100_16_stereo.wav");
         let playing = engine
-            .replace_queue_and_play(vec![first, second], 0)
+            .replace_queue_and_play(vec![MediaSource::file(first), MediaSource::file(second)], 0)
             .expect("replace queue and play");
         let current_id = playing.current_item_id;
 

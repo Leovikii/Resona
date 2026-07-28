@@ -3311,6 +3311,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20675572f6f24e9e76ef639bc5552774ed45f1c30e2951e1e99c59888861c539"
 
 [[package]]
+name = "rcue"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fca1481d62f18158646de2ec552dd63f8bdc5be6448389b192ba95c939df997e"
+
+[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3420,7 +3426,7 @@ dependencies = [
 
 [[package]]
 name = "resona"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "encoding_rs",
@@ -3431,6 +3437,7 @@ dependencies = [
  "lofty",
  "log",
  "lrc",
+ "rcue",
  "rodio",
  "rusqlite",
  "semver",

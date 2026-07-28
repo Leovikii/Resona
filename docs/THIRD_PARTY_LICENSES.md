@@ -13,7 +13,7 @@ Resona does not bundle FFmpeg. After an explicit user action, the installed appl
 - Binary details and hashes: [`src-tauri/binaries/README.md`](../src-tauri/binaries/README.md)
 - FFmpeg license and source information: `https://ffmpeg.org/legal.html`
 
-- Rust packages: 598
+- Rust packages: 599
 - npm packages: 214
 - Unknown license declarations: 0
 
@@ -349,6 +349,7 @@ Resona does not bundle FFmpeg. After an explicit user action, the installed appl
 | r-efi | 5.3.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later |
 | r-efi | 6.0.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later |
 | raw-window-handle | 0.6.2 | MIT OR Apache-2.0 OR Zlib |
+| rcue | 0.1.3 | MIT |
 | redox_syscall | 0.5.18 | MIT |
 | redox_users | 0.5.2 | MIT |
 | ref-cast | 1.0.25 | MIT OR Apache-2.0 |

@@ -4,8 +4,8 @@ import { invokeTauri, isTauriRuntime } from "../../shared/bridge/tauri";
 import type { TrackSummary } from "../../shared/model/metadata";
 import { fileNameFromPath } from "../../shared/utils/format";
 
-const BATCH_SIZE = 32;
-const MAX_CACHE_ENTRIES = 256;
+const BATCH_SIZE = 64;
+const MAX_CACHE_ENTRIES = 4_096;
 
 export function useTrackSummaries(paths: string[]) {
   const cacheRef = useRef(new Map<string, TrackSummary>());
@@ -24,32 +24,30 @@ export function useTrackSummaries(paths: string[]) {
     const pending = uniquePaths.filter((path) => !requestedRef.current.has(path));
     if (pending.length === 0) return;
     let disposed = false;
-
-    for (let index = 0; index < pending.length; index += BATCH_SIZE) {
-      const batch = pending.slice(index, index + BATCH_SIZE);
-      for (const path of batch) requestedRef.current.add(path);
-      const request = isTauriRuntime()
-        ? invokeTauri<TrackSummary[]>("get_track_summaries", { paths: batch })
-        : Promise.resolve(batch.map(previewSummary));
-      void request
-        .then((summaries) => {
+    void (async () => {
+      for (let index = 0; index < pending.length && !disposed; index += BATCH_SIZE) {
+        const batch = pending.slice(index, index + BATCH_SIZE);
+        for (const path of batch) requestedRef.current.add(path);
+        try {
+          const summaries = isTauriRuntime()
+            ? await invokeTauri<TrackSummary[]>("get_track_summaries", { paths: batch })
+            : batch.map(previewSummary);
           for (const summary of summaries) cacheSummary(summary, cacheRef.current, requestedRef.current);
-        })
-        .catch((error) => {
+        } catch (error) {
           console.warn("track metadata summary failed", error);
           for (const path of batch) {
             cacheSummary({
               path,
               title: null,
               trackNumber: null,
+              durationMs: null,
               metadataWarning: String(error),
             }, cacheRef.current, requestedRef.current);
           }
-        })
-        .finally(() => {
-          if (!disposed) setRevision((current) => current + 1);
-        });
-    }
+        }
+        setRevision((current) => current + 1);
+      }
+    })();
     return () => { disposed = true; };
   }, [pathKey, paths]);
 
@@ -78,6 +76,7 @@ function previewSummary(path: string): TrackSummary {
     path,
     title,
     trackNumber: fileName === "Midnight Signal.flac" ? 2 : null,
+    durationMs: 247_000,
     metadataWarning: null,
   };
 }

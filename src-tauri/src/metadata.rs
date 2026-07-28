@@ -84,6 +84,7 @@ pub struct TrackSummary {
     pub path: String,
     pub title: Option<String>,
     pub track_number: Option<u32>,
+    pub duration_ms: Option<u64>,
     pub metadata_warning: Option<String>,
 }
 
@@ -95,6 +96,7 @@ const MAX_ARTWORK_BYTES: usize = 16 * 1024 * 1024;
 const MAX_ARTWORK_DIMENSION: u32 = 8_192;
 const MAX_DECODED_ARTWORK_BYTES: u64 = 64 * 1024 * 1024;
 const CACHED_ARTWORK_DIMENSION: u32 = 512;
+const MAX_ARTWORK_DIRECTORY_ENTRIES: usize = 128;
 
 #[derive(Clone, Debug)]
 pub struct Artwork {
@@ -135,6 +137,7 @@ struct FileRevision {
     path: PathBuf,
     size: Option<u64>,
     modified: Option<SystemTime>,
+    fallback_artwork: Option<(PathBuf, u64, Option<SystemTime>)>,
 }
 
 #[derive(Clone)]
@@ -164,7 +167,7 @@ pub struct MetadataService {
 
 impl MetadataService {
     pub fn load(&self, path: &Path) -> CachedTrackMetadata {
-        let revision = file_revision(path);
+        let revision = file_revision(path, true);
         let mut cache = self
             .cache
             .lock()
@@ -202,7 +205,7 @@ impl MetadataService {
     }
 
     fn load_summary(&self, path: &Path) -> TrackSummary {
-        let revision = file_revision(path);
+        let revision = file_revision(path, false);
         let mut cache = self
             .summary_cache
             .lock()
@@ -309,7 +312,7 @@ fn read_uncached_track_metadata(
         .primary_tag()
         .or_else(|| tagged_file.tags().first());
     let properties = tagged_file.properties();
-    let artwork = include_artwork
+    let embedded_artwork = include_artwork
         .then_some(tag)
         .flatten()
         .and_then(|value| value.pictures().first())
@@ -336,6 +339,31 @@ fn read_uncached_track_metadata(
                 }
             }
         });
+    let artwork = if include_artwork && embedded_artwork.is_none() {
+        fallback_artwork_candidate(path).and_then(|candidate| {
+            match std::fs::read(&candidate.path) {
+                Ok(bytes) => match service.load_artwork("application/octet-stream", &bytes) {
+                    Ok(artwork) => Some(artwork),
+                    Err(error) => {
+                        log::warn!(
+                            "fallback artwork decode failed for {}: {error}",
+                            candidate.path.display()
+                        );
+                        None
+                    }
+                },
+                Err(error) => {
+                    log::warn!(
+                        "fallback artwork read failed for {}: {error}",
+                        candidate.path.display()
+                    );
+                    None
+                }
+            }
+        })
+    } else {
+        embedded_artwork
+    };
     let sample_rate = properties.sample_rate();
     let bit_depth = properties.bit_depth();
     let audio_bitrate = properties.audio_bitrate();
@@ -371,7 +399,7 @@ fn read_track_summary(path: &Path) -> TrackSummary {
         probe
             .options(
                 ParseOptions::new()
-                    .read_properties(false)
+                    .read_properties(true)
                     .read_cover_art(false),
             )
             .read()
@@ -381,10 +409,17 @@ fn read_track_summary(path: &Path) -> TrackSummary {
         .as_ref()
         .ok()
         .and_then(|file| file.primary_tag().or_else(|| file.tags().first()));
+    let duration_ms = tagged_file.as_ref().ok().map(|file| {
+        file.properties()
+            .duration()
+            .as_millis()
+            .min(u128::from(u64::MAX)) as u64
+    });
     TrackSummary {
         path: path.to_string_lossy().into_owned(),
         title: tag.and_then(|value| value.title().map(|text| text.into_owned())),
         track_number: tag.and_then(Accessor::track),
+        duration_ms,
         metadata_warning,
     }
 }
@@ -436,13 +471,101 @@ fn fingerprint(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
 }
 
-fn file_revision(path: &Path) -> FileRevision {
+fn file_revision(path: &Path, include_artwork: bool) -> FileRevision {
     let metadata = std::fs::metadata(path).ok();
+    let fallback_artwork = include_artwork
+        .then(|| fallback_artwork_candidate(path))
+        .flatten()
+        .and_then(|candidate| {
+            let metadata = std::fs::metadata(&candidate.path).ok()?;
+            Some((candidate.path, metadata.len(), metadata.modified().ok()))
+        });
     FileRevision {
         path: path.to_path_buf(),
         size: metadata.as_ref().map(std::fs::Metadata::len),
         modified: metadata.and_then(|value| value.modified().ok()),
+        fallback_artwork,
     }
+}
+
+#[derive(Clone, Debug)]
+struct ArtworkCandidate {
+    path: PathBuf,
+    width: u32,
+    height: u32,
+    size: u64,
+}
+
+fn fallback_artwork_candidate(audio_path: &Path) -> Option<ArtworkCandidate> {
+    let directory = audio_path.parent()?;
+    let mut candidates = std::fs::read_dir(directory)
+        .ok()?
+        .take(MAX_ARTWORK_DIRECTORY_ENTRIES)
+        .filter_map(Result::ok)
+        .filter_map(|entry| inspect_artwork_candidate(entry.path()))
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| {
+        left.path
+            .file_name()
+            .map(|value| value.to_string_lossy().to_lowercase())
+            .cmp(
+                &right
+                    .path
+                    .file_name()
+                    .map(|value| value.to_string_lossy().to_lowercase()),
+            )
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    if let Some(candidate) = candidates.iter().find(|candidate| {
+        candidate
+            .path
+            .file_stem()
+            .is_some_and(|stem| stem.to_string_lossy().eq_ignore_ascii_case("cover"))
+    }) {
+        return Some(candidate.clone());
+    }
+    if candidates.len() == 1 {
+        return candidates.pop();
+    }
+    candidates.into_iter().min_by_key(|candidate| {
+        let longest = u64::from(candidate.width.max(candidate.height).max(1));
+        let aspect_error = u64::from(candidate.width.abs_diff(candidate.height)) * 10_000 / longest;
+        (
+            aspect_error,
+            u64::from(candidate.width) * u64::from(candidate.height),
+            candidate.size,
+        )
+    })
+}
+
+fn inspect_artwork_candidate(path: PathBuf) -> Option<ArtworkCandidate> {
+    let extension = path.extension()?.to_str()?;
+    if !matches!(
+        extension.to_ascii_lowercase().as_str(),
+        "jpg" | "jpeg" | "png"
+    ) {
+        return None;
+    }
+    let metadata = std::fs::metadata(&path).ok()?;
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_ARTWORK_BYTES as u64 {
+        return None;
+    }
+    let reader = ImageReader::open(&path).ok()?.with_guessed_format().ok()?;
+    let (width, height) = reader.into_dimensions().ok()?;
+    if width == 0
+        || height == 0
+        || width > MAX_ARTWORK_DIMENSION
+        || height > MAX_ARTWORK_DIMENSION
+        || u64::from(width) * u64::from(height) * 4 > MAX_DECODED_ARTWORK_BYTES
+    {
+        return None;
+    }
+    Some(ArtworkCandidate {
+        path,
+        width,
+        height,
+        size: metadata.len(),
+    })
 }
 
 fn classify_quality(
@@ -493,6 +616,42 @@ mod tests {
         bytes
     }
 
+    fn write_png(path: &Path, width: u32, height: u32, color: u8) {
+        let source = image::RgbaImage::from_pixel(width, height, image::Rgba([color, 0, 0, 255]));
+        source.save(path).expect("write artwork fixture");
+    }
+
+    #[test]
+    fn fallback_artwork_prefers_cover_then_unique_then_small_square() {
+        let root = std::env::temp_dir().join(format!("resona-artwork-{}", fastrand::u64(..)));
+        std::fs::create_dir_all(&root).expect("create artwork fixture directory");
+        let audio = root.join("album.flac");
+        std::fs::write(&audio, []).expect("create audio fixture");
+
+        write_png(&root.join("only.png"), 320, 200, 1);
+        assert_eq!(
+            fallback_artwork_candidate(&audio)
+                .and_then(|candidate| candidate.path.file_name().map(|name| name.to_owned())),
+            Some("only.png".into())
+        );
+
+        write_png(&root.join("folder.png"), 100, 100, 2);
+        write_png(&root.join("large-square.png"), 500, 500, 3);
+        assert_eq!(
+            fallback_artwork_candidate(&audio)
+                .and_then(|candidate| candidate.path.file_name().map(|name| name.to_owned())),
+            Some("folder.png".into())
+        );
+
+        write_png(&root.join("CoVeR.PNG"), 600, 400, 4);
+        assert_eq!(
+            fallback_artwork_candidate(&audio)
+                .and_then(|candidate| candidate.path.file_name().map(|name| name.to_owned())),
+            Some("CoVeR.PNG".into())
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn reads_supported_fixture_properties() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -503,6 +662,16 @@ mod tests {
         assert_eq!(metadata.bit_depth, Some(16));
         assert!(metadata.duration_ms.is_some());
         assert!(metadata.metadata_warning.is_none());
+    }
+
+    #[test]
+    fn lightweight_summary_reads_duration_without_artwork() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("tests/fixtures/audio/flac_44100_16_stereo.flac");
+        let summary = MetadataService::default().load_summary(&path);
+        assert!(summary.duration_ms.is_some_and(|duration| duration > 0));
+        assert!(summary.metadata_warning.is_none());
     }
 
     #[test]

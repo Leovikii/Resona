@@ -15,6 +15,7 @@ export interface QueueItem {
   durationMs: number | null;
   status: QueueItemStatus;
   error: PlaybackFailure | null;
+  cue?: import("./library").CueTrackSource | null;
 }
 
 export interface OutputDevice {

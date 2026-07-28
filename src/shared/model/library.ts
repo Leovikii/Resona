@@ -12,11 +12,22 @@ export interface PlaylistDetails {
   items: PlaylistItem[];
 }
 
+export interface CueTrackSource {
+  cuePath: string;
+  trackNumber: number;
+  title: string | null;
+  performer: string | null;
+  album: string | null;
+  startMs: number;
+  endMs: number | null;
+}
+
 export interface DefaultPlaylistItem {
   id: number;
   path: string;
   displayName: string;
   folderRoot: string | null;
+  cue?: CueTrackSource | null;
 }
 
 export interface DefaultPlaylistSnapshot {
@@ -54,6 +65,7 @@ export interface PlaylistItem {
   displayName: string;
   position: number;
   folderRoot: string | null;
+  cue?: CueTrackSource | null;
 }
 
 export interface RejectedPath {

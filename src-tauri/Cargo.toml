@@ -1,6 +1,6 @@
 [package]
 name = "resona"
-version = "0.1.0"
+version = "0.2.0"
 description = "A local desktop audio player"
 authors = ["Viki"]
 edition = "2021"
@@ -24,6 +24,7 @@ base64 = "0.22.1"
 fastrand = "2.3.0"
 futures-util = "0.3"
 lrc = "0.2.0"
+rcue = "0.1.3"
 subtp = "0.2.0"
 encoding_rs = "0.8.35"
 log = "0.4"

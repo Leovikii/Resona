@@ -1,7 +1,7 @@
 {
   "name": "resona",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port 1420",
@@ -13,7 +13,7 @@
     "icons:windows": "node scripts/generate-windows-shell-icons.mjs",
     "installer:artwork": "node scripts/generate-nsis-artwork.mjs",
     "preview": "vite preview --port 1421",
-    "test": "node --test scripts/release-channel.test.mjs scripts/preference-value.test.mjs scripts/full-player-paging.test.mjs scripts/compression-root-expansion.test.mjs scripts/playlist-ordering.test.mjs scripts/playlist-tree.test.mjs scripts/edge-auto-scroll.test.mjs",
+    "test": "node --test scripts/release-channel.test.mjs scripts/preference-value.test.mjs scripts/full-player-paging.test.mjs scripts/compression-root-expansion.test.mjs scripts/playlist-ordering.test.mjs scripts/playlist-tree.test.mjs scripts/edge-auto-scroll.test.mjs scripts/desktop-lyrics-timing.test.mjs",
     "test:release": "node --test scripts/release-channel.test.mjs",
     "verify:fixtures": "node scripts/generate-audio-fixtures.mjs --verify",
     "prepare:test-tools": "node scripts/prepare-ffmpeg-test-tools.mjs",

@@ -97,7 +97,7 @@ fn item_inputs(items: Vec<filesystem::ResolvedAudioItem>) -> Vec<PlaylistItemInp
     items
         .into_iter()
         .map(|item| PlaylistItemInput {
-            path: item.path.to_string_lossy().into_owned(),
+            source: item.source,
             folder_root: item
                 .folder_root
                 .map(|path| path.to_string_lossy().into_owned()),

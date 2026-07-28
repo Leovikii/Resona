@@ -255,8 +255,10 @@ export default function App() {
   const hasCurrentTrack = playback.snapshot.currentItemId !== null
     && playback.selectedPath !== null;
   const currentTitle = useMemo(
-    () => fileNameFromPath(playback.selectedPath) || t("playback.noTrack"),
-    [playback.selectedPath, t],
+    () => playback.currentItem?.displayName
+      || fileNameFromPath(playback.selectedPath)
+      || t("playback.noTrack"),
+    [playback.currentItem?.displayName, playback.selectedPath, t],
   );
   const trackDetails = useTrackDetails(playback.selectedPath);
   const runSeek = useCallback(
@@ -466,8 +468,13 @@ export default function App() {
       setSelection({ kind: "default" });
     }
     playlistLocateRequestIdRef.current += 1;
-    setPlaylistLocateRequest({ id: playlistLocateRequestIdRef.current, path, treeKey });
-  }, [playback.activePlaylist, playback.selectedPath, selectUserPlaylist]);
+    setPlaylistLocateRequest({
+      id: playlistLocateRequestIdRef.current,
+      path,
+      cue: playback.currentItem?.cue ?? null,
+      treeKey,
+    });
+  }, [playback.activePlaylist, playback.currentItem?.cue, playback.selectedPath, selectUserPlaylist]);
 
   const closePlayer = useCallback(() => setPlayerExpanded(false), []);
   const togglePlayer = useCallback(() => setPlayerExpanded((value) => !value), []);
@@ -601,6 +608,7 @@ export default function App() {
             output={playback.snapshot.output}
             seekable={playback.snapshot.seekable && (playback.snapshot.status === "playing" || playback.snapshot.status === "paused")}
             title={currentTitle}
+            cue={playback.currentItem?.cue ?? null}
             trackKey={playback.selectedPath}
           />
         ) : (
@@ -609,6 +617,7 @@ export default function App() {
             {selection.kind === "default" && (
               <MemoDefaultPlaylistView
                 busy={playback.busy}
+                currentCue={playback.currentItem?.cue ?? null}
                 currentPath={playback.selectedPath}
                 dropTarget={dropTarget}
                 folderState={playlistFolderStates.get("default")}
@@ -629,6 +638,7 @@ export default function App() {
             {selection.kind === "user" && (
               <MemoUserPlaylistView
                 busy={playback.busy || library.loading}
+                currentCue={playback.currentItem?.cue ?? null}
                 currentPath={playback.selectedPath}
                 dropTarget={dropTarget}
                 externalDragActive={externalDragActive}
@@ -1151,6 +1161,7 @@ function PlaylistGap({ active, position }: { active: boolean; position: number }
 
 function DefaultPlaylistView({
   busy,
+  currentCue,
   currentPath,
   dropTarget,
   folderState,
@@ -1168,6 +1179,7 @@ function DefaultPlaylistView({
   sourceDirectory,
 }: {
   busy: boolean;
+  currentCue: import("../shared/model/library").CueTrackSource | null;
   currentPath: string | null;
   dropTarget: DropTarget | null;
   folderState: PlaylistFolderState | undefined;
@@ -1186,8 +1198,8 @@ function DefaultPlaylistView({
 }) {
   const { t } = useTranslation();
   const trackViewportRef = useRef<HTMLDivElement | null>(null);
-  const [visiblePaths, setVisiblePaths] = useState<string[]>([]);
-  const summaries = useTrackSummaries(visiblePaths);
+  const summaryPaths = useMemo(() => items.map((item) => item.path), [items]);
+  const summaries = useTrackSummaries(summaryPaths);
   return (
     <div className="page-content list-page">
       <div className="playlist-detail-heading">
@@ -1229,6 +1241,7 @@ function DefaultPlaylistView({
         >
           <PlaylistTrackList
             busy={busy}
+            currentCue={currentCue}
             currentPath={currentPath}
             externalInsertionPosition={dropTarget?.kind === "default-track-gap" ? dropTarget.position : null}
             folderState={folderState}
@@ -1243,7 +1256,6 @@ function DefaultPlaylistView({
             onPlay={(itemId) => void onPlay(itemId)}
             onRemove={(itemIds) => void onRemove(itemIds)}
             onShowInfo={onShowInfo}
-            onVisiblePaths={setVisiblePaths}
             scrollViewportRef={trackViewportRef}
             summaries={summaries}
             treeKey="default"
@@ -1256,6 +1268,7 @@ function DefaultPlaylistView({
 
 function UserPlaylistView({
   busy,
+  currentCue,
   currentPath,
   dropTarget,
   externalDragActive,
@@ -1276,6 +1289,7 @@ function UserPlaylistView({
   playlist,
 }: {
   busy: boolean;
+  currentCue: import("../shared/model/library").CueTrackSource | null;
   currentPath: string | null;
   dropTarget: DropTarget | null;
   externalDragActive: boolean;
@@ -1298,10 +1312,9 @@ function UserPlaylistView({
   const { t } = useTranslation();
   const [name, setName] = useState(playlist?.name ?? "");
   const trackViewportRef = useRef<HTMLDivElement | null>(null);
-  const [visiblePaths, setVisiblePaths] = useState<string[]>([]);
-  const summaries = useTrackSummaries(visiblePaths);
+  const summaryPaths = useMemo(() => items.map((item) => item.path), [items]);
+  const summaries = useTrackSummaries(summaryPaths);
   useEffect(() => setName(playlist?.name ?? ""), [playlist?.id, playlist?.name]);
-  useEffect(() => setVisiblePaths([]), [playlist?.id]);
 
   if (!playlist) return <EmptyView icon={<ListMusic />} label={t("library.selectPrompt")} />;
   return (
@@ -1352,6 +1365,7 @@ function UserPlaylistView({
           <div>
             <PlaylistTrackList
               busy={busy}
+              currentCue={currentCue}
               currentPath={currentPath}
               externalInsertionPosition={externalDragActive && dropTarget?.kind === "track-gap" && dropTarget.playlistId === playlist.id
                 ? dropTarget.position
@@ -1368,7 +1382,6 @@ function UserPlaylistView({
               onPlay={onPlay}
               onRemove={onRemove}
               onShowInfo={onShowInfo}
-              onVisiblePaths={setVisiblePaths}
               scrollViewportRef={trackViewportRef}
               summaries={summaries}
               treeKey={`playlist-${playlist.id}`}
@@ -2247,8 +2260,9 @@ function CurrentPlaylistButton({ disabled, onClick }: {
   );
 }
 
-function FullPlayerView({ compact, details, error, loading, lyrics, onClose, onSeek, output, seekable, title, trackKey }: {
+function FullPlayerView({ compact, cue, details, error, loading, lyrics, onClose, onSeek, output, seekable, title, trackKey }: {
   compact: boolean;
+  cue: import("../shared/model/library").CueTrackSource | null;
   details: ReturnType<typeof useTrackDetails>["details"];
   error: string | null;
   loading: boolean;
@@ -2342,8 +2356,8 @@ function FullPlayerView({ compact, details, error, loading, lyrics, onClose, onS
       {compact ? (
         <div className="full-player-compact-header">
           <div className="full-player-compact-copy">
-            <Title order={3} lineClamp={1}>{details?.title || title}</Title>
-            <Text c="dimmed" lineClamp={1} size="sm">{details?.artist || t("metadata.unknownArtist")}</Text>
+            <Title order={3} lineClamp={1}>{cue?.title || details?.title || title}</Title>
+            <Text c="dimmed" lineClamp={1} size="sm">{cue?.performer || details?.artist || t("metadata.unknownArtist")}</Text>
           </div>
           {closeButton}
         </div>
@@ -2353,8 +2367,8 @@ function FullPlayerView({ compact, details, error, loading, lyrics, onClose, onS
           <div className="full-player-summary">
             {artwork}
             <div className="full-player-copy">
-              <Title order={2}>{details?.title || title}</Title>
-              <Text c="dimmed">{details?.artist || t("metadata.unknownArtist")}</Text>
+              <Title order={2}>{cue?.title || details?.title || title}</Title>
+              <Text c="dimmed">{cue?.performer || details?.artist || t("metadata.unknownArtist")}</Text>
               {loading && <Loader size="xs" />}
               {(error || details?.metadataWarning) && <Text c="yellow" size="xs">{t("metadata.partial")}</Text>}
             </div>

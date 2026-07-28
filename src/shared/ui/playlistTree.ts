@@ -2,11 +2,24 @@ export interface PlaylistTreeItem {
   id: number;
   path: string;
   folderRoot: string | null;
+  displayName?: string;
+  cue?: {
+    trackNumber: number;
+    title: string | null;
+    startMs: number;
+    endMs: number | null;
+  } | null;
 }
 
 export interface PlaylistTrackSummary {
   title: string | null;
   trackNumber: number | null;
+  durationMs: number | null;
+}
+
+export interface PlaylistDurationSummary {
+  complete: boolean;
+  durationMs: number;
 }
 
 export interface PlaylistFolderState {
@@ -106,13 +119,45 @@ export function resolvePlaylistFolderState(
 }
 
 export function playlistTrackTitle(
-  item: Pick<PlaylistTreeItem, "path">,
+  item: Pick<PlaylistTreeItem, "path" | "displayName" | "cue">,
   summary: PlaylistTrackSummary | undefined,
 ) {
   const fileName = baseName(item.path);
   const fallback = fileName.replace(/\.[^.]+$/, "") || fileName;
-  const title = summary?.title?.trim() || fallback;
-  return summary?.trackNumber ? `${summary.trackNumber} · ${title}` : title;
+  const title = item.cue?.title?.trim()
+    || (item.cue ? item.displayName?.replace(/\.[^.]+$/, "") : null)
+    || summary?.title?.trim()
+    || fallback;
+  const trackNumber = item.cue?.trackNumber ?? summary?.trackNumber;
+  return trackNumber ? `${trackNumber} · ${title}` : title;
+}
+
+export function playlistTrackDuration(
+  item: Pick<PlaylistTreeItem, "cue">,
+  summary: PlaylistTrackSummary | undefined,
+): number | null {
+  const physicalDuration = summary?.durationMs ?? null;
+  if (!item.cue) return physicalDuration;
+  const startMs = item.cue.startMs;
+  const endMs = item.cue.endMs ?? physicalDuration;
+  return endMs === null ? null : Math.max(0, endMs - startMs);
+}
+
+export function playlistDurationSummary<T extends PlaylistTreeItem>(
+  items: T[],
+  summaries: Map<string, PlaylistTrackSummary>,
+  startPosition = 0,
+  endPosition = items.length,
+): PlaylistDurationSummary {
+  let durationMs = 0;
+  let complete = true;
+  for (let position = startPosition; position < endPosition; position += 1) {
+    const item = items[position];
+    const duration = playlistTrackDuration(item, summaries.get(item.path));
+    if (duration === null) complete = false;
+    else durationMs += duration;
+  }
+  return { complete, durationMs };
 }
 
 function buildRange<T extends PlaylistTreeItem>(

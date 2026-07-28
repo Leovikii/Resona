@@ -508,10 +508,7 @@ pub async fn play_user_playlist_item(
             .ok_or_else(|| PlaybackFailure::task_failed("playlist item not found".to_owned()))?;
         media_import.play_user_playlist(
             playlist_id,
-            items
-                .into_iter()
-                .map(|item| PathBuf::from(item.path))
-                .collect(),
+            items.iter().map(PlaylistItemRecord::source).collect(),
             selected_index,
         )
     })
@@ -1024,8 +1021,8 @@ pub async fn move_playlist_item(
     })?
 }
 
-fn playlist_paths(items: &[PlaylistItemRecord]) -> Vec<PathBuf> {
-    items.iter().map(|item| PathBuf::from(&item.path)).collect()
+fn playlist_paths(items: &[PlaylistItemRecord]) -> Vec<crate::media_source::MediaSource> {
+    items.iter().map(PlaylistItemRecord::source).collect()
 }
 
 fn playlist_sync_failure(failure: PlaybackFailure) -> PersistenceFailure {

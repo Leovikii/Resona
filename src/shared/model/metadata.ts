@@ -26,5 +26,6 @@ export interface TrackSummary {
   path: string;
   title: string | null;
   trackNumber: number | null;
+  durationMs: number | null;
   metadataWarning: string | null;
 }
