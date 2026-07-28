@@ -57,7 +57,7 @@ Tauri commands 负责 DTO 转换和服务调用，不包含领域分支。长任
 
 ## 歌词与窗口
 
-歌词解析器只处理 LRC、SRT 和 VTT，返回平台无关的时间片/文本模型。桌面歌词极长行按当前行起止时间与播放位置从头到尾线性滚动一次，暂停冻结、定位同步。窗口由 Rust 服务管理位置、尺寸、置顶、穿透和 helper；Windows adapter 在显示、锁定、解锁、失焦、恢复和 DPI 变化时以原生事件校正 topmost 与 helper 几何，不使用定时置顶。主窗口关闭、托盘隐藏与完整退出由 `ApplicationLifecycleService` 协调。
+歌词解析器只处理 LRC、SRT 和 VTT，返回平台无关的时间片/文本模型。桌面歌词极长行按当前行起止时间与播放位置从头到尾线性滚动一次，暂停冻结、定位同步。窗口由 Rust 服务管理位置、尺寸、置顶、穿透和 helper；Windows adapter 在显示、锁定、解锁、失焦、恢复和 DPI 变化时校正 topmost 与 helper 几何，并以 WinEvent 监听外部前台窗口、虚拟桌面和最小化恢复事件。回调只合并并投递无激活校正，资源隐藏时卸载 hook，不使用定时置顶。主窗口关闭、托盘隐藏与完整退出由 `ApplicationLifecycleService` 协调。
 
 Win32/COM 回调必须快速返回，通过 channel 或缓存与服务交互。禁止全局鼠标 hook、持续轮询、输入注入或向其他程序转发输入。
 

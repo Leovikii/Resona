@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::collections::HashMap;
 use std::ffi::c_void;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::thread::{self, JoinHandle};
@@ -21,16 +23,18 @@ use windows::Win32::Graphics::Gdi::{
     OUT_DEFAULT_PRECIS, PAINTSTRUCT, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 use windows::Win32::UI::Controls::WM_MOUSELEAVE;
 use windows::Win32::UI::Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, GetWindowLongPtrW, IsWindow,
     LoadCursorW, RegisterClassExW, SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos,
-    ShowWindow, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, GWLP_USERDATA, HWND_TOPMOST, IDC_ARROW,
+    ShowWindow, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, EVENT_SYSTEM_DESKTOPSWITCH,
+    EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZEEND, GWLP_USERDATA, HWND_TOPMOST, IDC_ARROW,
     LWA_ALPHA, MA_NOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SW_HIDE,
-    SW_SHOWNOACTIVATE, WM_ERASEBKGND, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_NCCREATE,
-    WM_NCDESTROY, WM_PAINT, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_POPUP,
+    SW_SHOWNOACTIVATE, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_ERASEBKGND, WM_LBUTTONUP,
+    WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WNDCLASSEXW,
+    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 use super::{DesktopLyricsWindowFailure, DesktopLyricsWindowSnapshot};
@@ -50,6 +54,12 @@ const HELPER_HOVER_ALPHA: u8 = 230;
 const UNLOCK_GLYPH: u16 = 0xE785;
 const _: () = assert!(HELPER_IDLE_ALPHA > 0 && HELPER_HOVER_ALPHA > HELPER_IDLE_ALPHA);
 const HELPER_CLASS_NAME: PCWSTR = windows::w!("ResonaDesktopLyricsUnlock");
+const TOPMOST_EVENTS: [u32; 3] = [
+    EVENT_SYSTEM_FOREGROUND,
+    EVENT_SYSTEM_DESKTOPSWITCH,
+    EVENT_SYSTEM_MINIMIZEEND,
+];
+static NEXT_RESOURCE_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Default)]
 struct Lifecycle {
@@ -97,6 +107,8 @@ impl Lifecycle {
 }
 
 struct WindowResources {
+    generation: u64,
+    _topmost_observer: TopmostObserver,
     native_helper: NativeUnlockHelper,
     lyrics_window: WebviewWindow,
 }
@@ -150,13 +162,15 @@ impl DesktopLyricsWindowService {
         // hold the service mutex while Tauri creates the native window, otherwise
         // the event handler can re-enter this service and deadlock the UI thread.
         if needs_create {
-            let resources = match create_windows(app, Arc::downgrade(self), requested_font_size) {
-                Ok(resources) => resources,
-                Err(error) => {
-                    self.lock_state().window_ready = false;
-                    return Err(error);
-                }
-            };
+            let generation = NEXT_RESOURCE_GENERATION.fetch_add(1, Ordering::Relaxed);
+            let resources =
+                match create_windows(app, Arc::downgrade(self), requested_font_size, generation) {
+                    Ok(resources) => resources,
+                    Err(error) => {
+                        self.lock_state().window_ready = false;
+                        return Err(error);
+                    }
+                };
             let mut state = self.lock_state();
             if state.resources.is_none() {
                 state.resources = Some(resources);
@@ -398,6 +412,13 @@ impl DesktopLyricsWindowService {
     }
 
     fn ensure_topmost(&self) -> Result<(), DesktopLyricsWindowFailure> {
+        self.ensure_topmost_for_generation(None)
+    }
+
+    fn ensure_topmost_for_generation(
+        &self,
+        expected_generation: Option<u64>,
+    ) -> Result<(), DesktopLyricsWindowFailure> {
         let (window, helper) = {
             let state = self.lock_state();
             if !state.lifecycle.visible {
@@ -409,6 +430,9 @@ impl DesktopLyricsWindowService {
                     "desktop lyrics windows are not initialized",
                 )
             })?;
+            if !resource_generation_matches(resources.generation, expected_generation) {
+                return Ok(());
+            }
             (
                 resources.lyrics_window.clone(),
                 state
@@ -443,10 +467,15 @@ impl DesktopLyricsWindowService {
     }
 }
 
+fn resource_generation_matches(actual: u64, expected: Option<u64>) -> bool {
+    expected.is_none_or(|expected| actual == expected)
+}
+
 fn create_windows(
     app: &AppHandle,
     service: Weak<DesktopLyricsWindowService>,
     font_size: u32,
+    generation: u64,
 ) -> Result<WindowResources, DesktopLyricsWindowFailure> {
     let height = lyrics_height(font_size);
     let lyrics_window = WebviewWindowBuilder::new(
@@ -478,7 +507,7 @@ fn create_windows(
         .hwnd()
         .map_err(|error| window_failure("desktop_lyrics_handle_failed", error))?;
     let owner = lyrics_hwnd.0 as isize;
-    let native_helper = match NativeUnlockHelper::create(app, owner, service) {
+    let native_helper = match NativeUnlockHelper::create(app, owner, service.clone()) {
         Ok(helper) => helper,
         Err(error) => {
             let _ = lyrics_window.close();
@@ -489,8 +518,17 @@ fn create_windows(
         let _ = lyrics_window.close();
         return Err(error);
     }
+    let topmost_observer = match TopmostObserver::create(app, service, generation) {
+        Ok(observer) => observer,
+        Err(error) => {
+            let _ = lyrics_window.close();
+            return Err(error);
+        }
+    };
 
     Ok(WindowResources {
+        generation,
+        _topmost_observer: topmost_observer,
         native_helper,
         lyrics_window,
     })
@@ -699,6 +737,188 @@ fn set_native_topmost(hwnd: HWND) -> Result<(), DesktopLyricsWindowFailure> {
             "desktop_lyrics_topmost_failed",
             WindowsError::from_win32(),
         ))
+    }
+}
+
+#[derive(Default)]
+struct CorrectionGate(AtomicBool);
+
+impl CorrectionGate {
+    fn begin(&self) -> bool {
+        !self.0.swap(true, Ordering::AcqRel)
+    }
+
+    fn finish(&self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+struct TopmostObserverState {
+    app: AppHandle,
+    service: Weak<DesktopLyricsWindowService>,
+    generation: u64,
+    pending: CorrectionGate,
+    last_event: AtomicU32,
+}
+
+impl TopmostObserverState {
+    fn request_correction(self: &Arc<Self>, event: u32) {
+        self.last_event.store(event, Ordering::Relaxed);
+        if !self.pending.begin() {
+            return;
+        }
+
+        let state = Arc::clone(self);
+        let app = self.app.clone();
+        if let Err(error) = app.run_on_main_thread(move || {
+            if let Some(service) = state.service.upgrade() {
+                if let Err(error) = service.ensure_topmost_for_generation(Some(state.generation)) {
+                    eprintln!(
+                        "desktop lyrics topmost event correction failed (event {}): {}",
+                        state.last_event.load(Ordering::Relaxed),
+                        error.message
+                    );
+                }
+            }
+            state.pending.finish();
+        }) {
+            self.pending.finish();
+            eprintln!(
+                "desktop lyrics topmost event dispatch failed (event {}): {error}",
+                self.last_event.load(Ordering::Relaxed)
+            );
+        }
+    }
+}
+
+struct TopmostObserver {
+    hooks: Vec<isize>,
+    _state: Arc<TopmostObserverState>,
+}
+
+impl TopmostObserver {
+    fn create(
+        app: &AppHandle,
+        service: Weak<DesktopLyricsWindowService>,
+        generation: u64,
+    ) -> Result<Self, DesktopLyricsWindowFailure> {
+        let state = Arc::new(TopmostObserverState {
+            app: app.clone(),
+            service,
+            generation,
+            pending: CorrectionGate::default(),
+            last_event: AtomicU32::new(0),
+        });
+        let state_for_main = Arc::clone(&state);
+        let (result_sender, result_receiver) = mpsc::sync_channel(1);
+        app.run_on_main_thread(move || {
+            let result = install_topmost_hooks(&state_for_main);
+            if let Err(result) = result_sender.send(result) {
+                if let Ok(hooks) = result.0 {
+                    uninstall_topmost_hooks(&hooks);
+                }
+            }
+        })
+        .map_err(|error| window_failure("desktop_lyrics_topmost_hook_dispatch_failed", error))?;
+
+        let hooks = result_receiver
+            .recv_timeout(Duration::from_secs(5))
+            .map_err(|error| {
+                DesktopLyricsWindowFailure::new(
+                    "desktop_lyrics_topmost_hook_dispatch_failed",
+                    format!(
+                        "desktop lyrics topmost observer did not respond within 5 seconds: {error}"
+                    ),
+                )
+            })??;
+        Ok(Self {
+            hooks,
+            _state: state,
+        })
+    }
+}
+
+impl Drop for TopmostObserver {
+    fn drop(&mut self) {
+        uninstall_topmost_hooks(&self.hooks);
+    }
+}
+
+type TopmostObserverRegistry = Mutex<HashMap<isize, Weak<TopmostObserverState>>>;
+
+fn topmost_observer_registry() -> &'static TopmostObserverRegistry {
+    static REGISTRY: OnceLock<TopmostObserverRegistry> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn install_topmost_hooks(
+    state: &Arc<TopmostObserverState>,
+) -> Result<Vec<isize>, DesktopLyricsWindowFailure> {
+    let mut hooks = Vec::with_capacity(TOPMOST_EVENTS.len());
+    for event in TOPMOST_EVENTS {
+        let hook = unsafe {
+            SetWinEventHook(
+                event,
+                event,
+                HINSTANCE(0),
+                Some(topmost_win_event_callback),
+                0,
+                0,
+                WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
+            )
+        };
+        if hook.0 == 0 {
+            let error = WindowsError::from_win32();
+            uninstall_topmost_hooks(&hooks);
+            return Err(DesktopLyricsWindowFailure::new(
+                "desktop_lyrics_topmost_hook_failed",
+                format!("failed to observe Windows event {event}: {error}"),
+            ));
+        }
+        topmost_observer_registry()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(hook.0, Arc::downgrade(state));
+        hooks.push(hook.0);
+    }
+    Ok(hooks)
+}
+
+fn uninstall_topmost_hooks(hooks: &[isize]) {
+    {
+        let mut registry = topmost_observer_registry()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for hook in hooks {
+            registry.remove(hook);
+        }
+    }
+    for hook in hooks {
+        if !unsafe { UnhookWinEvent(HWINEVENTHOOK(*hook)) }.as_bool() {
+            eprintln!(
+                "desktop lyrics topmost observer removal failed: {}",
+                WindowsError::from_win32()
+            );
+        }
+    }
+}
+
+unsafe extern "system" fn topmost_win_event_callback(
+    hook: HWINEVENTHOOK,
+    event: u32,
+    _hwnd: HWND,
+    _object_id: i32,
+    _child_id: i32,
+    _event_thread: u32,
+    _event_time: u32,
+) {
+    let state = topmost_observer_registry()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(&hook.0)
+        .and_then(Weak::upgrade);
+    if let Some(state) = state {
+        state.request_correction(event);
     }
 }
 
@@ -1230,5 +1450,36 @@ mod tests {
         assert!(!lifecycle.snapshot().locked);
         lifecycle.mark_hidden();
         assert!(!lifecycle.snapshot().visible);
+    }
+
+    #[test]
+    fn topmost_observer_only_subscribes_to_selected_system_events() {
+        assert_eq!(
+            TOPMOST_EVENTS,
+            [
+                EVENT_SYSTEM_FOREGROUND,
+                EVENT_SYSTEM_DESKTOPSWITCH,
+                EVENT_SYSTEM_MINIMIZEEND,
+            ]
+        );
+        assert!(TOPMOST_EVENTS
+            .windows(2)
+            .all(|events| events[0] != events[1]));
+    }
+
+    #[test]
+    fn correction_gate_coalesces_events_until_the_task_finishes() {
+        let gate = CorrectionGate::default();
+        assert!(gate.begin());
+        assert!(!gate.begin());
+        gate.finish();
+        assert!(gate.begin());
+    }
+
+    #[test]
+    fn stale_resource_generations_are_ignored() {
+        assert!(resource_generation_matches(7, None));
+        assert!(resource_generation_matches(7, Some(7)));
+        assert!(!resource_generation_matches(8, Some(7)));
     }
 }

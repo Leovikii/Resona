@@ -40,6 +40,13 @@ Windows WebView2 本身采用多进程架构；增加第二个 WebView 可能增
 ## 2026-07-26 置顶恢复补充
 
 - 歌词 WebView 与原生 helper 的 topmost 属于 `DesktopLyricsWindowService` 平台资源状态，不因锁定与否改变。失去焦点、系统恢复或 DPI 变化只触发一次无激活原生校正，不创建后台保活任务。
+
+## 2026-07-28 外部窗口事件补充
+
+- Windows adapter 使用 `SetWinEventHook` 分别监听外部前台窗口变化、虚拟桌面切换和最小化恢复；回调只合并并投递现有无激活置顶校正，歌词窗口先校正，锁定 helper 后校正。
+- hook 与歌词窗口资源同生命周期，隐藏时通过 `UnhookWinEvent` 释放；资源代次阻止关闭或快速重建后的迟到任务影响新窗口。
+- 不使用定时轮询、焦点激活、`HWND_NOTOPMOST` 双切换或对抗式 Z-order 循环。独占全屏、安全桌面和持续争夺 topmost 的其他应用仍遵循 Windows 平台边界。
+- 0.2.0 Windows Release 在锁定与解锁状态下完成实机验收，未发现需要引入双切换、轮询或抢焦点回退的新问题。
 - helper 的 38 px 逻辑命中区域保持不变；图标改用系统矢量字体并沿用歌词工具按钮的小圆角、白色图标和 hover 层级。组件库样式可作为视觉规范，但原生 helper 不为复用 React 组件增加 WebView。
 
 ## 2026-07-20 视觉交互补充
