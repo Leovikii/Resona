@@ -2,6 +2,7 @@
 
 - 状态：Accepted；0.1.0 修订
 - 日期：2026-07-20，修订于 2026-07-26
+- 2026-10-19 部分修订：[ADR 0027](0027-compression-progress-and-close-dialog.md) 替代下文“子目录仅手动展开”的约束，增加活动分支自动展开与固定总进度；其余决定保持有效。
 - 补充：[ADR 0022](0022-native-window-materials-and-surface-hierarchy.md)
 
 ## 决定

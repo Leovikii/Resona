@@ -69,6 +69,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { useDesktopLyricsWindow } from "../features/lyrics/useDesktopLyricsWindow";
+import { compressionProgress } from "../features/compression/compressionProgress";
 import { useAudioCompression } from "../features/compression/useAudioCompression";
 import { useFfmpegDependency } from "../features/compression/useFfmpegDependency";
 import { useLibrary } from "../features/library/useLibrary";
@@ -818,6 +819,8 @@ export default function App() {
       <Modal
         centered
         closeOnClickOutside={false}
+        closeOnEscape={!applicationLifetime.pending}
+        withCloseButton={!applicationLifetime.pending}
         onClose={applicationLifetime.dismissClosePrompt}
         opened={applicationLifetime.closePromptOpen}
         title={t("lifetime.closeTitle")}
@@ -825,6 +828,7 @@ export default function App() {
         <Stack>
           <Text c="dimmed" size="sm">{t("lifetime.closeBody")}</Text>
           <Switch
+            disabled={applicationLifetime.pending}
             checked={rememberCloseDecision}
             label={t("lifetime.remember")}
             onChange={(event) => setRememberCloseDecision(event.currentTarget.checked)}
@@ -834,16 +838,19 @@ export default function App() {
           )}
           <Group justify="flex-end">
             <Button
+              disabled={applicationLifetime.pending}
               onClick={() => void applicationLifetime.resolveClose(
                 "hide_to_tray",
                 rememberCloseDecision,
               )}
               variant="default"
+              data-autofocus
             >
               {t("lifetime.hideToTray")}
             </Button>
             <Button
               color="red"
+              disabled={applicationLifetime.pending}
               onClick={() => void applicationLifetime.resolveClose(
                 "exit",
                 rememberCloseDecision,
@@ -857,6 +864,8 @@ export default function App() {
       <Modal
         centered
         closeOnClickOutside={false}
+        closeOnEscape={!applicationLifetime.pending}
+        withCloseButton={!applicationLifetime.pending}
         onClose={applicationLifetime.dismissExitConfirmation}
         opened={applicationLifetime.exitConfirmationOpen}
         title={t("lifetime.activeWorkTitle")}
@@ -868,12 +877,14 @@ export default function App() {
           )}
           <Group justify="flex-end">
             <Button
+              data-autofocus
+              disabled={applicationLifetime.pending}
               onClick={applicationLifetime.dismissExitConfirmation}
               variant="default"
             >
-              {t("common.cancel")}
+              {t("lifetime.goBack")}
             </Button>
-            <Button color="red" onClick={() => void applicationLifetime.confirmExit()}>
+            <Button color="red" disabled={applicationLifetime.pending} onClick={() => void applicationLifetime.confirmExit()}>
               {t("lifetime.exitAnyway")}
             </Button>
           </Group>
@@ -1408,10 +1419,7 @@ function ToolsView({ onNotify }: {
     dependency.dismissCommandError();
   }, [dependency.commandError, dependency.dismissCommandError, onNotify, openError]);
   const running = compression.snapshot.status === "running" || compression.snapshot.status === "cancelling";
-  const progress = compression.snapshot.total > 0
-    ? (compression.snapshot.items.reduce((total, item) => total + item.progress, 0)
-      / compression.snapshot.total) * 100
-    : 0;
+  const progress = compressionProgress(compression.snapshot).percent;
   const dependencyBusy = ["downloading", "installing", "cancelling"].includes(
     dependency.snapshot.status,
   );

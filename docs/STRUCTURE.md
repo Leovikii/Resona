@@ -40,7 +40,7 @@ Resona/
 │  │  ├─ compression.rs            # 扫描、并行转换与任务快照
 │  │  ├─ ffmpeg_dependency.rs      # 按需依赖下载与验证
 │  │  ├─ application_update.rs     # Release 选择与 updater
-│  │  ├─ application_lifecycle.rs  # 退出、托盘与辅助窗口协调
+│  │  ├─ application_lifetime.rs   # 退出、托盘与辅助窗口协调
 │  │  └─ platform/                 # Windows/非 Windows adapters
 │  │     ├─ media_session/
 │  │     ├─ playback_projection.rs

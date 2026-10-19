@@ -454,7 +454,7 @@ fn decode_artwork(_mime_type: &str, bytes: &[u8]) -> Result<Arc<Artwork>, String
         .write_to(&mut Cursor::new(&mut encoded), ImageFormat::Png)
         .map_err(|error| error.to_string())?;
     let mut bgra = rgba.into_raw();
-    for pixel in bgra.chunks_exact_mut(4) {
+    for pixel in bgra.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
     Ok(Arc::new(Artwork {
