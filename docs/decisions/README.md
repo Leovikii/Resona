@@ -32,4 +32,6 @@ ADR 记录会长期影响代码、依赖或产品边界且无法仅从实现看�
 - [0025 - 公开仓库首页与 Agent 规范归位](0025-public-repository-surface-and-agent-guidance.md)
 - [0026 - CUE 逻辑音轨与本地封面回退](0026-cue-logical-tracks-and-artwork-fallback.md)
 
+- [0027 - 压缩活动分支、整体进度与关闭询问](0027-compression-progress-and-close-dialog.md)
+
 新 ADR 不修改历史决定的原文；如果决定被替代，新增 ADR 并将旧记录标记为 `Superseded`。

@@ -6,7 +6,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 
@@ -244,7 +244,7 @@ impl CompressionService {
                 "no files or folders were selected",
             ));
         }
-        self.ensure_scan_idle()?;
+        let mut task = self.prepare_input_change()?;
         {
             let mut workspace = self
                 .scan_workspace
@@ -259,14 +259,22 @@ impl CompressionService {
             }
             normalize_scan_roots(&mut workspace.roots);
         }
-        self.start_scan()
+        let scan = self.start_scan()?;
+        *task = CompressionSnapshot::idle();
+        Ok(scan)
     }
 
     pub fn remove_scan_inputs(
         self: &Arc<Self>,
         paths: Vec<PathBuf>,
     ) -> Result<CompressionScanSnapshot, CompressionFailure> {
-        self.ensure_scan_idle()?;
+        if paths.is_empty() {
+            return Err(CompressionFailure::new(
+                "empty_compression_scan",
+                "no files or folders were selected",
+            ));
+        }
+        let mut task = self.prepare_input_change()?;
         {
             let mut workspace = self
                 .scan_workspace
@@ -285,12 +293,16 @@ impl CompressionService {
                 workspace.exclusions.clear();
             }
         }
-        self.start_scan()
+        let scan = self.start_scan()?;
+        *task = CompressionSnapshot::idle();
+        Ok(scan)
     }
 
     pub fn clear_scan_inputs(&self) -> Result<CompressionScanSnapshot, CompressionFailure> {
-        self.ensure_scan_idle()?;
-        Ok(self.discard_scan_inputs())
+        let mut task = self.prepare_input_change()?;
+        let scan = self.discard_scan_inputs();
+        *task = CompressionSnapshot::idle();
+        Ok(scan)
     }
 
     pub fn discard_scan_inputs(&self) -> CompressionScanSnapshot {
@@ -318,6 +330,23 @@ impl CompressionService {
             snapshot.status = "cancelling".to_owned();
         }
         snapshot.clone()
+    }
+
+    fn prepare_input_change(
+        &self,
+    ) -> Result<MutexGuard<'_, CompressionSnapshot>, CompressionFailure> {
+        let task = self
+            .snapshot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if matches!(task.status.as_str(), "running" | "cancelling") {
+            return Err(CompressionFailure::new(
+                "compression_busy",
+                "a compression batch is already running",
+            ));
+        }
+        self.ensure_scan_idle()?;
+        Ok(task)
     }
 
     fn ensure_scan_idle(&self) -> Result<(), CompressionFailure> {
@@ -467,6 +496,10 @@ impl CompressionService {
                 "a compression batch is already running",
             ));
         }
+        if state.status != "idle" {
+            return Err(CompressionFailure::new("compression_batch_finished", "this batch has ended; add or remove inputs, or clear the workspace before starting another batch"));
+        }
+        self.ensure_scan_idle()?;
         let task_id = self.next_task_id.fetch_add(1, Ordering::Relaxed);
         let items = paths
             .iter()
@@ -1358,6 +1391,115 @@ mod tests {
         assert!(
             matches!(result, Err(CompressionFailure { code, .. }) if code == "source_deletion_confirmation_required")
         );
+    }
+
+    #[test]
+    fn terminal_batches_reject_restart_without_overwriting_results() {
+        let service = Arc::new(CompressionService::with_binaries(
+            std::env::current_exe().unwrap(),
+            PathBuf::new(),
+        ));
+        for status in ["completed", "completed_with_errors", "cancelled"] {
+            prime_batch_snapshot(&service, 91, Path::new("finished.wav"));
+            service.snapshot.lock().unwrap().status = status.to_owned();
+            let before = serde_json::to_value(service.snapshot()).unwrap();
+            let error = service
+                .start(
+                    vec![PathBuf::from("finished.wav")],
+                    CompressionPreset::Fast,
+                    false,
+                    false,
+                )
+                .unwrap_err();
+            assert_eq!(error.code, "compression_batch_finished");
+            assert_eq!(serde_json::to_value(service.snapshot()).unwrap(), before);
+            assert_eq!(
+                service.add_scan_inputs(vec![]).unwrap_err().code,
+                "empty_compression_scan"
+            );
+            assert_eq!(
+                service.remove_scan_inputs(vec![]).unwrap_err().code,
+                "empty_compression_scan"
+            );
+            assert_eq!(serde_json::to_value(service.snapshot()).unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn input_changes_reset_finished_batches_and_rescan_output_conflicts() {
+        let service = Arc::new(CompressionService::default());
+        let directory = test_directory("terminal-input-reset");
+        fs::create_dir_all(&directory).unwrap();
+        let first = directory.join("first.wav");
+        let second = directory.join("second.wav");
+        for source in [&first, &second] {
+            fs::copy(fixture_directory().join("wav_44100_16_stereo.wav"), source).unwrap();
+        }
+        service.add_scan_inputs(vec![directory.clone()]).unwrap();
+        assert_eq!(wait_for_scan(&service).ready_files, 2);
+        prime_batch_snapshot(&service, 92, &first);
+        service.snapshot.lock().unwrap().status = "completed".to_owned();
+        fs::write(first.with_extension("flac"), b"existing output").unwrap();
+        service.add_scan_inputs(vec![directory.clone()]).unwrap();
+        assert_eq!(service.snapshot().status, "idle");
+        assert_eq!(wait_for_scan(&service).ready_files, 1);
+        prime_batch_snapshot(&service, 93, &second);
+        service.snapshot.lock().unwrap().status = "cancelled".to_owned();
+        service.remove_scan_inputs(vec![first.clone()]).unwrap();
+        assert_eq!(service.snapshot().task_id, 0);
+        assert_eq!(wait_for_scan(&service).ready_files, 1);
+        prime_batch_snapshot(&service, 94, &second);
+        service.snapshot.lock().unwrap().status = "completed_with_errors".to_owned();
+        assert_eq!(service.clear_scan_inputs().unwrap().status, "idle");
+        assert!(service.snapshot().items.is_empty());
+        assert!(service.scan_snapshot().roots.is_empty());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn running_tasks_and_scans_serialize_input_changes_and_start() {
+        let service = Arc::new(CompressionService::with_binaries(
+            std::env::current_exe().unwrap(),
+            PathBuf::new(),
+        ));
+        for status in ["running", "cancelling"] {
+            prime_batch_snapshot(&service, 95, Path::new("active.wav"));
+            service.snapshot.lock().unwrap().status = status.to_owned();
+            assert_eq!(
+                service
+                    .add_scan_inputs(vec![PathBuf::from("other.wav")])
+                    .unwrap_err()
+                    .code,
+                "compression_busy"
+            );
+            assert_eq!(
+                service
+                    .remove_scan_inputs(vec![PathBuf::from("active.wav")])
+                    .unwrap_err()
+                    .code,
+                "compression_busy"
+            );
+            assert_eq!(
+                service.clear_scan_inputs().unwrap_err().code,
+                "compression_busy"
+            );
+            assert_eq!(service.snapshot().task_id, 95);
+        }
+        *service.snapshot.lock().unwrap() = CompressionSnapshot::idle();
+        service.scan_snapshot.lock().unwrap().status = "scanning".to_owned();
+        assert_eq!(
+            service
+                .start(
+                    vec![PathBuf::from("active.wav")],
+                    CompressionPreset::Fast,
+                    false,
+                    false
+                )
+                .unwrap_err()
+                .code,
+            "compression_scan_busy"
+        );
+        assert_eq!(service.snapshot().status, "idle");
     }
 
     #[test]

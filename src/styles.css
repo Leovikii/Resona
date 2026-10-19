@@ -192,7 +192,6 @@ html[data-window="audio-compression"] #root {
 .compression-workspace {
   min-width: 0;
   min-height: 0;
-  display: grid;
   display: block;
   flex: 1;
   background: var(--resona-content-surface);
@@ -207,6 +206,9 @@ html[data-window="audio-compression"] #root {
 }
 
 .compression-panel-heading {
+  position: relative;
+  overflow: hidden;
+  flex-wrap: wrap;
   min-height: 48px;
   padding: 12px 16px;
   display: flex;
@@ -216,8 +218,84 @@ html[data-window="audio-compression"] #root {
 }
 
 .compression-summary {
+  flex: 1 1 300px;
   min-width: 0;
   text-align: right;
+}
+
+.compression-panel-heading > :not(.compression-tree-progress):not([role="status"]) {
+  position: relative;
+  z-index: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .compression-tree-progress { transition: none; }
+}
+
+/* The result stays above the scrolling file tree. */
+.compression-tree-panel[data-finished] {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.compression-panel-heading[data-result] {
+  --result-color: var(--mantine-color-green-7);
+  background: color-mix(in srgb, var(--result-color) 8%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--result-color) 24%, transparent);
+  padding: 18px 20px 14px;
+}
+
+.compression-panel-heading[data-result] .compression-tree-progress { background: transparent; }
+
+.compression-panel-heading[data-result="warning"] { --result-color: var(--mantine-color-yellow-7); }
+.compression-panel-heading[data-result="failure"] { --result-color: var(--mantine-color-red-7); }
+.compression-panel-heading[data-result="cancelled"] { --result-color: var(--mantine-color-gray-6); }
+[data-mantine-color-scheme="dark"] .compression-panel-heading[data-result="success"] { --result-color: var(--mantine-color-green-4); }
+[data-mantine-color-scheme="dark"] .compression-panel-heading[data-result="warning"] { --result-color: var(--mantine-color-yellow-4); }
+[data-mantine-color-scheme="dark"] .compression-panel-heading[data-result="failure"] { --result-color: var(--mantine-color-red-4); }
+
+.compression-result {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 20px;
+}
+
+.compression-result-main {
+  min-width: 0;
+  flex: 1 1 280px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.compression-result-icon { flex-shrink: 0; color: var(--result-color); display: flex; }
+.compression-result h2 { font-size: 20px; line-height: 1.35; margin-bottom: 4px; overflow-wrap: anywhere; }
+.compression-result-savings { min-width: 0; text-align: right; flex: 1 1 240px; }
+.compression-result-saved { font-size: 24px; color: var(--result-color); line-height: 1.35; }
+.compression-result-details { width: 100%; min-width: 0; display: grid; gap: 4px; overflow-wrap: anywhere; }
+.compression-results-label { padding: 10px 16px 0; }
+.compression-start[data-result="success"]:disabled {
+  color: var(--mantine-color-green-7);
+  background: color-mix(in srgb, var(--mantine-color-green-filled) 12%, transparent);
+}
+[data-mantine-color-scheme="dark"] .compression-start[data-result="success"]:disabled { color: var(--mantine-color-green-4); }
+
+@media (max-width: 620px) {
+  .compression-panel-heading[data-result] { padding: 12px 16px; }
+  .compression-result { gap: 8px; }
+  .compression-result-main { flex-basis: 100%; }
+  .compression-result-savings { text-align: left; }
+  .compression-result h2 { font-size: 18px; }
+  .compression-result-saved { font-size: 20px; }
+}
+
+@media (max-height: 420px) {
+  .compression-workspace { overflow-y: auto; }
+  .compression-tree-panel { height: auto; min-height: 100%; grid-template-rows: auto minmax(120px, 1fr); }
+  .compression-tree-panel[data-finished] { grid-template-rows: auto auto minmax(120px, 1fr); }
+  .compression-tree-scroll { max-height: 240px; }
 }
 
 .compression-tree-scroll {

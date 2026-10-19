@@ -754,7 +754,7 @@ mod windows_impl {
         let pixels = unsafe {
             std::slice::from_raw_parts_mut(bits.cast::<u8>(), (width * height * 4) as usize)
         };
-        for pixel in pixels.chunks_exact_mut(4) {
+        for pixel in pixels.as_chunks_mut::<4>().0 {
             pixel.copy_from_slice(&[35, 34, 32, 255]);
         }
 

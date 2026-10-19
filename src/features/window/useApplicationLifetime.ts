@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 
 import { invokeTauri, isTauriRuntime } from "../../shared/bridge/tauri";
@@ -20,6 +20,8 @@ export function useApplicationLifetime() {
   const [exitConfirmationOpen, setExitConfirmationOpen] = useState(
     preview && new URLSearchParams(window.location.search).get("exitPrompt") === "1",
   );
+  const pendingRef = useRef(false);
+  const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -78,6 +80,9 @@ export function useApplicationLifetime() {
   }, []);
 
   const resolveClose = useCallback(async (decision: CloseDecision, remember: boolean) => {
+    if (pendingRef.current) return false;
+    pendingRef.current = true;
+    setPending(true);
     try {
       const next = isTauriRuntime()
         ? await invokeTauri<ApplicationLifetimeSnapshot>("resolve_main_window_close", {
@@ -92,10 +97,16 @@ export function useApplicationLifetime() {
     } catch (nextError) {
       setError(errorMessage(nextError));
       return false;
+    } finally {
+      pendingRef.current = false;
+      setPending(false);
     }
   }, [snapshot.closeBehavior]);
 
   const confirmExit = useCallback(async () => {
+    if (pendingRef.current) return false;
+    pendingRef.current = true;
+    setPending(true);
     try {
       if (isTauriRuntime()) {
         await invokeTauri<void>("confirm_application_exit");
@@ -107,14 +118,18 @@ export function useApplicationLifetime() {
     } catch (nextError) {
       setError(errorMessage(nextError));
       return false;
+    } finally {
+      pendingRef.current = false;
+      setPending(false);
     }
   }, []);
 
   return {
     closePromptOpen,
-    dismissClosePrompt: () => setClosePromptOpen(false),
-    dismissExitConfirmation: () => setExitConfirmationOpen(false),
+    dismissClosePrompt: () => { if (!pendingRef.current) setClosePromptOpen(false); },
+    dismissExitConfirmation: () => { if (!pendingRef.current) setExitConfirmationOpen(false); },
     error,
+    pending,
     exitConfirmationOpen,
     confirmExit,
     resolveClose,
