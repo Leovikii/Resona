@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { invokeTauri, isTauriRuntime } from "../../shared/bridge/tauri";
 import {
@@ -18,6 +18,8 @@ export function useAudioCompression() {
     preview && new URLSearchParams(window.location.search).get("preview") === "ready"
       ? previewScan(["C:\\Music"])
       : emptyCompressionScanSnapshot);
+  const requestRef = useRef(false);
+  const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -63,44 +65,34 @@ export function useAudioCompression() {
     return () => window.clearInterval(timer);
   }, [documentVisible, refreshScan, scan.status]);
 
-  const addInputs = useCallback(async (paths: string[]) => {
-    if (paths.length === 0) return false;
+  const changeInputs = useCallback(async (command: string, paths: string[] = []) => {
+    if (requestRef.current || (command !== "clear_audio_compression_inputs" && paths.length === 0)) return false;
+    requestRef.current = true;
+    setPending(true);
     try {
       const next = isTauriRuntime()
-        ? await invokeTauri<CompressionScanSnapshot>("scan_audio_compression_inputs", { paths })
-        : previewScan(paths);
+        ? await invokeTauri<CompressionScanSnapshot>(command, { paths })
+        : command === "scan_audio_compression_inputs" ? previewScan(paths)
+        : command === "remove_audio_compression_inputs" ? removePreviewNodes(scan, new Set(paths))
+        : emptyCompressionScanSnapshot;
       setScan(next);
+      setSnapshot(isTauriRuntime()
+        ? await invokeTauri<CompressionSnapshot>("get_audio_compression_state")
+        : emptyCompressionSnapshot);
       setError(null);
       return true;
     } catch (nextError) {
       setError(errorMessage(nextError));
       return false;
-    }
-  }, []);
-
-  const removeInputs = useCallback(async (paths: string[]) => {
-    try {
-      const next = isTauriRuntime()
-        ? await invokeTauri<CompressionScanSnapshot>("remove_audio_compression_inputs", { paths })
-        : removePreviewNodes(scan, new Set(paths));
-      setScan(next);
-      setError(null);
-    } catch (nextError) {
-      setError(errorMessage(nextError));
+    } finally {
+      requestRef.current = false;
+      setPending(false);
     }
   }, [scan]);
 
-  const clearInputs = useCallback(async () => {
-    try {
-      const next = isTauriRuntime()
-        ? await invokeTauri<CompressionScanSnapshot>("clear_audio_compression_inputs")
-        : emptyCompressionScanSnapshot;
-      setScan(next);
-      setError(null);
-    } catch (nextError) {
-      setError(errorMessage(nextError));
-    }
-  }, []);
+  const addInputs = useCallback((paths: string[]) => changeInputs("scan_audio_compression_inputs", paths), [changeInputs]);
+  const removeInputs = useCallback((paths: string[]) => changeInputs("remove_audio_compression_inputs", paths), [changeInputs]);
+  const clearInputs = useCallback(() => changeInputs("clear_audio_compression_inputs"), [changeInputs]);
 
   const cancelScan = useCallback(async () => {
     if (!isTauriRuntime()) {
@@ -121,6 +113,9 @@ export function useAudioCompression() {
     deleteSource: boolean,
     deletionConfirmed: boolean,
   ) => {
+    if (requestRef.current || snapshot.status !== "idle" || scan.status !== "ready" || paths.length === 0) return false;
+    requestRef.current = true;
+    setPending(true);
     try {
       const next = isTauriRuntime()
         ? await invokeTauri<CompressionSnapshot>("start_audio_compression", {
@@ -152,8 +147,11 @@ export function useAudioCompression() {
     } catch (nextError) {
       setError(errorMessage(nextError));
       return false;
+    } finally {
+      requestRef.current = false;
+      setPending(false);
     }
-  }, []);
+  }, [scan.status, snapshot.status]);
 
   const cancel = useCallback(async () => {
     if (!isTauriRuntime()) return;
@@ -174,6 +172,7 @@ export function useAudioCompression() {
     refresh,
     refreshScan,
     removeInputs,
+    pending,
     scan,
     snapshot,
     start,

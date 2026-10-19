@@ -35,3 +35,17 @@ test("only Rust terminal state permits full progress and every new batch starts 
   assert.equal(compressionProgress(batch("running", [["pending", 0]])).percent, 0);
   assert.equal(compressionProgress(batch("running", [["running", NaN], ["running", -1], ["running", 5]])).percent, 33);
 });
+
+test("result facts count actual source deletion and warnings only on successful files", () => {
+  const snapshot = batch("completed_with_errors", [["completed", 1], ["completed", 1], ["completed", 1], ["failed", .1]]);
+  snapshot.items[0].sourceDeleted = true;
+  snapshot.items[1].message = "source deletion failed";
+  snapshot.items[3].message = "conversion failed";
+  const result = compressionProgress(snapshot);
+  assert.equal(result.succeeded, 3);
+  assert.equal(result.deleted, 1);
+  assert.equal(result.warnings, 1);
+  assert.equal(result.failed, 1);
+  assert.equal(result.sourceBytes, 300);
+  assert.equal(result.outputBytes, 180);
+});

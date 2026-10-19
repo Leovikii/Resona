@@ -7,6 +7,8 @@ export function compressionProgress(snapshot: CompressionSnapshot) {
   let succeeded = 0;
   let failed = 0;
   let cancelled = 0;
+  let deleted = 0;
+  let warnings = 0;
   let sourceBytes = 0;
   let outputBytes = 0;
   for (const item of snapshot.items) {
@@ -17,6 +19,8 @@ export function compressionProgress(snapshot: CompressionSnapshot) {
     if (item.status === "cancelled") cancelled++;
     if (item.status === "completed") {
       succeeded++;
+      if (item.sourceDeleted) deleted++;
+      if (item.message) warnings++;
       sourceBytes += item.sourceBytes;
       outputBytes += item.outputBytes;
     }
@@ -25,6 +29,6 @@ export function compressionProgress(snapshot: CompressionSnapshot) {
   const percent = snapshot.total > 0 ? Math.min(100, Math.round(processed / snapshot.total * 100)) : 0;
   return {
     percent: busy ? Math.min(99, percent) : percent,
-    running, succeeded, failed, cancelled, sourceBytes, outputBytes,
+    running, succeeded, failed, cancelled, deleted, warnings, sourceBytes, outputBytes,
   };
 }

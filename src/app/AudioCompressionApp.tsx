@@ -24,6 +24,7 @@ import {
   ChevronDown,
   ChevronRight,
   Check,
+  CircleCheck,
   CircleAlert,
   CircleX,
   FileAudio,
@@ -79,13 +80,25 @@ export default function AudioCompressionApp() {
   const overall = compressionProgress(compression.snapshot);
   const scanBusy = compression.scan.status === "scanning" || compression.scan.status === "cancelling";
   const taskBusy = compression.snapshot.status === "running" || compression.snapshot.status === "cancelling";
-  const locked = scanBusy || taskBusy;
+  const locked = scanBusy || taskBusy || compression.pending;
+  const finished = compression.snapshot.status !== "idle" && !taskBusy;
   const readyPaths = useMemo(() => collectReadyPaths(compression.scan.roots), [compression.scan.roots]);
   const readyBytes = useMemo(() => collectReadyBytes(compression.scan.roots), [compression.scan.roots]);
   const taskItems = useMemo(
     () => new Map(compression.snapshot.items.map((item) => [item.source, item])),
     [compression.snapshot.items],
   );
+  const canStart = !locked && !finished && compression.scan.status === "ready" && readyPaths.length > 0;
+  const resultTone = compression.snapshot.status === "cancelled" ? "cancelled"
+    : compression.snapshot.status === "completed" ? "success"
+    : overall.succeeded > 0 ? "warning" : "failure";
+  const resultTitle = t(
+    compression.snapshot.status === "cancelled" ? "compression.resultCancelled"
+    : compression.snapshot.status === "completed" ? "compression.resultSuccess"
+    : overall.failed === 0 && overall.warnings > 0 ? "compression.resultWarning"
+    : overall.succeeded > 0 ? "compression.resultPartial" : "compression.resultFailure",
+  );
+  const savedBytes = overall.sourceBytes - overall.outputBytes;
   const summary = compressionSummary(compression.snapshot, readyPaths.length, readyBytes, t);
 
   useEffect(() => {
@@ -170,7 +183,7 @@ export default function AudioCompressionApp() {
     if (paths.length > 0) void compression.addInputs(paths);
   };
   const start = () => {
-    if (readyPaths.length === 0) return;
+    if (!canStart) return;
     if (deleteSource) setConfirmOpen(true);
     else void compression.start(readyPaths, preset, false, false);
   };
@@ -230,7 +243,7 @@ export default function AudioCompressionApp() {
             { label: t("compression.balanced"), value: "balanced" },
             { label: t("compression.smallest"), value: "smallest" },
           ]}
-          disabled={taskBusy}
+          disabled={taskBusy || compression.pending}
           onChange={(value) => setCompression({ preset: value as CompressionPreset })}
           size="xs"
           value={preset}
@@ -238,7 +251,7 @@ export default function AudioCompressionApp() {
         <Group className="compression-run-actions" gap="sm" wrap="nowrap">
           <Switch
             checked={deleteSource}
-            disabled={taskBusy}
+            disabled={taskBusy || compression.pending}
             label={t("compression.deleteSource")}
             onChange={(event) => setCompression({ deleteSource: event.currentTarget.checked })}
             size="xs"
@@ -248,8 +261,17 @@ export default function AudioCompressionApp() {
               {t("common.cancel")}
             </Button>
           ) : (
-            <Button disabled={locked || readyPaths.length === 0} leftSection={<Wrench size={15} />} onClick={start} size="xs">
-              {t("compression.start", { count: readyPaths.length })}
+            <Button
+              className="compression-start"
+              data-result={finished ? resultTone : undefined}
+              aria-describedby={finished ? "compression-next-batch" : undefined}
+              disabled={!canStart}
+              leftSection={finished && resultTone === "success" ? <Check size={15} /> : <Wrench size={15} />}
+              onClick={start} size="xs"
+            >
+              {finished ? t(compression.snapshot.status === "completed" ? "compression.completed"
+                : compression.snapshot.status === "cancelled" ? "compression.cancelled" : "compression.ended")
+                : t("compression.start", { count: readyPaths.length })}
             </Button>
           )}
         </Group>
@@ -292,8 +314,8 @@ export default function AudioCompressionApp() {
       )}
 
       <div className="compression-workspace">
-        <section className="compression-tree-panel" aria-label={t("compression.inputs")}>
-          <div className="compression-panel-heading" data-status={compression.snapshot.status}>
+        <section className="compression-tree-panel" data-finished={finished || undefined} aria-label={t(finished ? "compression.results" : "compression.inputs")}>
+          <div className="compression-panel-heading" data-status={compression.snapshot.status} data-result={finished ? resultTone : undefined}>
             {compression.snapshot.total > 0 && <span
               className="compression-tree-progress"
               style={{ width: `${overall.percent}%` }}
@@ -303,16 +325,49 @@ export default function AudioCompressionApp() {
               aria-valuemax={100}
               aria-valuenow={overall.percent}
             />}
-            <Text fw={650} size="sm">{t("compression.inputs")}</Text>
-            <VisuallyHidden role="status">{compression.snapshot.total > 0 ? t(`compression.batchAnnouncement.${compression.snapshot.status}`) : ""}</VisuallyHidden>
-            <div className="compression-summary">
-              {compression.snapshot.total > 0 && <Text fw={600} size="xs">{t(`compression.batchStatus.${compression.snapshot.status}`, {
-                percent: overall.percent, ended: compression.snapshot.completed, total: compression.snapshot.total,
-                running: overall.running, succeeded: overall.succeeded, failed: overall.failed, cancelled: overall.cancelled,
-              })}</Text>}
-              <Text c="dimmed" lineClamp={1} size="xs" title={summary}>{summary}</Text>
-            </div>
+            <VisuallyHidden role="status">{finished ? resultTitle : compression.snapshot.total > 0 ? t(`compression.batchAnnouncement.${compression.snapshot.status}`) : ""}</VisuallyHidden>
+            {finished ? (
+              <div className="compression-result">
+                <div className="compression-result-main">
+                  <span className="compression-result-icon" aria-hidden="true">
+                    {resultTone === "success" ? <CircleCheck size={29} /> : resultTone === "failure" ? <CircleX size={29} />
+                      : resultTone === "warning" ? <CircleAlert size={29} /> : <X size={29} />}
+                  </span>
+                  <div>
+                    <Title order={2}>{resultTitle}</Title>
+                    <Text c="dimmed" size="sm">{t("compression.resultCounts", overall)}</Text>
+                  </div>
+                </div>
+                <div className="compression-result-savings">
+                  {overall.succeeded > 0 ? <>
+                    <Text className="compression-result-saved" fw={750}>{t(savedBytes >= 0 ? "compression.resultSaved" : "compression.resultGrew", { size: formatBytes(Math.abs(savedBytes)) })}</Text>
+                    <Text c="dimmed" size="xs">{t(savedBytes >= 0 ? "compression.resultReduction" : "compression.resultIncrease", {
+                      percent: overall.sourceBytes > 0 ? Math.round(Math.abs(savedBytes) / overall.sourceBytes * 100) : 0,
+                      source: formatBytes(overall.sourceBytes), output: formatBytes(overall.outputBytes),
+                    })}</Text>
+                  </> : <Text c="dimmed" size="sm">{t("compression.resultNoOutput")}</Text>}
+                </div>
+                <div className="compression-result-details">
+                  <Text size="xs">{overall.succeeded > 0 ? t("compression.resultGenerated", { count: overall.succeeded }) : t("compression.resultCheckErrors")}
+                    {overall.deleted > 0 ? ` · ${t("compression.resultDeleted", { count: overall.deleted })}` : ""}
+                    {overall.succeeded - overall.deleted > 0 ? ` · ${t("compression.resultRetained", { count: overall.succeeded - overall.deleted })}` : ""}
+                    {overall.warnings > 0 ? ` · ${t("compression.resultWarnings", { count: overall.warnings })}` : ""}
+                  </Text>
+                  <Text c="dimmed" size="xs" id="compression-next-batch">{t("compression.nextBatch")}</Text>
+                </div>
+              </div>
+            ) : <>
+              <Text fw={650} size="sm">{t("compression.inputs")}</Text>
+              <div className="compression-summary">
+                {compression.snapshot.total > 0 && <Text fw={600} size="xs">{t(`compression.batchStatus.${compression.snapshot.status}`, {
+                  percent: overall.percent, ended: compression.snapshot.completed, total: compression.snapshot.total,
+                  running: overall.running, succeeded: overall.succeeded, failed: overall.failed, cancelled: overall.cancelled,
+                })}</Text>}
+                <Text c="dimmed" lineClamp={1} size="xs" title={summary}>{summary}</Text>
+              </div>
+            </>}
           </div>
+          {finished && <Text className="compression-results-label" fw={650} size="sm">{t("compression.results")}</Text>}
           <ScrollArea className="compression-tree-scroll" scrollHideDelay={700} type="scroll">
             {compression.scan.roots.length === 0 ? (
               <CompressionEmpty icon={<FileAudio />} label={t("compression.emptyInputs")} />
@@ -358,8 +413,9 @@ export default function AudioCompressionApp() {
           <Text size="sm">{t("compression.confirmBody", { count: readyPaths.length })}</Text>
           <Group justify="flex-end">
             <Button onClick={() => setConfirmOpen(false)} variant="default">{t("common.cancel")}</Button>
-            <Button color="red" onClick={() => {
+            <Button color="red" disabled={!canStart} onClick={() => {
               setConfirmOpen(false);
+              if (!canStart) return;
               void compression.start(readyPaths, preset, true, true);
             }}>{t("compression.confirm")}</Button>
           </Group>
@@ -489,7 +545,6 @@ function compressionSummary(
   if (snapshot.total === 0) {
     return t("compression.summaryReady", { count: readyCount, size: formatBytes(readyBytes) });
   }
-  const { sourceBytes, outputBytes, failed, cancelled } = compressionProgress(snapshot);
   if (snapshot.status === "running" || snapshot.status === "cancelling") {
     const allSourceBytes = snapshot.items.reduce((total, item) => total + item.sourceBytes, 0);
     return t("compression.summaryRunning", {
@@ -498,16 +553,7 @@ function compressionSummary(
       total: snapshot.total,
     });
   }
-  const savedBytes = Math.max(0, sourceBytes - outputBytes);
-  const percent = sourceBytes > 0 ? Math.round((savedBytes / sourceBytes) * 100) : 0;
-  return t("compression.summaryComplete", {
-    cancelled: cancelled > 0 ? ` · ${t("compression.cancelledCount", { count: cancelled })}` : "",
-    failed: failed > 0 ? ` · ${t("compression.failedCount", { count: failed })}` : "",
-    output: formatBytes(outputBytes),
-    percent,
-    saved: formatBytes(savedBytes),
-    source: formatBytes(sourceBytes),
-  });
+  return "";
 }
 
 function formatBytes(bytes: number) {
