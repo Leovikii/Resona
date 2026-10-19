@@ -192,7 +192,6 @@ html[data-window="audio-compression"] #root {
 .compression-workspace {
   min-width: 0;
   min-height: 0;
-  display: grid;
   display: block;
   flex: 1;
   background: var(--resona-content-surface);
@@ -227,18 +226,6 @@ html[data-window="audio-compression"] #root {
 .compression-panel-heading > :not(.compression-tree-progress):not([role="status"]) {
   position: relative;
   z-index: 1;
-}
-
-.compression-panel-heading[data-status="completed"] .compression-tree-progress {
-  background: color-mix(in srgb, var(--mantine-color-green-filled) 12%, transparent);
-}
-
-.compression-panel-heading[data-status="completed_with_errors"] .compression-tree-progress {
-  background: color-mix(in srgb, var(--mantine-color-yellow-filled) 15%, transparent);
-}
-
-.compression-panel-heading[data-status="cancelled"] .compression-tree-progress {
-  background: color-mix(in srgb, var(--mantine-color-gray-filled) 12%, transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {

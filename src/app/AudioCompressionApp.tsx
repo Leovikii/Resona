@@ -99,7 +99,9 @@ export default function AudioCompressionApp() {
     : overall.succeeded > 0 ? "compression.resultPartial" : "compression.resultFailure",
   );
   const savedBytes = overall.sourceBytes - overall.outputBytes;
-  const summary = compressionSummary(compression.snapshot, readyPaths.length, readyBytes, t);
+  const summary = compression.snapshot.total === 0
+    ? t("compression.summaryReady", { count: readyPaths.length, size: formatBytes(readyBytes) })
+    : formatBytes(compression.snapshot.items.reduce((total, item) => total + item.sourceBytes, 0));
 
   useEffect(() => {
     document.documentElement.dataset.window = "audio-compression";
@@ -534,26 +536,6 @@ function collectReadyBytes(nodes: CompressionScanNode[]): number {
     (total, node) => total + (node.kind === "file" && node.ready ? node.sourceBytes : 0) + collectReadyBytes(node.children),
     0,
   );
-}
-
-function compressionSummary(
-  snapshot: ReturnType<typeof useAudioCompression>["snapshot"],
-  readyCount: number,
-  readyBytes: number,
-  t: ReturnType<typeof useTranslation>["t"],
-) {
-  if (snapshot.total === 0) {
-    return t("compression.summaryReady", { count: readyCount, size: formatBytes(readyBytes) });
-  }
-  if (snapshot.status === "running" || snapshot.status === "cancelling") {
-    const allSourceBytes = snapshot.items.reduce((total, item) => total + item.sourceBytes, 0);
-    return t("compression.summaryRunning", {
-      completed: snapshot.completed,
-      size: formatBytes(allSourceBytes),
-      total: snapshot.total,
-    });
-  }
-  return "";
 }
 
 function formatBytes(bytes: number) {

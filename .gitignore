@@ -6,7 +6,7 @@ coverage/
 
 # Rust / Tauri
 src-tauri/target/
-# Downloaded and hash-verified by scripts/prepare-ffmpeg-sidecars.ps1.
+# Downloaded and hash-verified by scripts/prepare-ffmpeg-test-tools.mjs.
 src-tauri/binaries/*.exe
 src-tauri/binaries/*.zip
 
