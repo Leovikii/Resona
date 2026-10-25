@@ -2,12 +2,12 @@
 
 use serde::{Deserialize, Serialize};
 use tauri::{
-    AppHandle, Manager, PhysicalPosition, PhysicalSize, Runtime, WebviewUrl, WebviewWindow,
+    AppHandle, LogicalSize, Manager, PhysicalPosition, Runtime, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder,
 };
 
 use crate::compression::CompressionFailure;
-use crate::platform::window_material;
+use crate::platform::{window_geometry, window_material};
 
 pub const LABEL: &str = "audio-compression";
 const GEOMETRY_FILE: &str = "audio-compression-window.json";
@@ -19,7 +19,10 @@ const MAX_WIDTH: u32 = 960;
 const MAX_HEIGHT: u32 = 720;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct WindowGeometry {
+    #[serde(default)]
+    geometry_version: u8,
     x: i32,
     y: i32,
     width: u32,
@@ -57,6 +60,7 @@ pub fn show<R: Runtime>(app: &AppHandle<R>) -> Result<(), CompressionFailure> {
         .build()
         .or_else(|error| app.get_webview_window(LABEL).ok_or(error))
         .map_err(|error| window_error("create_failed", error))?;
+    crate::platform::window_controls::apply(&window);
     restore_geometry(app, &window);
     Ok(())
 }
@@ -65,13 +69,17 @@ pub fn persist_geometry<R: Runtime>(app: &AppHandle<R>) {
     let Some(window) = app.get_webview_window(LABEL) else {
         return;
     };
-    let Ok(position) = window.outer_position() else {
+    let Ok(position) = window_geometry::position(&window) else {
         return;
     };
-    let Ok(size) = window.outer_size() else {
+    if window.is_maximized().unwrap_or(false) || window.is_minimized().unwrap_or(false) {
+        return;
+    }
+    let Ok(size) = window_geometry::inner_size(&window) else {
         return;
     };
     let geometry = WindowGeometry {
+        geometry_version: 1,
         x: position.x,
         y: position.y,
         width: size.width.clamp(MIN_WIDTH, MAX_WIDTH),
@@ -98,59 +106,111 @@ fn restore_geometry<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
     let Ok(data_dir) = app.path().app_local_data_dir() else {
         return;
     };
-    let Ok(bytes) = std::fs::read(data_dir.join(GEOMETRY_FILE)) else {
+    let default = WindowGeometry {
+        geometry_version: 1,
+        x: 0,
+        y: 0,
+        width: DEFAULT_WIDTH as u32,
+        height: DEFAULT_HEIGHT as u32,
+    };
+    let mut saved = match std::fs::read(data_dir.join(GEOMETRY_FILE)) {
+        Ok(bytes) => serde_json::from_slice::<WindowGeometry>(&bytes).unwrap_or_else(|error| {
+            eprintln!("audio compression geometry invalid; using defaults: {error}");
+            default
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => default,
+        Err(error) => {
+            eprintln!("audio compression geometry read failed; using defaults: {error}");
+            default
+        }
+    };
+    let Ok(scale) = window.scale_factor() else {
         return;
     };
-    let Ok(saved) = serde_json::from_slice::<WindowGeometry>(&bytes) else {
-        eprintln!("audio compression geometry file is invalid; using centered defaults");
-        return;
-    };
-    let Ok(monitors) = app.available_monitors() else {
-        return;
-    };
-    let work_areas = monitors
-        .iter()
-        .map(|monitor| monitor.work_area())
-        .collect::<Vec<_>>();
-    let Some(restored) = constrain_geometry(saved, &work_areas) else {
-        return;
-    };
-    if let Err(error) = window.set_size(PhysicalSize::new(restored.width, restored.height)) {
-        eprintln!("audio compression size restore failed: {error}");
+    if saved.geometry_version == 0 {
+        if !window_geometry::supports_absolute_position() {
+            // Legacy GTK dimensions include decorations and used physical-pixel clamps.
+            saved = default;
+        }
+        if saved.geometry_version == 0 {
+            let logical =
+                tauri::PhysicalSize::new(saved.width, saved.height).to_logical::<u32>(scale);
+            saved.width = logical.width;
+            saved.height = logical.height;
+        }
+        saved.geometry_version = 1;
     }
-    if let Err(error) = window.set_position(PhysicalPosition::new(restored.x, restored.y)) {
-        eprintln!("audio compression position restore failed: {error}");
+    saved.width = saved.width.clamp(MIN_WIDTH, MAX_WIDTH);
+    saved.height = saved.height.clamp(MIN_HEIGHT, MAX_HEIGHT);
+    match window_geometry::max_inner_size(window) {
+        Ok(Some(max)) => {
+            saved.width = saved.width.min(max.width);
+            saved.height = saved.height.min(max.height);
+        }
+        Ok(None) => {}
+        Err(error) => eprintln!("audio compression work area unavailable: {error}"),
+    }
+    if window_geometry::supports_absolute_position() {
+        let Ok(monitors) = app.available_monitors() else {
+            return;
+        };
+        let areas = monitors
+            .iter()
+            .map(|monitor| monitor.work_area())
+            .collect::<Vec<_>>();
+        let Some(restored) = constrain_geometry(saved, &areas, scale) else {
+            return;
+        };
+        saved = restored;
+        if let Err(error) = window.set_position(PhysicalPosition::new(saved.x, saved.y)) {
+            eprintln!("audio compression position restore failed: {error}");
+        }
+    }
+    if let Err(error) = window_geometry::resize(
+        window,
+        LogicalSize::new(saved.width, saved.height),
+        LogicalSize::new(MIN_WIDTH.min(saved.width), MIN_HEIGHT.min(saved.height)),
+    ) {
+        eprintln!("audio compression size restore failed: {error}");
     }
 }
 
 fn constrain_geometry(
     saved: WindowGeometry,
     work_areas: &[&tauri::PhysicalRect<i32, u32>],
+    scale: f64,
 ) -> Option<WindowGeometry> {
+    let physical = LogicalSize::new(saved.width, saved.height).to_physical::<u32>(scale);
     let area = work_areas
         .iter()
         .find(|area| {
             saved.x < area.position.x + area.size.width as i32
-                && saved.x + saved.width as i32 > area.position.x
+                && saved.x + physical.width as i32 > area.position.x
                 && saved.y < area.position.y + area.size.height as i32
-                && saved.y + saved.height as i32 > area.position.y
+                && saved.y + physical.height as i32 > area.position.y
         })
         .copied()
         .or_else(|| work_areas.first().copied())?;
-    let width = saved.width.clamp(MIN_WIDTH, MAX_WIDTH).min(area.size.width);
+    let logical_area = area.size.to_logical::<u32>(scale);
+    let width = saved
+        .width
+        .clamp(MIN_WIDTH, MAX_WIDTH)
+        .min(logical_area.width);
     let height = saved
         .height
         .clamp(MIN_HEIGHT, MAX_HEIGHT)
-        .min(area.size.height);
+        .min(logical_area.height);
+    let physical = LogicalSize::new(width, height).to_physical::<u32>(scale);
     let x = saved.x.clamp(
         area.position.x,
-        area.position.x + area.size.width as i32 - width as i32,
+        area.position.x + area.size.width as i32 - physical.width as i32,
     );
     let y = saved.y.clamp(
         area.position.y,
-        area.position.y + area.size.height as i32 - height as i32,
+        area.position.y + area.size.height as i32 - physical.height as i32,
     );
     Some(WindowGeometry {
+        geometry_version: 1,
         x,
         y,
         width,
@@ -168,6 +228,7 @@ fn window_error(code: &str, error: impl std::fmt::Display) -> CompressionFailure
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tauri::PhysicalSize;
 
     #[test]
     fn restored_geometry_is_constrained_to_a_visible_work_area() {
@@ -177,12 +238,14 @@ mod tests {
         };
         let restored = constrain_geometry(
             WindowGeometry {
+                geometry_version: 1,
                 x: 4000,
                 y: -2000,
                 width: 3000,
                 height: 200,
             },
             &[&area],
+            1.0,
         )
         .expect("constrain geometry");
         assert_eq!(restored.width, MAX_WIDTH);
@@ -199,12 +262,14 @@ mod tests {
         };
         let restored = constrain_geometry(
             WindowGeometry {
+                geometry_version: 1,
                 x: 100,
                 y: 120,
                 width: 1710,
                 height: 1860,
             },
             &[&area],
+            1.0,
         )
         .expect("constrain oversized geometry");
         assert_eq!(restored.width, MAX_WIDTH);

@@ -38,10 +38,11 @@ const previewUpdateRelease: ApplicationUpdateRelease = {
 
 export function useApplicationUpdate() {
   const operationRef = useRef<ApplicationUpdateStatus>("idle");
-  const [snapshot, setSnapshot] = useState<ApplicationUpdateSnapshot>(() =>
-    previewUpdateAvailable
-      ? { ...defaultApplicationUpdateSnapshot, updaterConfigured: true }
-      : defaultApplicationUpdateSnapshot);
+  const [snapshot, setSnapshot] = useState<ApplicationUpdateSnapshot>(() => ({
+    ...defaultApplicationUpdateSnapshot,
+    supported: !isTauriRuntime() && new URLSearchParams(window.location.search).get("platform") !== "linux",
+    updaterConfigured: previewUpdateAvailable,
+  }));
   const [available, setAvailable] = useState<ApplicationUpdateRelease | null>(
     previewUpdateAvailable ? previewUpdateRelease : null,
   );

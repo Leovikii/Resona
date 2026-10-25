@@ -2,9 +2,9 @@
 
 ## 环境
 
-- Windows 10/11 x64，Node 与 Rust 版本以锁文件和 `rust-version` 为准。
+- Windows 10/11 x64；0.3.0-alpha.1 起增加 Arch 系 Linux x86_64 / Wayland 开发预览。Node 与 Rust 版本以锁文件和 `rust-version` 为准；[Linux 环境、运行和验证](LINUX.md)。
 - 首次安装使用 `npm ci`。Rust Windows 命令在已加载 MSVC 环境的终端运行。
-- FFmpeg 不进入安装包。普通开发和 release build 不下载它；只有真实转换矩阵需要 `npm run prepare:test-tools`。
+- FFmpeg 不进入安装包。Windows 真实转换矩阵使用 `npm run prepare:test-tools`；Linux 直接使用系统 `ffmpeg` 包，不运行 Windows 工具准备脚本。普通开发与 build 不下载 FFmpeg。
 - 大型 Mantine 参考只放在忽略的 `.local-docs/llms-full.txt`，按 API 名称局部检索。
 
 常用命令：
@@ -33,6 +33,8 @@ cargo test --manifest-path src-tauri/Cargo.toml pinned_ffmpeg_test_tools_preserv
 
 固定 FFmpeg 版本、URL、归档/二进制哈希和许可证必须同步审查。测试工具只写入忽略的 `src-tauri/binaries/`；运行时依赖写入 Local AppData 并由 `FfmpegDependencyService` 验证。
 
+Linux 本机构建使用 `npm run build:linux`，开发与运行使用 `npm run dev:linux` / `npm run start:linux`；不将裸 `cargo build` 的开发服务器模式产物交付测试。KDE 桌面歌词使用系统 `gtk-layer-shell`，MPRIS 使用会话总线；原生自动回归可运行 `python3 scripts/test-linux-desktop.py`（需要 Release，必须先关闭其他实例）。Linux 的同目录输出采用不覆盖硬链接提交，失败保留源文件。
+
 ## 实现规则
 
 - 先沿用现有 module/service/adapter；只有消除真实重复或隔离平台/安全边界时才新增抽象。
@@ -41,6 +43,7 @@ cargo test --manifest-path src-tauri/Cargo.toml pinned_ffmpeg_test_tools_preserv
 - Mantine 用于组件行为和可访问性，应用 token/CSS 负责布局与材质。不得加入第二套组件库、全局 Acrylic/blur 或自绘标题栏。
 - 短时通知使用 Mantine `Notification` 及其原生图标插槽；文案按“结果：实际原因”组织，在无歧义前提下尽量简短。只有无需持续处理的临时反馈才自动消失，持续错误保留在对应工作流中。
 - 平台能力放入 `platform` adapter。Win32/COM 回调只读缓存或发 typed command，不能做文件 I/O、图片解码、等待播放锁或直接控制 Rodio。
+- 同步窗口查询可能等待 UI 线程；查询尺寸、位置或窗口状态时不得持有 UI 事件处理也会使用的 service mutex。先读取窗口快照，再加锁更新服务状态，避免布局切换与 resize/close 事件互相等待。
 - 不增加第二播放引擎、mpv fallback、DSP、隐式重采样或未经测量的高频轮询。
 
 ## 文件与数据安全
@@ -65,7 +68,7 @@ cargo test --manifest-path src-tauri/Cargo.toml pinned_ffmpeg_test_tools_preserv
 1. 纯函数/状态机：顺序、迁移、解析、SemVer、偏好、转换安全矩阵。
 2. 服务集成：actor、SQLite、扫描、并行转换、取消、原子提交、更新选择。
 3. 浏览器视觉：常用桌面与窄窗口、明暗主题、溢出、键盘焦点、更新 Markdown、压缩行进度。使用项目规定的浏览器客户端，不用浏览器结果宣称原生材质通过。
-4. Windows Release：SMTC、任务栏缩略图/进度/按钮、托盘、Mica、文件关联、拖入、DPI/多显示器、桌面歌词、睡眠/蓝牙恢复和覆盖更新。
+4. 原生平台：Arch Wayland 验收见 [Linux 指南](LINUX.md)；Windows Release：SMTC、任务栏缩略图/进度/按钮、托盘、Mica、文件关联、拖入、DPI/多显示器、桌面歌词、睡眠/蓝牙恢复和覆盖更新。
 
 UI 固定格式控件要有稳定尺寸，文本不得溢出或遮挡。压缩窗口最低覆盖 `720x500`，主窗口至少覆盖 `1080x700`、`760x520`、`420x720`、`360x600`。
 

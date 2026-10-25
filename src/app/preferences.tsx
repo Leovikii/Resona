@@ -82,8 +82,9 @@ export function AppProvider({ children }: PropsWithChildren) {
         autoContrast: true,
         luminanceThreshold: 0.3,
         defaultRadius: "sm",
-        fontFamily: "Segoe UI, system-ui, sans-serif",
-        headings: { fontFamily: "Segoe UI, system-ui, sans-serif" },
+        fontFamily: "system-ui, sans-serif",
+        fontFamilyMonospace: "ui-monospace, monospace",
+        headings: { fontFamily: "system-ui, sans-serif" },
         components: {
           Modal: Modal.extend({
             defaultProps: {

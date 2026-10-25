@@ -24,6 +24,9 @@ pub struct NativePlaybackProjection {
 pub struct NativePlaybackSnapshot {
     pub playback: PlaybackSnapshot,
     pub artwork: Option<Arc<Artwork>>,
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
 }
 
 impl NativePlaybackProjection {
@@ -39,6 +42,7 @@ impl NativePlaybackProjection {
             .spawn(move || {
                 let mut artwork_path = None;
                 let mut artwork = None;
+                let mut details = None;
                 loop {
                     match receiver.recv_timeout(PUBLISH_INTERVAL) {
                         Ok(ProjectionCommand::Shutdown) | Err(RecvTimeoutError::Disconnected) => {
@@ -51,14 +55,20 @@ impl NativePlaybackProjection {
                     };
                     if snapshot.path != artwork_path {
                         artwork_path.clone_from(&snapshot.path);
-                        artwork = snapshot
+                        let loaded = snapshot
                             .path
                             .as_deref()
-                            .and_then(|path| metadata.load(std::path::Path::new(path)).artwork);
+                            .map(|path| metadata.load(std::path::Path::new(path)));
+                        artwork = loaded.as_ref().and_then(|loaded| loaded.artwork.clone());
+                        details = loaded.map(|loaded| loaded.details);
                     }
+                    let (title, artist, album) = projected_tags(&snapshot, details.as_ref());
                     let projection = NativePlaybackSnapshot {
                         playback: snapshot,
                         artwork: artwork.clone(),
+                        title,
+                        artist,
+                        album,
                     };
                     subscribers_for_worker
                         .lock()
@@ -92,5 +102,62 @@ impl Drop for NativePlaybackProjection {
                 let _ = worker.join();
             }
         }
+    }
+}
+
+fn projected_tags(
+    snapshot: &PlaybackSnapshot,
+    details: Option<&crate::metadata::TrackDetails>,
+) -> (Option<String>, Option<String>, Option<String>) {
+    let cue = snapshot
+        .current_item_id
+        .and_then(|id| snapshot.queue.iter().find(|item| item.id == id))
+        .and_then(|item| item.cue.as_ref());
+    (
+        cue.and_then(|cue| cue.title.clone())
+            .or_else(|| details.and_then(|details| details.title.clone())),
+        cue.and_then(|cue| cue.performer.clone())
+            .or_else(|| details.and_then(|details| details.artist.clone())),
+        cue.and_then(|cue| cue.album.clone())
+            .or_else(|| details.and_then(|details| details.album.clone())),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn cue_tags_follow_the_current_logical_track() {
+        let mut snapshot = PlaybackSnapshot {
+            current_item_id: Some(7),
+            queue: vec![crate::playback::QueueItemSnapshot {
+                id: 7,
+                path: "album.flac".into(),
+                display_name: "Track 2".into(),
+                duration_ms: Some(1000),
+                status: crate::playback::QueueItemStatus::Playing,
+                error: None,
+                cue: Some(crate::media_source::CueTrackSource {
+                    cue_path: "album.cue".into(),
+                    track_number: 2,
+                    title: Some("Logical title".into()),
+                    performer: Some("Performer".into()),
+                    album: Some("Album".into()),
+                    start_ms: 1000,
+                    end_ms: Some(2000),
+                }),
+            }],
+            ..Default::default()
+        };
+        assert_eq!(
+            projected_tags(&snapshot, None),
+            (
+                Some("Logical title".into()),
+                Some("Performer".into()),
+                Some("Album".into())
+            )
+        );
+        snapshot.current_item_id = Some(8);
+        assert_eq!(projected_tags(&snapshot, None), (None, None, None));
     }
 }

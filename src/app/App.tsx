@@ -275,7 +275,7 @@ export default function App() {
 
   useEffect(() => {
     const path = playback.selectedPath;
-    if (!isTauriRuntime() || !lyricsPreferences.enabled || !hasCurrentTrack || !path) {
+    if (!isTauriRuntime() || !desktopLyrics.snapshot.supported || !lyricsPreferences.enabled || !hasCurrentTrack || !path) {
       if (!path) autoLyricsPathRef.current = null;
       return;
     }
@@ -1427,7 +1427,8 @@ function ToolsView({ onNotify }: {
     ? (dependency.snapshot.downloadedBytes / dependency.snapshot.totalBytes) * 100
     : 0;
   const dependencyDetail = dependency.snapshot.status === "ready"
-    ? t("tools.ffmpegReady", {
+    ? t(dependency.snapshot.managedBySystem ? "tools.systemFfmpegReady" : "tools.ffmpegReady", {
+        version: dependency.snapshot.version,
         size: formatBytes(dependency.snapshot.installedBytes),
       })
     : dependencyBusy
@@ -1441,7 +1442,7 @@ function ToolsView({ onNotify }: {
         ? t("tools.ffmpegStatus.checking")
         : dependency.snapshot.status === "failed"
           ? dependency.snapshot.error?.message ?? t("tools.ffmpegStatus.failed")
-          : t("tools.ffmpegRequired");
+          : t(dependency.snapshot.managedBySystem ? "tools.systemFfmpegRequired" : "tools.ffmpegRequired");
   return (
     <ScrollArea className="page-scroll" scrollHideDelay={700} type="scroll">
     <div className="page-content tools-page">
@@ -1484,7 +1485,9 @@ function ToolsView({ onNotify }: {
               onClick={() => void dependency.install()}
               size="xs"
               variant="light"
-            >{dependency.snapshot.status === "failed"
+            >{dependency.snapshot.managedBySystem
+              ? t("tools.recheckFfmpeg")
+              : dependency.snapshot.status === "failed"
               ? t("tools.retryFfmpeg")
               : t("tools.downloadFfmpeg")}</Button>
           )}
@@ -1562,7 +1565,9 @@ function SettingsView({ applicationLifetime, applicationUpdate, busy, desktopLyr
     }
     setDesktopLyrics({ fontSize: value });
   }, [desktopLyrics, lyricsPreferences.fontSize, setDesktopLyrics]);
-  const updateButtonLabel = applicationUpdate.available
+  const updateButtonLabel = !applicationUpdate.snapshot.supported
+    ? t("settings.versionManual", { version: applicationUpdate.snapshot.currentVersion })
+    : applicationUpdate.available
     ? `v${applicationUpdate.snapshot.currentVersion} -> v${applicationUpdate.available.version}`
     : applicationUpdate.status === "checking"
       ? t("settings.versionChecking", { version: applicationUpdate.snapshot.currentVersion })
@@ -1584,7 +1589,7 @@ function SettingsView({ applicationLifetime, applicationUpdate, busy, desktopLyr
       <section className="settings-section settings-about-section">
         <Text className="settings-section-title" fw={650}>{t("settings.about")}</Text>
         <SettingRow label={t("settings.version")}>
-          <Button
+          {!applicationUpdate.snapshot.supported ? <Text size="xs">{updateButtonLabel}</Text> : <Button
             leftSection={applicationUpdate.available ? <Download size={15} /> : <RefreshCw size={15} />}
             loading={applicationUpdate.status === "checking"}
             onClick={() => void handleUpdateAction()}
@@ -1592,9 +1597,9 @@ function SettingsView({ applicationLifetime, applicationUpdate, busy, desktopLyr
             variant={applicationUpdate.available ? "filled" : "light"}
           >
             {updateButtonLabel}
-          </Button>
+          </Button>}
         </SettingRow>
-        <SettingRow label={t("settings.prereleaseUpdates")}>
+        {applicationUpdate.snapshot.supported && <SettingRow label={t("settings.prereleaseUpdates")}>
           <Switch
             aria-label={t("settings.prereleaseUpdates")}
             checked={applicationUpdate.snapshot.receivePrereleaseUpdates}
@@ -1604,7 +1609,7 @@ function SettingsView({ applicationLifetime, applicationUpdate, busy, desktopLyr
             }}
             size="sm"
           />
-        </SettingRow>
+        </SettingRow>}
         <div className="about-footer-row">
           <Text c="dimmed" size="xs">{t("settings.copyright")}</Text>
           <Tooltip label={t("settings.repository")}>
@@ -1706,6 +1711,8 @@ function SettingsView({ applicationLifetime, applicationUpdate, busy, desktopLyr
 
       <section className="settings-section">
         <Text className="settings-section-title" fw={650}>{t("desktopLyrics.title")}</Text>
+        {!desktopLyrics.snapshot.supported && <Text c="dimmed" size="sm">{t("desktopLyrics.unavailable")}</Text>}
+        {desktopLyrics.snapshot.supported && <>
         <SettingRow className="font-size-setting" label={t("desktopLyrics.fontSize")}>
           <NumberInput
             allowDecimal={false}
@@ -1772,6 +1779,7 @@ function SettingsView({ applicationLifetime, applicationUpdate, busy, desktopLyr
             value={backgroundOpacity}
           />
         </SettingRow>
+        </>}
         {desktopLyrics.error && (
           <Text c="red" size="xs">
             {t(`desktopLyrics.errors.${desktopLyrics.error.code}`, {

@@ -1451,9 +1451,9 @@ mod tests {
             .create_playlist_with_items(
                 "Road trip",
                 &[
-                    item("C:\\Music\\First.wav"),
-                    item("C:\\Music\\Second.flac"),
-                    item("C:\\Music\\Third.mp3"),
+                    item("C:/Music/First.wav"),
+                    item("C:/Music/Second.flac"),
+                    item("C:/Music/Third.mp3"),
                 ],
                 None,
                 false,

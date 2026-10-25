@@ -8,10 +8,27 @@ mod windows;
 #[cfg(target_os = "windows")]
 pub use windows::DesktopLyricsWindowService;
 
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+pub use linux::{DesktopLyricsWindowService, GestureKind};
+
+pub fn create_service() -> DesktopLyricsWindowService {
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    {
+        DesktopLyricsWindowService::default()
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    {
+        DesktopLyricsWindowService
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopLyricsWindowSnapshot {
     pub supported: bool,
+    pub layer_shell: bool,
     pub visible: bool,
     pub locked: bool,
 }
@@ -31,11 +48,11 @@ impl DesktopLyricsWindowFailure {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 #[derive(Default)]
 pub struct DesktopLyricsWindowService;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 impl DesktopLyricsWindowService {
     pub fn snapshot(&self) -> DesktopLyricsWindowSnapshot {
         DesktopLyricsWindowSnapshot::default()
@@ -94,4 +111,38 @@ impl DesktopLyricsWindowService {
     }
 
     pub fn maintain_topmost(&self) {}
+
+    pub fn enforce_height(&self) {}
+}
+
+pub fn pointer(
+    service: &DesktopLyricsWindowService,
+    phase: String,
+    kind: String,
+    x: f64,
+    y: f64,
+) -> Result<(), DesktopLyricsWindowFailure> {
+    #[cfg(target_os = "linux")]
+    {
+        let kind = match kind.as_str() {
+            "move" => GestureKind::Move,
+            "east" => GestureKind::East,
+            "west" => GestureKind::West,
+            _ => {
+                return Err(DesktopLyricsWindowFailure::new(
+                    "desktop_lyrics_invalid_gesture",
+                    "invalid gesture kind",
+                ))
+            }
+        };
+        service.pointer(phase, kind, x, y)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (service, phase, kind, x, y);
+        Err(DesktopLyricsWindowFailure::new(
+            "desktop_lyrics_unsupported_gesture",
+            "layer-shell gestures are unavailable",
+        ))
+    }
 }

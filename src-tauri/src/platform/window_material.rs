@@ -8,11 +8,13 @@ use tauri::{
 
 const MAIN_LABEL: &str = "main";
 const COMPRESSION_LABEL: &str = "audio-compression";
+#[cfg(any(target_os = "windows", test))]
 const WINDOWS_11_FIRST_BUILD: u32 = 22_000;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WindowMaterial {
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     Mica,
     #[default]
     Solid,
@@ -150,6 +152,7 @@ fn preferred_platform_material() -> WindowMaterial {
     WindowMaterial::Solid
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn supports_mica_version(major: u32, build: u32) -> bool {
     major >= 10 && build >= WINDOWS_11_FIRST_BUILD
 }

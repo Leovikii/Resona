@@ -27,8 +27,8 @@ concurrency:
   queue: max
 
 jobs:
-  pr-validation:
-    name: PR validation
+  windows-validation:
+    name: Windows validation
     if: github.event_name == 'pull_request'
     runs-on: windows-latest
     timeout-minutes: 30
@@ -84,6 +84,48 @@ jobs:
 
       - name: Validate release version
         run: node scripts/release-channel.mjs --base "${{ github.event.pull_request.base.sha }}"
+
+  linux-validation:
+    name: Arch Linux validation
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel@sha256:3cbf69d2d5958d6a294f3722c5668e6187c4df8e00fa27f72352f0bf83e495e1
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Install Arch build dependencies
+        run: pacman -Syu --noconfirm --needed git rust nodejs npm webkit2gtk-4.1 libayatana-appindicator alsa-lib openssl ffmpeg gtk-layer-shell
+
+      - name: Check out the pull request merge commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
+        with:
+          persist-credentials: false
+
+      - name: Build and test Linux
+        run: |
+          npm ci
+          npm test
+          cargo fmt --manifest-path src-tauri/Cargo.toml --check
+          cargo test --manifest-path src-tauri/Cargo.toml --locked
+          cargo test --manifest-path src-tauri/Cargo.toml --locked system_tools_are_ready_without_a_download -- --ignored
+          cargo test --manifest-path src-tauri/Cargo.toml --locked pinned_ffmpeg_test_tools_preserve_matrix_and_quantize_32_bit_to_24 -- --ignored
+          cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
+          npm run build:linux -- --debug
+
+  pr-validation:
+    name: PR validation
+    if: always() && github.event_name == 'pull_request'
+    needs: [windows-validation, linux-validation]
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Require both platform checks
+        env:
+          WINDOWS_RESULT: ${{ needs.windows-validation.result }}
+          LINUX_RESULT: ${{ needs.linux-validation.result }}
+        run: test "$WINDOWS_RESULT" = success && test "$LINUX_RESULT" = success
 
   verify:
     name: Prepare delivery

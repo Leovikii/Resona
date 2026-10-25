@@ -1031,3 +1031,14 @@ fn playlist_sync_failure(failure: PlaybackFailure) -> PersistenceFailure {
         message: failure.message,
     }
 }
+
+#[tauri::command]
+pub async fn desktop_lyrics_pointer(
+    phase: String,
+    kind: String,
+    x: f64,
+    y: f64,
+    service: State<'_, ManagedDesktopLyricsWindowService>,
+) -> Result<(), DesktopLyricsWindowFailure> {
+    crate::platform::desktop_lyrics::pointer(&service, phase, kind, x, y)
+}

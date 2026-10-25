@@ -186,6 +186,15 @@ pub fn show_main_window(app: &AppHandle) -> Result<(), ApplicationLifetimeFailur
 }
 
 fn hide_main_window(app: &AppHandle) -> Result<(), ApplicationLifetimeFailure> {
+    if app
+        .try_state::<crate::platform::tray::TrayService>()
+        .is_none()
+    {
+        return Err(failure(
+            "system_tray_unavailable",
+            "The system tray is unavailable; keep the window open or choose Exit.",
+        ));
+    }
     let window = app.get_webview_window("main").ok_or_else(|| {
         failure(
             "main_window_unavailable",

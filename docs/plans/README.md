@@ -4,6 +4,7 @@
 
 | 版本 | 状态 | 入口 |
 | --- | --- | --- |
+| 0.3.0 | Development Complete，alpha.1 本机预览，待所有者验收 | [计划与验证](0.3.0.md) · [Linux 指南](../LINUX.md) |
 | 0.2.1 | Ready for owner release，所有者实测通过，尚未发布 | [计划](0.2.1.md) · [UI 方案](0.2.1-ui.md) · [验证记录](0.2.1-validation.md) |
 
 只保留当前活动版本及发行门禁。已关闭版本归入[0.2.0 发行说明](../releases/0.2.0.md)和[0.1.0 发行说明](../releases/0.1.0.md)；长期决定见 [ADR](../decisions/README.md)，当前事实见 [STATUS](../STATUS.md)。

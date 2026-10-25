@@ -55,6 +55,8 @@ struct ArtworkFileCache {
 struct MetadataSyncKey {
     path: String,
     title: String,
+    artist: Option<String>,
+    album: Option<String>,
     duration_ms: Option<u64>,
     artwork_fingerprint: Option<[u8; 32]>,
 }
@@ -283,10 +285,15 @@ fn sync_controls(
     artwork_files: &mut ArtworkFileCache,
 ) {
     let snapshot = &projection.playback;
-    let title = current_track_title(snapshot);
+    let title = projection
+        .title
+        .clone()
+        .unwrap_or_else(|| current_track_title(snapshot));
     let metadata_key = MetadataSyncKey {
         path: snapshot.path.clone().unwrap_or_default(),
         title: title.clone(),
+        artist: projection.artist.clone(),
+        album: projection.album.clone(),
         duration_ms: snapshot.duration_ms,
         artwork_fingerprint: projection
             .artwork
@@ -309,6 +316,8 @@ fn sync_controls(
             .unwrap_or_else(|| app_logo_url.to_owned());
         let metadata = MediaMetadata {
             title: (!title.is_empty()).then_some(title.as_str()),
+            artist: projection.artist.as_deref(),
+            album: projection.album.as_deref(),
             cover_url: Some(cover_url.as_str()),
             duration: snapshot.duration_ms.map(Duration::from_millis),
             ..MediaMetadata::default()
@@ -321,6 +330,8 @@ fn sync_controls(
                 if cover_url != app_logo_url {
                     match controls.set_metadata(MediaMetadata {
                         title: (!title.is_empty()).then_some(title.as_str()),
+                        artist: projection.artist.as_deref(),
+                        album: projection.album.as_deref(),
                         cover_url: Some(app_logo_url),
                         duration: snapshot.duration_ms.map(Duration::from_millis),
                         ..MediaMetadata::default()
@@ -334,6 +345,8 @@ fn sync_controls(
                 if !metadata_applied {
                     match controls.set_metadata(MediaMetadata {
                         title: (!title.is_empty()).then_some(title.as_str()),
+                        artist: projection.artist.as_deref(),
+                        album: projection.album.as_deref(),
                         duration: snapshot.duration_ms.map(Duration::from_millis),
                         ..MediaMetadata::default()
                     }) {

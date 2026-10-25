@@ -13,10 +13,12 @@ export function useFfmpegDependency() {
   const previewTimer = useRef<number | null>(null);
   const [snapshot, setSnapshot] = useState<FfmpegDependencySnapshot>(() => {
     if (!preview) return checkingFfmpegDependency;
+    const systemPreview = new URLSearchParams(window.location.search).get("platform") === "linux";
+    const initial = { ...checkingFfmpegDependency, managedBySystem: systemPreview };
     return new URLSearchParams(window.location.search).get("ffmpeg") === "missing"
-      ? { ...checkingFfmpegDependency, status: "missing" }
+      ? { ...initial, status: "missing" }
       : {
-          ...checkingFfmpegDependency,
+          ...initial,
           status: "ready",
           installedBytes: 148 * 1024 * 1024,
         };
@@ -51,6 +53,10 @@ export function useFfmpegDependency() {
 
   const install = useCallback(async () => {
     try {
+      if (preview && snapshot.managedBySystem) {
+        setCommandError(null);
+        return;
+      }
       if (preview) {
         let downloadedBytes = 0;
         const totalBytes = 96 * 1024 * 1024;
@@ -82,7 +88,7 @@ export function useFfmpegDependency() {
     } catch (error) {
       setCommandError(errorMessage(error));
     }
-  }, [preview]);
+  }, [preview, snapshot.managedBySystem]);
 
   const cancel = useCallback(async () => {
     try {

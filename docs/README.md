@@ -5,6 +5,7 @@
 | [PRODUCT.md](PRODUCT.md) | 当前产品范围与非目标 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 分层、所有权和关键数据流 |
 | [STRUCTURE.md](STRUCTURE.md) | 目录职责与文档规则 |
+| [LINUX.md](LINUX.md) | Arch Linux / Wayland 环境、构建、能力与验收边界 |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | 环境、实现、安全和测试规范 |
 | [STATUS.md](STATUS.md) | 当前版本、开放门禁与风险 |
 | [ROADMAP.md](ROADMAP.md) | 交付顺序与未来边界 |
@@ -16,6 +17,6 @@
 | [releases/](releases/) | 正式版发布说明 |
 | [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) | 自动生成的依赖许可证 |
 
-当前入口：[0.2.1 计划](plans/0.2.1.md) · [UI 方案与取舍](plans/0.2.1-ui.md) · [验证记录](plans/0.2.1-validation.md)；0.2.0 已发布并归入发行说明。
+当前入口：[0.3.0 计划与验证](plans/0.3.0.md) · [Arch Linux / Wayland](LINUX.md)；[0.2.1](plans/0.2.1.md) 保留原有发行门禁，0.2.0 已发布并归入发行说明。
 
 冲突时优先级：当前代码/测试/构建结果 > Accepted ADR > 架构与开发规范 > 状态与路线图 > 其他说明。发现不一致必须在同一任务修正文档，不新增逐日流水或复制同一事实到多处。

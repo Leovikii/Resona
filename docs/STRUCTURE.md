@@ -9,8 +9,8 @@ Resona/
 │  │  ├─ App.tsx
 │  │  ├─ AudioCompressionApp.tsx
 │  │  ├─ ApplicationUpdateDialog.tsx
-│  │  ├─ DesktopLyricsApp.tsx
 │  │  └─ preferences.tsx
+│  ├─ windows/                     # 歌词与压缩等独立窗口入口
 │  ├─ features/
 │  │  ├─ playback/                 # 播放快照与控制意图
 │  │  ├─ playlists/                # 用户/默认列表工作流
@@ -38,16 +38,21 @@ Resona/
 │  │  ├─ metadata.rs               # 按需元数据与有界封面缓存
 │  │  ├─ lyrics.rs                 # 本地歌词解析
 │  │  ├─ compression.rs            # 扫描、并行转换与任务快照
-│  │  ├─ ffmpeg_dependency.rs      # 按需依赖下载与验证
+│  │  ├─ ffmpeg_dependency/        # Windows 固定下载 / Linux 系统 FFmpeg adapters（DTO 在同名 .rs）
 │  │  ├─ application_update.rs     # Release 选择与 updater
 │  │  ├─ application_lifetime.rs   # 退出、托盘与辅助窗口协调
-│  │  └─ platform/                 # Windows/非 Windows adapters
-│  │     ├─ media_session/
+│  │  └─ platform/                 # Windows / Linux adapters
+│  │     ├─ media_session/            # Windows souvlaki / Linux MPRIS
 │  │     ├─ playback_projection.rs
 │  │     ├─ taskbar.rs
 │  │     ├─ tray.rs
+│  │     ├─ window_controls.rs     # GTK 原生标题栏按钮命中区域
+│  │     ├─ window_geometry.rs     # 内容区逻辑尺寸 / Wayland 几何适配
+│  │     ├─ file_commit.rs         # 不覆盖原子提交
+│  │     ├─ distribution.rs        # updater 平台支持
+│  │     ├─ compression_tools.rs   # 默认测试/开发工具路径
 │  │     ├─ window_material.rs
-│  │     └─ desktop_lyrics/
+│  │     └─ desktop_lyrics/           # Win32 / Wayland layer-shell
 │  ├─ capabilities/                # Tauri 最小权限
 │  ├─ icons/                       # 应用、任务栏与文件关联图标
 │  ├─ resources/                   # 运行时占位资源

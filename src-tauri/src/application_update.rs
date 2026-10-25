@@ -23,6 +23,7 @@ const UPDATER_PUBLIC_KEY: &str = match option_env!("RESONA_UPDATER_PUBLIC_KEY") 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApplicationUpdateSnapshot {
+    pub supported: bool,
     pub current_version: String,
     pub current_is_prerelease: bool,
     pub receive_prerelease_updates: bool,
@@ -143,10 +144,12 @@ impl ApplicationUpdateService {
     pub fn snapshot(&self) -> Result<ApplicationUpdateSnapshot, ApplicationUpdateFailure> {
         let current = current_version()?;
         Ok(ApplicationUpdateSnapshot {
+            supported: crate::platform::distribution::supports_updater(),
             current_version: current.to_string(),
             current_is_prerelease: !current.pre.is_empty(),
             receive_prerelease_updates: self.lock_state()?.receive_prerelease_updates,
-            updater_configured: !UPDATER_PUBLIC_KEY.trim().is_empty(),
+            updater_configured: crate::platform::distribution::supports_updater()
+                && !UPDATER_PUBLIC_KEY.trim().is_empty(),
         })
     }
 
@@ -198,7 +201,9 @@ impl ApplicationUpdateService {
         app: AppHandle,
         expected_version: String,
     ) -> Result<(), ApplicationUpdateFailure> {
-        if UPDATER_PUBLIC_KEY.trim().is_empty() {
+        if !crate::platform::distribution::supports_updater()
+            || UPDATER_PUBLIC_KEY.trim().is_empty()
+        {
             return Err(ApplicationUpdateFailure::new(
                 "updater_not_configured",
                 "this build does not contain an updater verification public key",
@@ -309,6 +314,12 @@ impl ApplicationUpdateService {
 
     fn discover_update(&self) -> Result<ApplicationUpdateCheckResult, ApplicationUpdateFailure> {
         let current = current_version()?;
+        if !crate::platform::distribution::supports_updater() {
+            return Ok(ApplicationUpdateCheckResult {
+                current_version: current.to_string(),
+                update: None,
+            });
+        }
         let include_prerelease = self.lock_state()?.receive_prerelease_updates;
         let selected = select_release(fetch_github_releases()?, include_prerelease, None);
         Ok(ApplicationUpdateCheckResult {
@@ -516,6 +527,16 @@ fn updater_failure(error: impl std::fmt::Display) -> ApplicationUpdateFailure {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn unsupported_platforms_do_not_offer_windows_releases() {
+        if crate::platform::distribution::supports_updater() {
+            return;
+        }
+        let service = ApplicationUpdateService::load(Path::new("/nonexistent-resona-test"));
+        assert!(!service.snapshot().unwrap().updater_configured);
+        assert!(service.discover_update().unwrap().update.is_none());
+    }
 
     #[test]
     fn preview_channel_uses_full_semver_ordering_across_alpha_beta_rc_and_final() {

@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+pub mod compression_tools;
 pub mod desktop_lyrics;
+pub mod distribution;
+pub mod file_commit;
 pub mod media_session;
 pub mod playback_projection;
 pub mod taskbar;
 pub mod tray;
+pub mod window_controls;
+pub mod window_geometry;
 pub mod window_material;
 
 #[cfg(target_os = "windows")]

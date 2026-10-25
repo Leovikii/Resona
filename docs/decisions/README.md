@@ -34,4 +34,8 @@ ADR 记录会长期影响代码、依赖或产品边界且无法仅从实现看�
 
 - [0027 - 压缩活动分支、整体进度与关闭询问](0027-compression-progress-and-close-dialog.md)
 
+- [0028 - Arch Linux / Wayland 初始兼容](0028-arch-linux-wayland-baseline.md)
+
 新 ADR 不修改历史决定的原文；如果决定被替代，新增 ADR 并将旧记录标记为 `Superseded`。
+
+- [0029 - Wayland 置顶桌面歌词与 KDE 媒体集成](0029-wayland-lyrics-and-mpris.md)
