@@ -35,8 +35,17 @@ export function collectArtifacts(input, output, version, identity) {
   if (!recipe.includes(`sha256sums=('${payloadHash}')`) || !srcinfo.includes(payloadHash) || !recipe.includes(`/${identity.tag}/${payload}`)) throw new Error("Arch recipe does not match payload");
   mkdirSync(output, { recursive: true });
   for (const name of [installer, `${installer}.sig`]) copyFileSync(resolve(windows, name), resolve(output, name));
-  for (const name of [payload, packages[0], "PKGBUILD", ".SRCINFO", "build.json", "arch-packages.txt"]) copyFileSync(resolve(linux, name), resolve(output, name));
+  for (const name of [payload, packages[0], "PKGBUILD", "build.json", "arch-packages.txt"]) copyFileSync(resolve(linux, name), resolve(output, name));
+  // GitHub renames dotfiles (for example .SRCINFO to default.SRCINFO) on upload.
+  copyFileSync(resolve(linux, ".SRCINFO"), resolve(output, "SRCINFO"));
   return { installer, manifest: updateManifest(version, identity, installer, readFileSync(resolve(output, `${installer}.sig`), "utf8")) };
+}
+
+export function verifyDraftAssets(uploaded, expected) {
+  const actual = uploaded.assets.map((asset) => asset.name).sort();
+  if (!uploaded.isDraft || JSON.stringify(actual) !== JSON.stringify([...expected].sort())) {
+    throw new Error(`Draft release asset list is incomplete (isDraft=${uploaded.isDraft}); expected: ${JSON.stringify([...expected].sort())}; actual: ${JSON.stringify(actual)}`);
+  }
 }
 
 function verifyFile(file, encodedSignature, encodedPublicKey, scratch) {
@@ -76,7 +85,7 @@ function publish() {
   gh(["release", "upload", identity.tag, ...readdirSync(output).map((name) => resolve(output, name))]);
   const uploaded = JSON.parse(gh(["release", "view", identity.tag, "--json", "assets,isDraft"]));
   const expected = readdirSync(output).sort();
-  if (!uploaded.isDraft || JSON.stringify(uploaded.assets.map((asset) => asset.name).sort()) !== JSON.stringify(expected)) throw new Error("Draft release asset list is incomplete");
+  verifyDraftAssets(uploaded, expected);
   gh(["release", "edit", identity.tag, "--draft=false", `--latest=${prerelease ? "false" : "true"}`]);
 }
 
