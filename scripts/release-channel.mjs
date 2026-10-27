@@ -95,7 +95,26 @@ export function previousPackageVersion(base, root = projectRoot) {
   }
 }
 
-export function shouldCreateRelease({ currentVersion, previousVersion, tagExists }) {
+export function buildIdentity(version, runNumber, runAttempt, sha) {
+  parseReleaseVersion(version);
+  for (const value of [runNumber, runAttempt]) {
+    if (!/^[1-9]\d*$/.test(String(value)) || !Number.isSafeInteger(Number(value))) {
+      throw new Error("Build numbers must be positive safe integers");
+    }
+  }
+  if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error("A full commit SHA is required");
+  const id = `b${runNumber}.${runAttempt}-g${sha.slice(0, 7)}`;
+  return {
+    runNumber: Number(runNumber), runAttempt: Number(runAttempt), sha, id,
+    tag: parseReleaseVersion(version).prerelease ? `preview-v${version}-${id}` : `v${version}`,
+  };
+}
+
+export function affectsDelivery(paths) {
+  return paths.some((path) => /^(src\/|src-tauri\/|scripts\/|packaging\/|\.github\/workflows\/|package(?:-lock)?\.json$|tsconfig|vite\.config|LICENSE$|docs\/THIRD_PARTY_LICENSES\.md$)/.test(path));
+}
+
+export function shouldCreateRelease({ currentVersion, previousVersion, tagExists, deliveryChanged = true }) {
   if (previousVersion === null) return false;
   const comparison = compareReleaseVersions(currentVersion, previousVersion);
   if (comparison < 0) {
@@ -111,13 +130,18 @@ export function shouldCreateRelease({ currentVersion, previousVersion, tagExists
   if (previousVersion !== currentVersion && tagExists) {
     throw new Error(`Release tag already exists: v${currentVersion}`);
   }
-  return !tagExists;
+  return deliveryChanged && !tagExists;
 }
 
 export function releaseInspection({ base, root = projectRoot } = {}) {
   const parsed = readProjectVersion(root);
   const previousVersion = previousPackageVersion(base, root);
-  const tag = `v${parsed.version}`;
+  const identity = process.env.GITHUB_RUN_NUMBER
+    ? buildIdentity(parsed.version, process.env.GITHUB_RUN_NUMBER, process.env.GITHUB_RUN_ATTEMPT, process.env.GITHUB_SHA)
+    : null;
+  const tag = identity?.tag ?? `v${parsed.version}`;
+  const paths = base ? execFileSync("git", ["diff", "--name-only", base, "HEAD"], { cwd: root, encoding: "utf8" }).trim().split("\n") : [];
+
   const tagExists = execFileSync(
     "git",
     ["tag", "--list", tag],
@@ -127,10 +151,12 @@ export function releaseInspection({ base, root = projectRoot } = {}) {
     currentVersion: parsed.version,
     previousVersion,
     tagExists,
+    deliveryChanged: affectsDelivery(paths),
   });
   return {
     ...parsed,
     previousVersion,
+    identity,
     release,
     tag,
   };

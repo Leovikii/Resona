@@ -3490,6 +3490,7 @@ dependencies = [
  "lofty",
  "log",
  "lrc",
+ "minisign-verify",
  "mpris-server",
  "rcue",
  "rodio",

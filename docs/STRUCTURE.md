@@ -39,7 +39,7 @@ Resona/
 │  │  ├─ lyrics.rs                 # 本地歌词解析
 │  │  ├─ compression.rs            # 扫描、并行转换与任务快照
 │  │  ├─ ffmpeg_dependency/        # Windows 固定下载 / Linux 系统 FFmpeg adapters（DTO 在同名 .rs）
-│  │  ├─ application_update.rs     # Release 选择与 updater
+│  │  ├─ application_update.rs     # Release 选择、构建身份与签名清单 / updater
 │  │  ├─ application_lifetime.rs   # 退出、托盘与辅助窗口协调
 │  │  └─ platform/                 # Windows / Linux adapters
 │  │     ├─ media_session/            # Windows souvlaki / Linux MPRIS
@@ -57,7 +57,8 @@ Resona/
 │  ├─ icons/                       # 应用、任务栏与文件关联图标
 │  ├─ resources/                   # 运行时占位资源
 │  └─ tauri.conf.json
-├─ scripts/                        # Node 构建/测试工具
+├─ packaging/arch/                 # Linux 桌面入口与音频打开方式
+├─ scripts/                        # 构建、发布、Arch 配方与测试工具
 ├─ tests/                          # 前端与发布规则测试
 ├─ assets/                         # 品牌 SVG、图标规范与直接引用正式资源的预览页
 ├─ docs/                           # 当前规范、ADR 和活动计划

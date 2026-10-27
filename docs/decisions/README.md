@@ -39,3 +39,5 @@ ADR 记录会长期影响代码、依赖或产品边界且无法仅从实现看�
 新 ADR 不修改历史决定的原文；如果决定被替代，新增 ADR 并将旧记录标记为 `Superseded`。
 
 - [0029 - Wayland 置顶桌面歌词与 KDE 媒体集成](0029-wayland-lyrics-and-mpris.md)
+
+- [0030 - 同版本预览构建、Arch 分发与更新归属](0030-preview-builds-and-linux-distribution.md)

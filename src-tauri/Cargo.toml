@@ -21,6 +21,8 @@ lofty = "0.24.0"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 hound = "3.5.1"
 base64 = "0.22.1"
+# Already used by Tauri updater; verifies the build identity as well as the installer.
+minisign-verify = "=0.2.5"
 fastrand = "2.3.0"
 futures-util = "0.3"
 lrc = "0.2.0"

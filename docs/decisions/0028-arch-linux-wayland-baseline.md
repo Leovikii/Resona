@@ -2,6 +2,7 @@
 
 - 状态：Accepted；桌面歌词与 MPRIS 的延期由 [ADR 0029](0029-wayland-lyrics-and-mpris.md) 修订
 - 日期：2026-10-25
+- 分发/更新与 CI/CD 由已接受的 [ADR 0030](0030-preview-builds-and-linux-distribution.md) 补充修订：Arch/AUR 安装分发、文件打开关联和包管理器更新引导；以下保留最初本机预览基线。
 - 授权：所有者要求开始下一版本并兼容本机 Linux，当前只要求 Arch Linux 与 Wayland。
 - 补充 ADR 0001、0005、0012、0022、0024 的平台范围；Windows 的既有约束继续有效。
 

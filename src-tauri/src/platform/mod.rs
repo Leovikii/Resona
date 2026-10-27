@@ -25,5 +25,11 @@ pub fn initialize_process() {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+pub fn initialize_process() {
+    // Run before GTK and worker threads: native Wayland is required for layer-shell lyrics.
+    std::env::set_var("GDK_BACKEND", "wayland");
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 pub fn initialize_process() {}

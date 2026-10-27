@@ -19,6 +19,8 @@ const previewUpdateAvailable =
   && new URLSearchParams(window.location.search).get("update") === "available";
 
 const previewUpdateRelease: ApplicationUpdateRelease = {
+  tag: "v0.1.0",
+  build: null,
   version: "0.1.0",
   title: "Resona 0.1.0",
   notes: [
@@ -101,7 +103,7 @@ export function useApplicationUpdate() {
   }, [snapshot]);
 
   const check = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
-    if (operationRef.current !== "idle") return null;
+    if (!snapshot.supported || operationRef.current !== "idle") return null;
     operationRef.current = "checking";
     setStatus("checking");
     setChecked(false);
@@ -124,7 +126,7 @@ export function useApplicationUpdate() {
       operationRef.current = "idle";
       setStatus("idle");
     }
-  }, [snapshot.currentVersion]);
+  }, [snapshot.currentVersion, snapshot.supported]);
 
   const install = useCallback(async () => {
     if (!available || operationRef.current !== "idle") return false;
@@ -134,7 +136,7 @@ export function useApplicationUpdate() {
     setError(null);
     try {
       if (isTauriRuntime()) {
-        await invokeTauri<void>("install_application_update", { version: available.version });
+        await invokeTauri<void>("install_application_update", { tag: available.tag });
       }
       return true;
     } catch (nextError) {

@@ -12,3 +12,5 @@
 后续修复按实际反馈确定范围；标签编辑、额外格式等能力不能以 UI 补丁扩大范围。
 
 Linux 当前提供本机构建开发预览，复用领域层与 React UI；已实现 layer-shell 桌面歌词和 KDE MPRIS；正式发行格式、签名和多屏验收仍有开放门禁。
+
+[同版本的跨平台预览构建](plans/0.3.0-preview-delivery.md)已接受并实现：Windows NSIS/Tauri 签名更新、Arch/AUR 安装和包管理器更新引导，保持 `0.3.0-alpha.1`。待 main Actions 发布、AUR 配置与 Windows 原生覆盖更新验收。

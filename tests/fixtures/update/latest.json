@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "version": "0.3.0-alpha.1",
+  "tag": "preview-v0.3.0-alpha.1-b42.1-gaaaaaaa",
+  "channel": "preview",
+  "build": {
+    "runNumber": 42,
+    "runAttempt": 1,
+    "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "notes": "Resona 0.3.0-alpha.1 · b42.1-gaaaaaaa",
+  "pub_date": "2026-10-27T00:00:00Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "installer-signature",
+      "url": "https://github.com/Leovikii/Resona/releases/download/preview-v0.3.0-alpha.1-b42.1-gaaaaaaa/Resona_0.3.0-alpha.1_b42.1-gaaaaaaa_windows_x86_64-setup.exe"
+    }
+  }
+}

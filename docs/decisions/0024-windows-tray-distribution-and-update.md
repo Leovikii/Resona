@@ -2,6 +2,7 @@
 
 - 状态：Accepted；rc.2 修订启动更新检查，0.1.0 修订发布签名策略
 - 日期：2026-07-23，修订于 2026-07-24、2026-07-26
+- 分发/更新与 CI/CD 由已接受的 [ADR 0030](0030-preview-builds-and-linux-distribution.md) 补充修订：同版本预览构建、跨平台完整 Release 和 Windows 清单签名；以下保留原始 Windows 基线记录。
 
 ## 托盘与退出
 

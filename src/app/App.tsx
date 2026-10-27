@@ -1,3 +1,4 @@
+import PackageManagerUpdateDialog from "./PackageManagerUpdateDialog";
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode, WheelEvent } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -196,6 +197,7 @@ export default function App() {
   }, [applicationLifetime.closePromptOpen, applicationLifetime.exitConfirmationOpen]);
 
   useEffect(() => {
+    if (!applicationUpdate.snapshot.supported) return;
     let timer = 0;
     const frame = window.requestAnimationFrame(() => {
       if (startupUpdateCheckStarted) return;
@@ -210,7 +212,7 @@ export default function App() {
       window.cancelAnimationFrame(frame);
       window.clearTimeout(timer);
     };
-  }, [applicationUpdate.check, openUpdateDialog]);
+  }, [applicationUpdate.check, applicationUpdate.snapshot.supported, openUpdateDialog]);
 
   const rejectedImportCount = library.rejectedCount + playback.defaultRejectedCount;
   const rejectedImportReasons = useMemo(() => [...new Set([
@@ -1565,10 +1567,13 @@ function SettingsView({ applicationLifetime, applicationUpdate, busy, desktopLyr
     }
     setDesktopLyrics({ fontSize: value });
   }, [desktopLyrics, lyricsPreferences.fontSize, setDesktopLyrics]);
+  const [packageUpdateOpened, setPackageUpdateOpened] = useState(false);
   const updateButtonLabel = !applicationUpdate.snapshot.supported
     ? t("settings.versionManual", { version: applicationUpdate.snapshot.currentVersion })
     : applicationUpdate.available
-    ? `v${applicationUpdate.snapshot.currentVersion} -> v${applicationUpdate.available.version}`
+    ? applicationUpdate.available.version === applicationUpdate.snapshot.currentVersion && applicationUpdate.available.build
+      ? t("settings.buildAvailable", { build: applicationUpdate.available.build })
+      : `v${applicationUpdate.snapshot.currentVersion} -> v${applicationUpdate.available.version}`
     : applicationUpdate.status === "checking"
       ? t("settings.versionChecking", { version: applicationUpdate.snapshot.currentVersion })
       : applicationUpdate.checked
@@ -1589,7 +1594,10 @@ function SettingsView({ applicationLifetime, applicationUpdate, busy, desktopLyr
       <section className="settings-section settings-about-section">
         <Text className="settings-section-title" fw={650}>{t("settings.about")}</Text>
         <SettingRow label={t("settings.version")}>
-          {!applicationUpdate.snapshot.supported ? <Text size="xs">{updateButtonLabel}</Text> : <Button
+          {!applicationUpdate.snapshot.supported ? <Stack align="flex-end" gap={6}>
+            <Text size="xs">{updateButtonLabel}</Text>
+            <Button onClick={() => setPackageUpdateOpened(true)} size="xs" variant="light">{t("settings.packageUpdateHelp")}</Button>
+          </Stack> : <Button
             leftSection={applicationUpdate.available ? <Download size={15} /> : <RefreshCw size={15} />}
             loading={applicationUpdate.status === "checking"}
             onClick={() => void handleUpdateAction()}
@@ -1599,6 +1607,10 @@ function SettingsView({ applicationLifetime, applicationUpdate, busy, desktopLyr
             {updateButtonLabel}
           </Button>}
         </SettingRow>
+        {applicationUpdate.snapshot.currentBuild && <SettingRow label={t("settings.build")}>
+          <Text size="xs" style={{ overflowWrap: "anywhere" }}>{applicationUpdate.snapshot.currentBuild}</Text>
+        </SettingRow>}
+        <PackageManagerUpdateDialog opened={packageUpdateOpened} onClose={() => setPackageUpdateOpened(false)} prerelease={applicationUpdate.snapshot.currentIsPrerelease} />
         {applicationUpdate.snapshot.supported && <SettingRow label={t("settings.prereleaseUpdates")}>
           <Switch
             aria-label={t("settings.prereleaseUpdates")}

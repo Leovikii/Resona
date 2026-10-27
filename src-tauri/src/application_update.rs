@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
 
+mod manifest;
+use manifest::{BuildIdentity, PlatformAsset};
+
 const STATE_FILE: &str = "application-update.json";
 const GITHUB_RELEASES_URL: &str =
     "https://api.github.com/repos/Leovikii/Resona/releases?per_page=100&page=";
@@ -25,6 +28,7 @@ const UPDATER_PUBLIC_KEY: &str = match option_env!("RESONA_UPDATER_PUBLIC_KEY") 
 pub struct ApplicationUpdateSnapshot {
     pub supported: bool,
     pub current_version: String,
+    pub current_build: Option<String>,
     pub current_is_prerelease: bool,
     pub receive_prerelease_updates: bool,
     pub updater_configured: bool,
@@ -33,6 +37,8 @@ pub struct ApplicationUpdateSnapshot {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApplicationUpdateRelease {
+    pub tag: String,
+    pub build: Option<String>,
     pub version: String,
     pub title: String,
     pub notes: String,
@@ -101,6 +107,13 @@ struct SelectedRelease {
     version: Version,
     release: GithubRelease,
     manifest_url: String,
+    build: Option<BuildIdentity>,
+}
+
+#[derive(Clone)]
+struct VerifiedRelease {
+    selected: SelectedRelease,
+    asset: PlatformAsset,
 }
 
 pub struct ApplicationUpdateService {
@@ -108,6 +121,7 @@ pub struct ApplicationUpdateService {
     state: Mutex<StoredApplicationUpdate>,
     check_active: Mutex<bool>,
     install_cancel: Mutex<Option<AbortHandle>>,
+    selected: Mutex<Option<VerifiedRelease>>,
 }
 
 impl ApplicationUpdateService {
@@ -138,6 +152,7 @@ impl ApplicationUpdateService {
             state: Mutex::new(state),
             check_active: Mutex::new(false),
             install_cancel: Mutex::new(None),
+            selected: Mutex::new(None),
         }
     }
 
@@ -146,6 +161,7 @@ impl ApplicationUpdateService {
         Ok(ApplicationUpdateSnapshot {
             supported: crate::platform::distribution::supports_updater(),
             current_version: current.to_string(),
+            current_build: BuildIdentity::current().map(|build| build.id()),
             current_is_prerelease: !current.pre.is_empty(),
             receive_prerelease_updates: self.lock_state()?.receive_prerelease_updates,
             updater_configured: crate::platform::distribution::supports_updater()
@@ -199,7 +215,7 @@ impl ApplicationUpdateService {
     pub async fn install(
         self: &Arc<Self>,
         app: AppHandle,
-        expected_version: String,
+        expected_tag: String,
     ) -> Result<(), ApplicationUpdateFailure> {
         if !crate::platform::distribution::supports_updater()
             || UPDATER_PUBLIC_KEY.trim().is_empty()
@@ -209,25 +225,34 @@ impl ApplicationUpdateService {
                 "this build does not contain an updater verification public key",
             ));
         }
-        let expected =
-            Version::parse(expected_version.trim_start_matches('v')).map_err(|error| {
+        let verified = self
+            .selected
+            .lock()
+            .map_err(updater_failure)?
+            .clone()
+            .filter(|release| release.selected.release.tag_name == expected_tag)
+            .ok_or_else(|| {
                 ApplicationUpdateFailure::new(
-                    "update_version_invalid",
-                    format!("invalid requested update version: {error}"),
+                    "update_selection_expired",
+                    "check for updates again before installing",
                 )
             })?;
-        let service = Arc::clone(self);
-        let selected = tauri::async_runtime::spawn_blocking(move || {
-            service.discover_selected_release(Some(&expected))
-        })
-        .await
-        .map_err(|error| {
-            ApplicationUpdateFailure::new(
-                "update_check_task_failed",
-                format!("update install discovery task failed: {error}"),
-            )
-        })??;
-
+        let selected = verified.selected;
+        let current = current_version()?;
+        let enabled = self.lock_state()?.receive_prerelease_updates;
+        if !manifest::is_newer(
+            &selected.version,
+            selected.build.as_ref(),
+            &current,
+            BuildIdentity::current().as_ref(),
+            enabled,
+        ) {
+            return Err(ApplicationUpdateFailure::new(
+                "update_selection_expired",
+                "selected build is not an allowed update",
+            ));
+        }
+        let expected_version = selected.version.clone();
         let endpoint: tauri::Url = selected.manifest_url.parse().map_err(|error| {
             ApplicationUpdateFailure::new(
                 "update_manifest_url_invalid",
@@ -239,6 +264,10 @@ impl ApplicationUpdateService {
             .endpoints(vec![endpoint])
             .map_err(updater_failure)?
             .pubkey(UPDATER_PUBLIC_KEY)
+            .timeout(Duration::from_secs(15))
+            .version_comparator(move |installed, release| {
+                installed == current && release.version == expected_version
+            })
             .build()
             .map_err(updater_failure)?;
         let update = updater
@@ -251,7 +280,10 @@ impl ApplicationUpdateService {
                     "the selected update is no longer newer than this installation",
                 )
             })?;
-        if update.version != selected.version.to_string() {
+        if update.version != selected.version.to_string()
+            || update.download_url.as_str() != verified.asset.url
+            || update.signature != verified.asset.signature
+        {
             return Err(ApplicationUpdateFailure::new(
                 "update_manifest_version_mismatch",
                 format!(
@@ -298,10 +330,9 @@ impl ApplicationUpdateService {
                     "update_cancelled",
                     "application update download was cancelled",
                 )
-            })?
-            .map_err(updater_failure);
+            });
         self.lock_install_cancel()?.take();
-        let bytes = bytes?;
+        let bytes = bytes?.map_err(updater_failure)?;
         update.install(bytes).map_err(updater_failure)
     }
 
@@ -320,27 +351,64 @@ impl ApplicationUpdateService {
                 update: None,
             });
         }
+        if UPDATER_PUBLIC_KEY.trim().is_empty() {
+            return Ok(ApplicationUpdateCheckResult {
+                current_version: current.to_string(),
+                update: None,
+            });
+        }
         let include_prerelease = self.lock_state()?.receive_prerelease_updates;
-        let selected = select_release(fetch_github_releases()?, include_prerelease, None);
+        let candidate =
+            select_release(fetch_github_releases()?, include_prerelease).filter(|release| {
+                manifest::is_newer(
+                    &release.version,
+                    release.build.as_ref(),
+                    &current,
+                    BuildIdentity::current().as_ref(),
+                    include_prerelease,
+                )
+            });
+        let verified = candidate
+            .map(|mut selected| {
+                let bytes = fetch_asset(&selected.manifest_url, 256 * 1024)?;
+                let signature_url = selected
+                    .release
+                    .assets
+                    .iter()
+                    .find(|asset| asset.name == "latest.json.sig")
+                    .ok_or_else(|| updater_failure("missing manifest signature"))?
+                    .browser_download_url
+                    .clone();
+                let signature = String::from_utf8(fetch_asset(&signature_url, 16 * 1024)?)
+                    .map_err(updater_failure)?;
+                let (build, asset) = manifest::verified_asset(
+                    &bytes,
+                    &signature,
+                    UPDATER_PUBLIC_KEY,
+                    &selected.release.tag_name,
+                    &selected.version,
+                )?;
+                if !selected
+                    .release
+                    .assets
+                    .iter()
+                    .any(|entry| entry.browser_download_url == asset.url)
+                {
+                    return Err(updater_failure(
+                        "signed installer is missing from selected release",
+                    ));
+                }
+                selected.build = Some(build);
+                Ok(VerifiedRelease { selected, asset })
+            })
+            .transpose()?;
+        let update = verified
+            .as_ref()
+            .map(|release| release_snapshot(&release.selected));
+        *self.selected.lock().map_err(updater_failure)? = verified;
         Ok(ApplicationUpdateCheckResult {
             current_version: current.to_string(),
-            update: selected
-                .filter(|release| release.version > current)
-                .map(|release| release_snapshot(&release)),
-        })
-    }
-
-    fn discover_selected_release(
-        &self,
-        expected_version: Option<&Version>,
-    ) -> Result<SelectedRelease, ApplicationUpdateFailure> {
-        let include_prerelease = self.lock_state()?.receive_prerelease_updates;
-        let releases = fetch_github_releases()?;
-        select_release(releases, include_prerelease, expected_version).ok_or_else(|| {
-            ApplicationUpdateFailure::new(
-                "update_release_not_found",
-                "GitHub Releases did not contain a compatible signed updater release",
-            )
+            update,
         })
     }
 
@@ -456,10 +524,35 @@ fn fetch_github_releases() -> Result<Vec<GithubRelease>, ApplicationUpdateFailur
     Ok(releases)
 }
 
+fn fetch_asset(url: &str, limit: u64) -> Result<Vec<u8>, ApplicationUpdateFailure> {
+    use std::io::Read;
+    if !url.starts_with("https://github.com/Leovikii/Resona/releases/download/") {
+        return Err(updater_failure(
+            "update asset URL is outside the release repository",
+        ));
+    }
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(5)))
+        .timeout_global(Some(Duration::from_secs(15)))
+        .build()
+        .into();
+    let mut response = agent.get(url).call().map_err(updater_failure)?;
+    let mut bytes = Vec::new();
+    response
+        .body_mut()
+        .as_reader()
+        .take(limit + 1)
+        .read_to_end(&mut bytes)
+        .map_err(updater_failure)?;
+    if bytes.len() as u64 > limit {
+        return Err(updater_failure("update asset exceeds size limit"));
+    }
+    Ok(bytes)
+}
+
 fn select_release(
     releases: Vec<GithubRelease>,
     include_prerelease: bool,
-    expected_version: Option<&Version>,
 ) -> Option<SelectedRelease> {
     releases
         .into_iter()
@@ -467,15 +560,12 @@ fn select_release(
             if release.draft {
                 return None;
             }
-            let version = Version::parse(release.tag_name.trim_start_matches('v')).ok()?;
+            let (version, build) = manifest::parse_tag(&release.tag_name)?;
             let version_is_prerelease = !version.pre.is_empty();
             if version_is_prerelease != release.prerelease {
                 return None;
             }
             if version_is_prerelease && !include_prerelease {
-                return None;
-            }
-            if expected_version.is_some_and(|expected| expected != &version) {
                 return None;
             }
             let manifest_url = release
@@ -488,9 +578,17 @@ fn select_release(
                 version,
                 release,
                 manifest_url,
+                build,
             })
         })
-        .max_by(|left, right| left.version.cmp(&right.version))
+        .max_by(|left, right| {
+            left.version.cmp_precedence(&right.version).then_with(|| {
+                left.build
+                    .as_ref()
+                    .map(BuildIdentity::order)
+                    .cmp(&right.build.as_ref().map(BuildIdentity::order))
+            })
+        })
 }
 
 fn release_snapshot(selected: &SelectedRelease) -> ApplicationUpdateRelease {
@@ -499,12 +597,15 @@ fn release_snapshot(selected: &SelectedRelease) -> ApplicationUpdateRelease {
         .assets
         .iter()
         .find(|asset| {
-            asset.name.ends_with("_windows_x64-setup.exe")
+            asset.name.ends_with("_windows_x86_64-setup.exe")
+                || asset.name.ends_with("_windows_x64-setup.exe")
                 || asset.name.ends_with("_windows_arm64-setup.exe")
                 || asset.name.ends_with("_windows_x86-setup.exe")
         })
         .map(|asset| asset.size);
     ApplicationUpdateRelease {
+        tag: release.tag_name.clone(),
+        build: selected.build.as_ref().map(BuildIdentity::id),
         version: selected.version.to_string(),
         title: release
             .name
@@ -548,7 +649,6 @@ mod tests {
                 release("v0.1.0", false),
             ],
             true,
-            None,
         )
         .expect("selected release");
         assert_eq!(selected.version, Version::parse("0.1.0").unwrap());
@@ -564,7 +664,6 @@ mod tests {
                 release("v0.1.0", false),
             ],
             false,
-            None,
         )
         .expect("stable release");
         assert_eq!(selected.version, Version::parse("0.1.0").unwrap());
@@ -574,15 +673,32 @@ mod tests {
     fn inconsistent_github_prerelease_flag_and_drafts_are_rejected() {
         let mut draft = release("v1.0.0", false);
         draft.draft = true;
-        assert!(
-            select_release(vec![release("v1.1.0-beta.1", false), draft], true, None,).is_none()
-        );
+        assert!(select_release(vec![release("v1.1.0-beta.1", false), draft], true).is_none());
     }
 
     #[test]
     fn an_empty_or_incompatible_release_list_means_no_update() {
-        assert!(select_release(Vec::new(), true, None).is_none());
-        assert!(select_release(vec![release("v1.0.0-beta.1", true)], false, None).is_none());
+        assert!(select_release(Vec::new(), true).is_none());
+        assert!(select_release(vec![release("v1.0.0-beta.1", true)], false).is_none());
+    }
+
+    #[test]
+    fn repeated_preview_tags_sort_by_build_and_remain_opt_in() {
+        let selected = select_release(
+            vec![
+                release("preview-v0.3.0-alpha.1-b9.9-gaaaaaaa", true),
+                release("preview-v0.3.0-alpha.1-b10.1-gbbbbbbb", true),
+                release("preview-v0.3.0-alpha.1-b10.2-gccccccc", true),
+            ],
+            true,
+        )
+        .unwrap();
+        assert_eq!(selected.build.unwrap().order(), (10, 2));
+        assert!(select_release(
+            vec![release("preview-v0.3.0-alpha.1-b10.2-gccccccc", true)],
+            false,
+        )
+        .is_none());
     }
 
     #[test]

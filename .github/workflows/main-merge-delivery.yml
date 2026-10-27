@@ -16,6 +16,9 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   CARGO_TERM_COLOR: always
+  RESONA_BUILD_NUMBER: ${{ github.run_number }}
+  RESONA_BUILD_ATTEMPT: ${{ github.run_attempt }}
+  RESONA_BUILD_SHA: ${{ github.sha }}
 
 defaults:
   run:
@@ -29,7 +32,6 @@ concurrency:
 jobs:
   windows-validation:
     name: Windows validation
-    if: github.event_name == 'pull_request'
     runs-on: windows-latest
     timeout-minutes: 30
     concurrency:
@@ -83,11 +85,12 @@ jobs:
         run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: Validate release version
-        run: node scripts/release-channel.mjs --base "${{ github.event.pull_request.base.sha }}"
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: node scripts/release-channel.mjs --base "$BASE_SHA"
 
   linux-validation:
     name: Arch Linux validation
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     container:
       image: archlinux:base-devel@sha256:3cbf69d2d5958d6a294f3722c5668e6187c4df8e00fa27f72352f0bf83e495e1
@@ -156,53 +159,157 @@ jobs:
         id: release
         run: node scripts/release-channel.mjs --base "${{ github.event.before }}"
 
-  release:
-    needs:
-      - verify
+  windows-build:
+    name: Build signed Windows installer
+    needs: [verify, windows-validation, linux-validation]
     if: needs.verify.outputs.release == 'true'
     runs-on: windows-latest
+    timeout-minutes: 45
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 26
+          package-manager-cache: false
+      - run: npm ci
+      - name: Build signed NSIS without publishing
+        env:
+          RESONA_UPDATER_PUBLIC_KEY: ${{ vars.RESONA_UPDATER_PUBLIC_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          npm run release:windows
+          node scripts/stage-windows.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-delivery
+          path: src-tauri/target/delivery/*
+          if-no-files-found: error
+          retention-days: 7
+
+  arch-build:
+    name: Build Arch package and AUR recipe
+    needs: [verify, windows-validation, linux-validation]
+    if: needs.verify.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel@sha256:3cbf69d2d5958d6a294f3722c5668e6187c4df8e00fa27f72352f0bf83e495e1
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Install Arch build and package dependencies
+        run: pacman -Syu --noconfirm --needed git rust nodejs npm webkit2gtk-4.1 libayatana-appindicator alsa-lib openssl gtk-layer-shell namcap desktop-file-utils
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Build embedded frontend and stage package
+        run: |
+          npm ci
+          npm run build:linux
+          node scripts/package-arch.mjs
+          pacman -Q > src-tauri/target/delivery/arch-packages.txt
+          ldd src-tauri/target/release/resona | tee src-tauri/target/delivery/linked-libraries.txt
+          if grep -q 'not found' src-tauri/target/delivery/linked-libraries.txt; then exit 1; fi
+          desktop-file-validate packaging/arch/io.github.vki.resona.desktop
+      - name: Build the AUR recipe as an ordinary user
+        run: |
+          useradd --create-home builder
+          cp -a src-tauri/target/delivery/aur /home/builder/package
+          chown -R builder:builder /home/builder/package
+          runuser -u builder -- bash -c 'cd /home/builder/package && makepkg --verifysource && makepkg --nodeps --cleanbuild --noconfirm && makepkg --printsrcinfo > .SRCINFO'
+          cp /home/builder/package/*.pkg.tar.zst /home/builder/package/PKGBUILD /home/builder/package/.SRCINFO src-tauri/target/delivery/
+      - name: Verify clean-container package installation and removal
+        run: |
+          pacman -U --noconfirm src-tauri/target/delivery/*.pkg.tar.zst
+          test -x /usr/bin/resona
+          test -f /usr/lib/Resona/icons/default-artwork.png
+          desktop-file-validate /usr/share/applications/io.github.vki.resona.desktop
+          for mime in audio/mpeg audio/vnd.wave audio/flac; do
+            grep -F "$mime=io.github.vki.resona.desktop;" /usr/share/applications/mimeinfo.cache
+          done
+          ldd /usr/bin/resona | tee /tmp/resona-linked.txt
+          if grep -q 'not found' /tmp/resona-linked.txt; then exit 1; fi
+          pacman -Qk "$(sed -n 's/^pkgname=//p' src-tauri/target/delivery/PKGBUILD)"
+          namcap src-tauri/target/delivery/*.pkg.tar.zst
+          pacman -R --noconfirm "$(sed -n 's/^pkgname=//p' src-tauri/target/delivery/PKGBUILD)"
+          test ! -e /usr/bin/resona
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: arch-delivery
+          path: |
+            src-tauri/target/delivery/*.tar.gz
+            src-tauri/target/delivery/*.pkg.tar.zst
+            src-tauri/target/delivery/PKGBUILD
+            src-tauri/target/delivery/.SRCINFO
+            src-tauri/target/delivery/build.json
+            src-tauri/target/delivery/arch-packages.txt
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish complete release
+    needs: [verify, windows-build, arch-build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: release
     permissions:
       contents: write
     steps:
-      - name: Check out the main commit
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          fetch-depth: 0
           persist-credentials: false
           ref: ${{ github.sha }}
-
-      - name: Set up Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0, Node 24
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: 26
           package-manager-cache: false
-
-      - name: Install frontend dependencies
-        run: npm ci
-
-      - name: Prepare the signed updater configuration
+      - run: sudo apt-get update && sudo apt-get install -y minisign
+      - run: npm ci
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: '*-delivery'
+          path: src-tauri/target/artifacts
+      - name: Verify signatures, upload draft, then publish
         env:
-          RESONA_UPDATER_PUBLIC_KEY: ${{ vars.RESONA_UPDATER_PUBLIC_KEY }}
-        run: node scripts/prepare-updater-config.mjs
-
-      - name: Build and publish the signed Windows release
-        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0, Node 24
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
           RESONA_UPDATER_PUBLIC_KEY: ${{ vars.RESONA_UPDATER_PUBLIC_KEY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: node scripts/publish-release.mjs
+
+  aur-sync:
+    name: Synchronize published AUR recipe
+    needs: [verify, publish]
+    if: vars.RESONA_AUR_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: aur
+    container:
+      image: archlinux:base-devel@sha256:3cbf69d2d5958d6a294f3722c5668e6187c4df8e00fa27f72352f0bf83e495e1
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - run: pacman -Syu --noconfirm --needed git openssh nodejs curl
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          tagName: ${{ needs.verify.outputs.tag }}
-          releaseName: Resona ${{ needs.verify.outputs.version }}
-          releaseCommitish: ${{ github.sha }}
-          releaseDraft: false
-          prerelease: ${{ needs.verify.outputs.prerelease }}
-          generateReleaseNotes: true
-          retryAttempts: 2
-          updaterJsonPreferNsis: true
-          uploadUpdaterJson: true
-          uploadUpdaterSignatures: true
-          releaseAssetNamePattern: Resona_[version]_[platform]_[arch][setup][ext]
-          args: --bundles nsis --config src-tauri/target/updater.config.json
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: arch-delivery
+          path: src-tauri/target/aur-sync
+      - name: Publish recipe without downgrading AUR
+        env:
+          RESONA_AUR_SSH_KEY: ${{ secrets.RESONA_AUR_SSH_KEY }}
+          RESONA_AUR_KNOWN_HOSTS: ${{ vars.RESONA_AUR_KNOWN_HOSTS }}
+          RESONA_RELEASE_TAG: ${{ needs.verify.outputs.tag }}
+        run: bash scripts/sync-aur.sh src-tauri/target/aur-sync

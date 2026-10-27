@@ -1,6 +1,17 @@
 # Arch Linux / Wayland 开发预览
 
-`0.3.0-alpha.1` 开始支持 Arch Linux 系 x86_64 的原生 Wayland 会话。本机验证环境为 CachyOS、KDE Plasma、PipeWire；其他发行版、X11、ARM 和正式 Linux 安装包尚未验收。
+`0.3.0-alpha.1` 开始支持 Arch Linux 系 x86_64 的原生 Wayland 会话。本机验证环境为 CachyOS、KDE Plasma、PipeWire；其他发行版、X11 和 ARM 不在范围内；公开发行链仍待 Actions 验证。
+
+[跨平台预览交付方案](plans/0.3.0-preview-delivery.md)已获批准并落盘：保持当前应用版本，main 的 Actions 交付 Arch `.pkg.tar.zst`、AUR `-bin` 载荷和配方，Linux 应用内提供包管理器更新引导，不提供 AppImage 或应用自更新。实际公开资产/AUR 上线仍待 main 工作流与凭据配置。
+
+## 安装、打开方式与更新
+
+- AUR 预览包名为 `resona-preview-bin`；首次同步后可通过 yay/paru 安装。AUR 配方从 GitHub 固定 Release 下载已编译载荷，`pkgrel` 用构建编号区分同版本重建。
+- 直接下载安装包时，使用 `sudo pacman -U ./resona-preview-bin-<pkgver>-<pkgrel>-x86_64.pkg.tar.zst`；本地包不会订阅更新仓库。更新时下载新包重复安装，或改用 AUR。
+- 安装会注册 Resona 桌面入口、图标与 MP3/WAV/FLAC 的“打开方式”。可在 KDE 文件管理器中选择 Resona 并按个人需要设为默认；程序不擅自替换已有默认播放器。文件路径以 `%F` 传递，已有实例接收后恢复窗口并播放目标。卸载通过 pacman 标准钩子清理入口/缓存，保留用户数据与音频。
+- 关于页的“更新说明”可复制 `yay -Syu` / `paru -Syu`，并打开 AUR/Release 页面；只给出完整更新指引，不执行命令、不提权、不访问更新网络。首次 AUR 同步前包页面可能尚不存在。
+- 本机旧测试包的 `test-profile` 不自动迁移到安装版；请先保留原目录。安装版使用系统 XDG 数据目录，禁止通过覆盖用户数据库来自动合并。
+
 
 ## 环境与运行
 

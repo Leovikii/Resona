@@ -104,6 +104,43 @@ def check_contract():
     bus("call", NAME, PATH, "org.mpris.MediaPlayer2", "Quit")
 
 
+def check_file_associations(root, first, environment, binary):
+    desktop = Path(os.environ.get("RESONA_TEST_DESKTOP", ROOT / "packaging/arch/io.github.vki.resona.desktop"))
+    subprocess.run(["desktop-file-validate", str(desktop)], check=True, timeout=5)
+    launch_env = dict(environment, PATH=str(binary.parent) + os.pathsep + os.environ["PATH"])
+    # Exercise the installed desktop-entry command and %F expansion, including Unicode/spaces.
+    targets = [first]
+    association_dir = root / "Open with 测试"
+    association_dir.mkdir()
+    for name, codec in [("关联 WAV 测试.wav", "pcm_s16le"), ("关联 MP3 测试.mp3", "libmp3lame")]:
+        target = association_dir / name
+        subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(first), "-c:a", codec, str(target)], check=True, timeout=30)
+        targets.append(target)
+    for target in [*targets, first]:
+        subprocess.run(["gio", "launch", str(desktop), str(target)], env=launch_env, check=True, timeout=10)
+        wait_property("Metadata", target.as_uri())
+    assert "second instance activation received" in (root / "data/io.github.vki.resona/logs/resona.log").read_text()
+
+
+def check_cold_desktop_open(first, environment, binary):
+    desktop = Path(os.environ.get("RESONA_TEST_DESKTOP", ROOT / "packaging/arch/io.github.vki.resona.desktop"))
+    launch_env = dict(environment, PATH=str(binary.parent) + os.pathsep + os.environ["PATH"])
+    subprocess.run(["gio", "launch", str(desktop), str(first)], env=launch_env, check=True, timeout=10)
+    try:
+        deadline = time.monotonic() + 12
+        while NAME not in bus("call", "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "ListNames"):
+            assert time.monotonic() < deadline, "Cold desktop launch did not register MPRIS"
+            time.sleep(0.1)
+        wait_property("Metadata", first.as_uri())
+    finally:
+        if NAME in bus("call", "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "ListNames"):
+            bus("call", NAME, PATH, "org.mpris.MediaPlayer2", "Quit")
+    deadline = time.monotonic() + 10
+    while NAME in bus("call", "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "ListNames"):
+        assert time.monotonic() < deadline, "Cold desktop instance did not quit"
+        time.sleep(0.1)
+
+
 def main():
     names = bus("call", "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "ListNames")
     if NAME in names or "io.github.vki.resona.SingleInstance" in names:
@@ -123,7 +160,8 @@ def main():
             (root / "data/fonts").symlink_to(desktop_fonts, target_is_directory=True)
         environment = dict(os.environ, GDK_BACKEND="wayland", XDG_DATA_HOME=str(root / "data"), XDG_CACHE_HOME=str(root / "cache"))
         with (root / "native.log").open("w+") as log:
-            process = subprocess.Popen([str(ROOT / "src-tauri/target/release/resona"), str(first)], env=environment, stdout=log, stderr=subprocess.STDOUT)
+            binary = Path(os.environ.get("RESONA_TEST_BINARY", ROOT / "src-tauri/target/release/resona")).resolve()
+            process = subprocess.Popen([str(binary), str(first)], env=environment, stdout=log, stderr=subprocess.STDOUT)
             try:
                 deadline = time.monotonic() + 15
                 while NAME not in bus("call", "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "ListNames"):
@@ -131,9 +169,12 @@ def main():
                     assert time.monotonic() < deadline, "MPRIS did not register"
                     time.sleep(0.1)
                 check_lyrics(root)
+                check_file_associations(root, first, environment, binary)
                 check_contract()
+                assert "application update check started" not in (root / "data/io.github.vki.resona/logs/resona.log").read_text()
                 assert process.wait(timeout=10) == 0
                 assert NAME not in bus("call", "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "ListNames")
+                check_cold_desktop_open(first, environment, binary)
             except BaseException:
                 log.seek(0)
                 print(log.read())
@@ -149,7 +190,7 @@ def main():
                     except subprocess.TimeoutExpired:
                         process.kill()
                         process.wait()
-    print("PASS: native overlay lyrics readiness/recreation; MPRIS metadata/artwork, transport, seek/stale IDs, volume, modes, Raise and Quit")
+    print("PASS: desktop-entry MP3/WAV/FLAC opening and single instance; no Linux startup update check; native overlay lyrics readiness/recreation; MPRIS metadata/artwork, transport, seek/stale IDs, volume, modes, Raise and Quit")
 
 
 if __name__ == "__main__":
