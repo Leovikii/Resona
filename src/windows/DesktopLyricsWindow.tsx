@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -16,6 +16,7 @@ import {
   invokeTauri,
   isTauriRuntime,
   startCurrentWindowResize,
+  listenDesktopLyricsPointer,
 } from "../shared/bridge/tauri";
 import { fileNameFromPath } from "../shared/utils/format";
 import {
@@ -35,6 +36,20 @@ export default function DesktopLyricsWindow() {
   const { desktopLyrics: preferences, setDesktopLyrics } = usePreferences();
   const { error, initialized, lyrics, playback, runPlayback } = useDesktopLyricsNowPlaying();
   const desktopLyrics = useDesktopLyricsWindow();
+  const [pointerInside, setPointerInside] = useState(false);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    const stop = listenDesktopLyricsPointer(setPointerInside).catch((error) => {
+      console.error("Unable to listen for lyrics pointer changes", error);
+      return () => {};
+    });
+    return () => { void stop.then((unlisten) => unlisten()); };
+  }, []);
+
+  useEffect(() => {
+    if (desktopLyrics.snapshot.locked) setPointerInside(false);
+  }, [desktopLyrics.snapshot.locked]);
 
   useEffect(() => {
     document.documentElement.dataset.window = "desktop-lyrics";
@@ -181,12 +196,15 @@ export default function DesktopLyricsWindow() {
       aria-label={t("desktopLyrics.region")}
       className="desktop-lyrics-window"
       data-locked={desktopLyrics.snapshot.locked || undefined}
+      data-interacting={pointerInside && !desktopLyrics.snapshot.locked || undefined}
       data-ready={initialized || undefined}
       data-testid="desktop-lyrics-window"
       onPointerDown={startDragging}
+      onPointerEnter={() => setPointerInside(true)}
+      onPointerLeave={() => setPointerInside(false)}
       onPointerMove={updateGesture}
       onPointerUp={endGesture}
-      onPointerCancel={endGesture}
+      onPointerCancel={() => { setPointerInside(false); endGesture(); }}
       onLostPointerCapture={endGesture}
       style={style}
     >

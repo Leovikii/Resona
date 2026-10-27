@@ -499,7 +499,7 @@ html[data-window="audio-compression"] #root {
 .desktop-lyrics-resize-left { left: 2px; }
 .desktop-lyrics-resize-right { right: 2px; }
 
-.desktop-lyrics-window:not([data-locked]):hover .desktop-lyrics-resize-handle,
+.desktop-lyrics-window[data-interacting] .desktop-lyrics-resize-handle,
 .desktop-lyrics-resize-handle:focus-visible {
   opacity: 0.66;
   pointer-events: auto;
@@ -539,7 +539,7 @@ html[data-window="audio-compression"] #root {
   transition: background-color 140ms ease;
 }
 
-.desktop-lyrics-window:not([data-locked]):hover .desktop-lyrics-background {
+.desktop-lyrics-window[data-interacting] .desktop-lyrics-background {
   background: rgb(0 0 0 / max(var(--desktop-lyrics-background-opacity, 0), 0.38));
 }
 

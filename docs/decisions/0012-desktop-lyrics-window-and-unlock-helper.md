@@ -35,6 +35,10 @@ Resona 需要提供透明、置顶、可锁定穿透且可直接恢复交互的 
 - Linux/Wayland 不承诺相同窗口组合。未来实现必须报告实际 capability，不照搬 Win32 方案。
 - 如果原型失败，必须回到架构决策层选择全窗穿透加主窗口解锁，或保留整窗交互；不能静默引入被排除的输入方案。
 
+## 空闲显隐修订（0.3.0-alpha.2）
+
+两端锁定 helper 都保持有效命中区域，只在局部鼠标进入时显示解锁图形。Windows 空闲 alpha=1 且不绘制字形，`WM_MOUSELEAVE`、隐藏/重显重置 hover；Linux 的 mapped layer surface 保持透明，仅切换 GTK 按钮绘制 opacity。不可 hide/unmap 整个 helper 来实现 hover 消失。歌词背景的临时交互状态由前端 pointer enter/leave 清理，Linux WebKit 原生 enter/leave 事件补齐 surface 进出，锁定与 pointer cancel 也清理；不增加全局鼠标能力。
+
 ## 0.0.10 实现说明
 
 Tauri 2.11.5 稳定 API 的无 WebView `WindowBuilder` 仍要求 `unstable` feature。0.0.10 不为这一微型窗口启用不稳定能力，而是在 Windows platform adapter 内通过 raw Win32 创建 owned tool window，并由 Tauri 主事件线程持有窗口创建过程。该调整不改变本 ADR 的窗口分层、恢复顺序、故障回滚和禁止输入注入等约束。

@@ -8,7 +8,7 @@ use std::time::Duration;
 use gtk::prelude::*;
 use gtk_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 use super::{DesktopLyricsWindowFailure as Failure, DesktopLyricsWindowSnapshot as Snapshot};
 
@@ -137,6 +137,27 @@ impl DesktopLyricsWindowService {
                 let area = (bounds.width(), bounds.height());
                 let geometry = constrain(saved, area, height(font_size));
                 configure_layer(&window, &monitor, "io.github.vki.resona.lyrics");
+                let entering = app.clone();
+                let leaving = app.clone();
+                webview.with_webview(move |view| {
+                    view.inner().add_events(gtk::gdk::EventMask::ENTER_NOTIFY_MASK | gtk::gdk::EventMask::LEAVE_NOTIFY_MASK);
+                    view.inner().connect_enter_notify_event(move |_, event| {
+                        if event.detail() != gtk::gdk::NotifyType::Inferior {
+                            if let Err(error) = entering.emit_to("desktop-lyrics", "desktop-lyrics-pointer-inside", true) {
+                                log::warn!("lyrics pointer enter notification failed: {error}");
+                            }
+                        }
+                        gtk::glib::Propagation::Proceed
+                    });
+                    view.inner().connect_leave_notify_event(move |_, event| {
+                        if event.detail() != gtk::gdk::NotifyType::Inferior {
+                            if let Err(error) = leaving.emit_to("desktop-lyrics", "desktop-lyrics-pointer-inside", false) {
+                                log::warn!("lyrics pointer leave notification failed: {error}");
+                            }
+                        }
+                        gtk::glib::Propagation::Proceed
+                    });
+                }).map_err(failure)?;
                 let helper = gtk::Window::new(gtk::WindowType::Toplevel);
                 helper.set_decorated(false);
                 helper.set_accept_focus(false);
@@ -144,6 +165,7 @@ impl DesktopLyricsWindowService {
                 helper.set_default_size(56, 38);
                 configure_layer(&helper, &monitor, "io.github.vki.resona.lyrics-unlock");
                 let button = gtk::Button::with_label("🔓");
+                configure_helper_hover(&helper, &button);
                 button.set_tooltip_text(Some("解锁桌面歌词 / Unlock desktop lyrics"));
                 let weak = Arc::downgrade(&service);
                 button.connect_clicked(move |_| { if let Some(service) = weak.upgrade() {
@@ -216,6 +238,7 @@ impl DesktopLyricsWindowService {
                 }
                 if locked {
                     // Make recovery reachable before removing the lyrics input region.
+                    resources.helper.child().unwrap().set_opacity(0.0);
                     resources.helper.show_all();
                     resources
                         .window
@@ -327,6 +350,37 @@ fn configure_layer(window: &impl IsA<gtk::Window>, monitor: &gtk::gdk::Monitor, 
     window.set_anchor(Edge::Left, true);
     window.set_anchor(Edge::Top, true);
 }
+
+fn configure_helper_hover(helper: &gtk::Window, button: &gtk::Button) {
+    // Keep the mapped surface and its input region alive; hide only its drawing.
+    helper.set_app_paintable(true);
+    if let Some(screen) = gtk::prelude::WidgetExt::screen(helper) {
+        helper.set_visual(screen.rgba_visual().as_ref());
+    }
+    helper.connect_draw(|_, context| {
+        context.set_operator(gtk::cairo::Operator::Source);
+        context.set_source_rgba(0.0, 0.0, 0.0, 0.0);
+        if let Err(error) = context.paint() {
+            log::warn!("lyrics helper clear failed: {error}");
+        }
+        context.set_operator(gtk::cairo::Operator::Over);
+        gtk::glib::Propagation::Proceed
+    });
+    button.set_opacity(0.0);
+    button.add_events(
+        gtk::gdk::EventMask::ENTER_NOTIFY_MASK | gtk::gdk::EventMask::LEAVE_NOTIFY_MASK,
+    );
+    button.connect_enter_notify_event(|button, _| {
+        button.set_opacity(1.0);
+        gtk::glib::Propagation::Proceed
+    });
+    button.connect_leave_notify_event(|button, event| {
+        if event.detail() != gtk::gdk::NotifyType::Inferior {
+            button.set_opacity(0.0);
+        }
+        gtk::glib::Propagation::Proceed
+    });
+}
 impl Resources {
     fn apply_geometry(&self) {
         self.window
@@ -383,6 +437,7 @@ fn failure(error: impl std::fmt::Display) -> Failure {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tauri::Listener;
     #[test]
     fn geometry_stays_on_output_and_font_height_is_bounded() {
         let restored = constrain(
@@ -478,6 +533,12 @@ mod tests {
                             .pointer("end".into(), GestureKind::Move, 0.0, 0.0)
                             .unwrap();
                         assert!(service.lock().unwrap().locked);
+                        let (pointer_sent, pointer_received) = mpsc::channel();
+                        let pointer_window = app.get_webview_window("desktop-lyrics").unwrap();
+                        let listener =
+                            pointer_window.listen("desktop-lyrics-pointer-inside", move |event| {
+                                pointer_sent.send(event.payload().to_owned()).unwrap();
+                            });
                         std::thread::sleep(Duration::from_millis(250));
                         service
                             .on_main(|| {
@@ -491,11 +552,65 @@ mod tests {
                                         KeyboardMode::None
                                     );
                                     assert_eq!(resources.window.exclusive_zone(), -1);
+                                    resources
+                                        .webview
+                                        .with_webview(|view| {
+                                            let inner = view.inner();
+                                            // Real GTK crossings run outside the runtime's webview borrow.
+                                            gtk::glib::idle_add_local_once(move || {
+                                                let enter = gtk::gdk::Event::new(
+                                                    gtk::gdk::EventType::EnterNotify,
+                                                );
+                                                inner.emit_by_name::<bool>(
+                                                    "enter-notify-event",
+                                                    &[&enter],
+                                                );
+                                                let leave = gtk::gdk::Event::new(
+                                                    gtk::gdk::EventType::LeaveNotify,
+                                                );
+                                                inner.emit_by_name::<bool>(
+                                                    "leave-notify-event",
+                                                    &[&leave],
+                                                );
+                                            });
+                                        })
+                                        .unwrap();
                                     assert!(resources.helper.is_visible());
+                                    assert!(resources.helper.is_mapped());
+                                    assert!(!resources.helper.accepts_focus());
+                                    let button = resources
+                                        .helper
+                                        .child()
+                                        .unwrap()
+                                        .downcast::<gtk::Button>()
+                                        .unwrap();
+                                    for _ in 0..2 {
+                                        assert_eq!(button.opacity(), 0.0);
+                                        let enter =
+                                            gtk::gdk::Event::new(gtk::gdk::EventType::EnterNotify);
+                                        button
+                                            .emit_by_name::<bool>("enter-notify-event", &[&enter]);
+                                        assert_eq!(button.opacity(), 1.0);
+                                        let leave =
+                                            gtk::gdk::Event::new(gtk::gdk::EventType::LeaveNotify);
+                                        button
+                                            .emit_by_name::<bool>("leave-notify-event", &[&leave]);
+                                        assert_eq!(button.opacity(), 0.0);
+                                        assert!(resources.helper.is_mapped());
+                                    }
                                     Ok(())
                                 })
                             })
                             .unwrap();
+                        for expected in ["true", "false"] {
+                            assert_eq!(
+                                pointer_received
+                                    .recv_timeout(Duration::from_secs(2))
+                                    .unwrap(),
+                                expected
+                            );
+                        }
+                        pointer_window.unlisten(listener);
                         service
                             .on_main(|| {
                                 let button = WINDOWS.with(|slot| {

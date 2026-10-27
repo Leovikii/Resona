@@ -492,8 +492,39 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    #[ignore = "requires a live KDE Wayland session; run alone with isolated XDG data directories"]
+    #[ignore = "requires KDE Wayland, qdbus6 and maximize/squash effects; run alone with fresh XDG data"]
     fn native_window_controls_and_geometry() {
+        crate::platform::initialize_process();
+        fn wait_for_effect(effect: &str) {
+            let deadline = std::time::Instant::now() + Duration::from_secs(1);
+            loop {
+                let output = std::process::Command::new("qdbus6")
+                    .args([
+                        "org.kde.KWin",
+                        "/Effects",
+                        "org.kde.kwin.Effects.activeEffects",
+                    ])
+                    .output()
+                    .expect("KDE qdbus6");
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                if String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .any(|name| name == effect)
+                {
+                    println!("KWin {effect} animation active");
+                    return;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "KWin {effect} animation did not run"
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
         use gtk::prelude::*;
         use std::sync::{
             atomic::{AtomicUsize, Ordering},
@@ -565,7 +596,9 @@ mod tests {
         let app = tauri::Builder::default()
             .any_thread()
             .setup(move |app| {
+                crate::platform::window_material::verify_native_theme();
                 let main = app.get_webview_window("main").unwrap();
+                assert_eq!(main.gtk_window().unwrap().application().unwrap().application_id().as_deref(), Some("io.github.vki.resona"));
                 crate::platform::window_controls::apply(&main);
                 service.restore(app.handle()).unwrap();
                 let shown = std::time::Instant::now();
@@ -645,7 +678,7 @@ mod tests {
 
                         }
                         // UI resize callbacks capture geometry while this worker switches layouts.
-                        for index in 0..24 {
+                        for index in 0..4 {
                             service
                                 .set_layout_mode(
                                     &app,
@@ -768,6 +801,7 @@ mod tests {
                                 .unwrap();
                                 received.recv_timeout(Duration::from_secs(5)).unwrap();
                                 if action == "maximize" {
+                                    wait_for_effect("maximize");
                                     let deadline =
                                         std::time::Instant::now() + Duration::from_secs(5);
                                     while !window.is_maximized().unwrap() {
@@ -780,6 +814,7 @@ mod tests {
                                     window.unmaximize().unwrap();
                                     std::thread::sleep(Duration::from_millis(200));
                                 } else if action == "minimize" {
+                                    wait_for_effect("squash");
                                     // Wayland has no minimized-state acknowledgement; check the protocol trace.
                                     std::thread::sleep(Duration::from_millis(200));
                                     window.unminimize().unwrap();

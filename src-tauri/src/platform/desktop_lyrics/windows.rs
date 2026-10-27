@@ -33,8 +33,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZEEND, GWLP_USERDATA, HWND_TOPMOST, IDC_ARROW,
     LWA_ALPHA, MA_NOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SW_HIDE,
     SW_SHOWNOACTIVATE, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_ERASEBKGND, WM_LBUTTONUP,
-    WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WNDCLASSEXW,
-    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SHOWWINDOW,
+    WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 use super::{DesktopLyricsWindowFailure, DesktopLyricsWindowSnapshot};
@@ -1180,6 +1180,13 @@ unsafe extern "system" fn helper_window_proc(
     let data = &mut *reference_data;
     match message {
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
+        WM_SHOWWINDOW => {
+            set_helper_alpha(hwnd, HELPER_IDLE_ALPHA);
+            data.hovered = false;
+            data.tracking_leave = false;
+            InvalidateRect(hwnd, None, false);
+            DefWindowProcW(hwnd, message, wparam, lparam)
+        }
         WM_MOUSEMOVE => {
             set_helper_alpha(hwnd, HELPER_HOVER_ALPHA);
             if !data.tracking_leave {
@@ -1191,6 +1198,11 @@ unsafe extern "system" fn helper_window_proc(
                 };
                 if TrackMouseEvent(&mut tracking).as_bool() {
                     data.tracking_leave = true;
+                } else {
+                    log::warn!(
+                        "lyrics helper mouse-leave tracking failed: {}",
+                        WindowsError::from_win32()
+                    );
                 }
             }
             if !data.hovered {
@@ -1245,6 +1257,11 @@ unsafe fn paint_helper(hwnd: HWND, hovered: bool) {
     let brush = CreateSolidBrush(background);
     FillRect(hdc, &rect, brush);
     DeleteObject(brush);
+
+    if !hovered {
+        EndPaint(hwnd, &paint);
+        return;
+    }
 
     let width = rect.right - rect.left;
     let height = rect.bottom - rect.top;
@@ -1315,6 +1332,54 @@ unsafe fn create_unlock_font(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_helper_hover_leave_and_reshow() {
+        use windows::Win32::UI::WindowsAndMessaging::{GetLayeredWindowAttributes, SendMessageW};
+        struct Helper(HWND);
+        impl Drop for Helper {
+            fn drop(&mut self) {
+                unsafe { DestroyWindow(self.0) };
+            }
+        }
+        let (commands, receiver) = mpsc::channel();
+        let data = Mutex::new(Some(Box::new(NativeHelperData {
+            commands,
+            hovered: false,
+            tracking_leave: false,
+        })));
+        let helper = Helper(HWND(create_native_helper_window(0, &data).unwrap()));
+        let hwnd = helper.0;
+        let assert_state = |hovered: bool, expected_alpha: u8| unsafe {
+            let data = &*(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const NativeHelperData);
+            assert_eq!(data.hovered, hovered);
+            if !hovered {
+                assert!(!data.tracking_leave);
+            }
+            let mut alpha = 0;
+            assert!(GetLayeredWindowAttributes(hwnd, None, Some(&mut alpha), None).as_bool());
+            assert_eq!(alpha, expected_alpha);
+        };
+        unsafe {
+            ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+            assert_state(false, HELPER_IDLE_ALPHA);
+            for _ in 0..2 {
+                SendMessageW(hwnd, WM_MOUSEMOVE, WPARAM(0), LPARAM(0));
+                assert_state(true, HELPER_HOVER_ALPHA);
+                SendMessageW(hwnd, WM_MOUSELEAVE, WPARAM(0), LPARAM(0));
+                assert_state(false, HELPER_IDLE_ALPHA);
+            }
+            SendMessageW(hwnd, WM_MOUSEMOVE, WPARAM(0), LPARAM(0));
+            ShowWindow(hwnd, SW_HIDE);
+            ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+            assert_state(false, HELPER_IDLE_ALPHA);
+            SendMessageW(hwnd, WM_LBUTTONUP, WPARAM(0), LPARAM(0));
+        }
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(NativeHelperCommand::Unlock)
+        ));
+    }
 
     #[test]
     fn helper_bounds_follow_window_and_scale() {
