@@ -286,7 +286,12 @@ mod tests {
         let public_key = include_str!("../../../tests/fixtures/update/public-key.txt");
         let version = Version::parse("0.3.0-alpha.1").unwrap();
         let tag = "preview-v0.3.0-alpha.1-b42.1-gaaaaaaa";
-        assert!(verified_asset(bytes, signature, public_key, tag, &version).is_ok());
+        verified_asset(bytes, signature, public_key, tag, &version)
+            .expect("the fixture must retain its exact signed bytes after checkout");
+        let crlf = String::from_utf8(bytes.to_vec())
+            .unwrap()
+            .replace('\n', "\r\n");
+        assert!(verified_asset(crlf.as_bytes(), signature, public_key, tag, &version).is_err());
         let mut changed = bytes.to_vec();
         changed.push(b' ');
         assert!(verified_asset(&changed, signature, public_key, tag, &version).is_err());

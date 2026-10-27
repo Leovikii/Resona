@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Signature verification requires the exact signed bytes on every platform.
+tests/fixtures/update/latest.json text eol=lf
