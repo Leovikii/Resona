@@ -30,6 +30,7 @@
 - Linux Release 与实际 Arch 配方打包通过，生成约 8.7 MiB `.pkg.tar.zst`；载荷 SHA-256、包清单/root 权限、桌面入口和 MP3/WAV/FLAC 缓存注册通过。安装布局下的原生回归通过：`gio launch` 冷启动、三种音频交给已有实例、中文/空格路径、歌词 overlay 重建及完整 MPRIS 控制；日志确认 Linux 启动无更新检查。未在本机安装到系统目录或上传这些测试包。
 - 更新说明浏览器检查覆盖中文浅色/英文深色、宽屏 `1080×700`、窄屏 `420×720` / `360×600`，命令复制和内容可达、无横向溢出。生产前端、format、Clippy、许可证、actionlint 与差异检查通过；Windows 覆盖安装、GitHub 实际发布和 AUR 首次同步仍需下述门禁。
 - PR #13 首次 Windows CI 暴露两处问题：Git 的 CRLF 检出改变签名 fixture 字节，以及 `std::fs::rename` 会覆盖竞争创建的目标。签名 JSON 已固定 LF，并验证 CRLF 内容仍被拒绝；Windows 输出改用不设置替换/跨卷复制标志的 `MoveFileExW`，保留不覆盖约束。回归覆盖中文/空格路径、冲突保留、成功提交及 NUL 路径拒绝；本机 118 项 Rust 测试与 Clippy 通过，模拟 Windows 检出保持签名字节不变。Windows 后续 CI 结果以该 PR 检查为准。
+- Windows Actions 已验证上述测试修复；后续 Clippy 暴露 SMTC 两处已填写全部字段后的冗余 `MediaMetadata::default()`，已删除。无封面回退中仍保留所需默认值，媒体信息和封面失败处理不变。
 
 ## 当前开放门禁
 

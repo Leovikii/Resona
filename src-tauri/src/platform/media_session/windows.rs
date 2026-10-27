@@ -320,7 +320,6 @@ fn sync_controls(
             album: projection.album.as_deref(),
             cover_url: Some(cover_url.as_str()),
             duration: snapshot.duration_ms.map(Duration::from_millis),
-            ..MediaMetadata::default()
         };
         let mut metadata_applied = false;
         match controls.set_metadata(metadata) {
@@ -334,7 +333,6 @@ fn sync_controls(
                         album: projection.album.as_deref(),
                         cover_url: Some(app_logo_url),
                         duration: snapshot.duration_ms.map(Duration::from_millis),
-                        ..MediaMetadata::default()
                     }) {
                         Ok(()) => metadata_applied = true,
                         Err(error) => {
