@@ -9,7 +9,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { affectsDelivery, buildIdentity, shouldCreateRelease } from "./release-channel.mjs";
 import { archRecipe, archVersion } from "./package-arch.mjs";
-import { collectArtifacts, updateManifest } from "./publish-release.mjs";
+import { collectArtifacts, updateManifest, verifyDraftAssets } from "./publish-release.mjs";
 const version = "0.3.0-alpha.1";
 const identity = buildIdentity(version, "42", "1", "a".repeat(40));
 
@@ -77,6 +77,8 @@ test("publishing requires both platform identities and the exact checksummed pay
     writeFileSync(join(linux, "resona-preview-bin.pkg.tar.zst"), "package");
     assert.equal(collectArtifacts(input, output, version, identity).manifest.version, version);
     assert.equal(readFileSync(join(output, installer), "utf8"), "binary");
+    assert.equal(readFileSync(join(output, "SRCINFO"), "utf8"), readFileSync(join(linux, ".SRCINFO"), "utf8"));
+    assert.throws(() => readFileSync(join(output, ".SRCINFO")), { code: "ENOENT" });
     writeFileSync(join(linux, payload), "tampered");
     assert.throws(() => collectArtifacts(input, output, version, identity), /does not match/);
     writeFileSync(join(linux, "build.json"), JSON.stringify({ version, ...buildIdentity(version, 43, 1, "a".repeat(40)) }));
@@ -85,6 +87,17 @@ test("publishing requires both platform identities and the exact checksummed pay
     assert.deepEqual(Object.keys(manifest.platforms), ["windows-x86_64"]);
     assert.equal(manifest.build.runNumber, 42);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("release verification rejects GitHub-renamed, missing, extra or duplicate assets and non-drafts", () => {
+  const expected = ["PKGBUILD", "SRCINFO", "SHA256SUMS"];
+  const draft = (names, isDraft = true) => ({ isDraft, assets: names.map((name) => ({ name })) });
+  verifyDraftAssets(draft([...expected].reverse()), expected);
+  assert.throws(() => verifyDraftAssets(draft(["PKGBUILD", "default.SRCINFO", "SHA256SUMS"]), ["PKGBUILD", ".SRCINFO", "SHA256SUMS"]), /expected:.*\.SRCINFO.*actual:.*default\.SRCINFO/);
+  for (const names of [expected.slice(1), [...expected, "unexpected.txt"], [...expected, "SRCINFO"]]) {
+    assert.throws(() => verifyDraftAssets(draft(names), expected), /Draft release asset list is incomplete/);
+  }
+  assert.throws(() => verifyDraftAssets(draft(expected, false), expected), /isDraft=false/);
 });
 
 

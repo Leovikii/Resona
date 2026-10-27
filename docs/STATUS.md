@@ -17,7 +17,7 @@
 - Linux 输出使用不覆盖的原子硬链接提交；冲突测试、既有提交/删除顺序、取消和批次安全回归通过。托盘创建失败不阻止启动，无托盘时拒绝隐藏；正常 KDE 会话和无宿主的临时 D-Bus 会话均完成原生启动验证。
 - 浏览器检查覆盖宽屏 `1080×700` / `760×520`、窄屏 `420×720` / `360×600`、压缩窗口 `720×500`，复核明暗主题、中英文、系统依赖就绪/缺失和手动更新；不据此声称原生多屏/DPI通过。
 - `scripts/test-linux-desktop.py` 在最终 Release 上通过：实际歌词前端 ready、显示、关闭和重建，以及独立进程退出清理；修正隐藏 WebKitGTK 的初始读取与动画帧等待。KDE 会话的 D-Bus 实测通过：元数据/封面、播放/暂停/停止、前后曲、带曲目校验的定位、音量、循环/随机、Raise 和 Quit。原生忽略测试通过并由 Wayland 协议日志确认 overlay=3、无键盘交互、空输入区域、原生解锁回调、130/199px 字号高度与销毁重建。
-- format、Clippy、生产前端、Release、许可证清单、工作流语法与差异检查通过。新增固定摘要的 Arch CI，与 Windows 共同汇总到既有 `PR validation`；PR #13 的首次 Arch 验证已在 GitHub 通过，实际发布仍待 main 交付。
+- format、Clippy、生产前端、Release、许可证清单、工作流语法与差异检查通过。新增固定摘要的 Arch CI，与 Windows 共同汇总到既有 `PR validation`；PR #13 的双平台验证通过并已合并，首轮 main 交付的双平台测试与安装包构建通过，公开发布停在草稿资产检查。
 - 已生成本机测试包 `src-tauri/target/test-build/Resona-0.3.0-alpha.1-arch-wayland-x86_64/`，通过 `start-resona.sh` 启动；包含私有 gtk-layer-shell、运行资源、许可证和库源码，测试数据隔离在包内。脱离构建目录和 Vite 的原生启动、私有库加载、歌词显示/重建与 MPRIS 控制回归通过，见 [Linux 指南](LINUX.md)。
 - 所有者确认本机测试版功能正常。按反馈将正文、标题与桌面歌词统一改为系统默认字体（`system-ui`），等宽内容使用系统等宽回退；不内置或下载字体。TypeScript、生产前端与 Linux Release 构建通过，浏览器复核明暗主题和中英文，测试包已更新并保留已有测试数据；Windows 字体效果待原生回归。
 - 修正测试启动器隔离 XDG 配置/数据导致系统字体配置与用户字体不可见的问题：保留桌面配置，并链接用户字体，只隔离应用数据/缓存。启动器回归和原生 WebKit 渲染对比通过，GTK 字体由 Adwaita 回到 Sarasa UI SC；测试包已更新。所有者反馈的模糊尚需重新观察；本机 150% 缩放下 GTK 3 使用 2 倍绘制，不能据此宣称分数缩放清晰度已验收。
@@ -31,12 +31,13 @@
 - 更新说明浏览器检查覆盖中文浅色/英文深色、宽屏 `1080×700`、窄屏 `420×720` / `360×600`，命令复制和内容可达、无横向溢出。生产前端、format、Clippy、许可证、actionlint 与差异检查通过；Windows 覆盖安装、GitHub 实际发布和 AUR 首次同步仍需下述门禁。
 - PR #13 首次 Windows CI 暴露两处问题：Git 的 CRLF 检出改变签名 fixture 字节，以及 `std::fs::rename` 会覆盖竞争创建的目标。签名 JSON 已固定 LF，并验证 CRLF 内容仍被拒绝；Windows 输出改用不设置替换/跨卷复制标志的 `MoveFileExW`，保留不覆盖约束。回归覆盖中文/空格路径、冲突保留、成功提交及 NUL 路径拒绝；本机 118 项 Rust 测试与 Clippy 通过，模拟 Windows 检出保持签名字节不变。Windows 后续 CI 结果以该 PR 检查为准。
 - Windows Actions 已验证上述测试修复；后续 Clippy 暴露 SMTC 两处已填写全部字段后的冗余 `MediaMetadata::default()`，已删除。无封面回退中仍保留所需默认值，媒体信息和封面失败处理不变。
+- 首轮 main 交付 `b28.1-g03c89e0` 通过 Windows 签名 NSIS、Arch 配方打包和干净容器安装/文件关联/卸载；发布时 GitHub 将 `.SRCINFO` 重命名为 `default.SRCINFO`，严格资产检查失败，Release 保持草稿。公开副本已改为 `SRCINFO`，Actions 内部 artifact 与 AUR 仍为 `.SRCINFO`，SHA256SUMS 随公开名生成；失败诊断包含期望/实际资产列表。62 项 Node 测试通过，含重命名、缺失、额外、重复资产和非草稿拒绝；下载该运行的真实双平台 artifact 后，修复后的整理、Arch 载荷摘要与 Windows 安装器签名验证通过。未在本机上传或公开资产，临时下载已清理，修复后的实际发布仍待 main Actions。
 
 ## 当前开放门禁
 
 - 所有者需按 [0.3.0 计划](plans/0.3.0.md) 验收原生文件选择、拖入、托盘关闭/退出、蓝牙/睡眠恢复、物理设备与多屏缩放；Windows Release 仍需回归。
-- Linux 安装包/文件关联与双平台发布代码已完成；公开安装包仍待所有者将 dev PR 合并到 main 后由 Actions 生成。AUR 首次同步需要配置 `RESONA_AUR_ENABLED` 与 `aur` Environment；实际包名可用性/维护权限待所有者确认。其他发行版、X11 和 ARM 不在本轮范围。
-- 正式发行继续走受保护的 main 工作流；仍需真实运行 draft 汇总发布、Windows 同版本 NSIS 覆盖/取消/签名错误与卸载，以及 AUR 首次同步。CI 已加入干净 Arch 容器安装/校验/卸载步骤，尚未在 GitHub 执行。本轮未创建标签、发布、合并 PR 或覆盖安装用户应用。
+- Linux 安装包/文件关联与双平台构建已通过 main Actions；公开安装包待本次发布修复合并到 main 后由 Actions 交付。AUR 首次同步需要配置 `RESONA_AUR_ENABLED` 与 `aur` Environment；实际包名可用性/维护权限待所有者确认。其他发行版、X11 和 ARM 不在本轮范围。
+- 正式发行继续走受保护的 main 工作流；仍需验证修复后的 draft 汇总公开、Windows 同版本 NSIS 覆盖/取消/签名错误与卸载，以及 AUR 首次同步。干净 Arch 容器安装/校验/卸载已在 GitHub 执行通过；失败草稿由原 Actions 保留供诊断，不在本机覆盖或公开。
 
 ## 风险与限制
 
