@@ -2,9 +2,9 @@
 
 `0.3.0-alpha.1` 开始支持 Arch Linux 系 x86_64 的原生 Wayland 会话。本机验证环境为 CachyOS、KDE Plasma、PipeWire；其他发行版、X11 和 ARM 不在范围内；交付状态见 [STATUS](STATUS.md)。
 
-[跨平台预览交付方案](plans/0.3.0-preview-delivery.md)已获批准并落盘：main 的 Actions 交付 Arch `.pkg.tar.zst`、AUR `-bin` 载荷和配方，Linux 应用内提供包管理器更新引导，不提供 AppImage 或应用自更新。实际公开资产/AUR 状态本轮未重新查询。
+[跨平台预览交付方案](plans/0.3.0-preview-delivery.md)已获批准并落盘：main 的 Actions 交付 Arch `.pkg.tar.zst`、AUR `-bin` 载荷和配方，Linux 应用内提供包管理器更新引导，不提供 AppImage 或应用自更新。alpha.2 完整公开资产及本机官方包安装已验证；AUR 同步本次未启用，见 STATUS。
 
-当前开发版本 [0.3.0-alpha.2](plans/0.3.0-alpha.2.md) 继续只验收本机 Arch 系 x86_64 / KDE Plasma / 原生 Wayland。使用桌面 portal 初始值与变更信号同步 auto 主题，保留手动覆盖；GTK 应用 ID 和进程名均为 `io.github.vki.resona`，与 desktop/hicolor 图标一致。原生测试已观察到 KWin maximize/squash 动画启动；歌词背景以局部指针状态恢复设置值，锁定 helper 只在鼠标进入时绘制按钮。实际鼠标手感、安装版切换器和多屏仍见计划中的验收限制。
+当前预览版本 [0.3.0-alpha.2](plans/0.3.0-alpha.2.md) 继续只验收本机 Arch 系 x86_64 / KDE Plasma / 原生 Wayland。使用桌面 portal 初始值与变更信号同步 auto 主题，保留手动覆盖；GTK 应用 ID 和进程名均为 `io.github.vki.resona`，与 desktop/hicolor 图标一致。原生测试已观察到 KWin maximize/squash 动画启动；歌词背景以局部指针状态恢复设置值，锁定 helper 只在鼠标进入时绘制按钮。所有者已确认安装版五项 KDE 实际效果均正常；多屏与极端边界仍见计划中的限制。
 
 ## 安装、打开方式与更新
 
