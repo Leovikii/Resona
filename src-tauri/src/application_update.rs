@@ -38,7 +38,6 @@ pub struct ApplicationUpdateSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct ApplicationUpdateRelease {
     pub tag: String,
-    pub build: Option<String>,
     pub version: String,
     pub title: String,
     pub notes: String,
@@ -107,7 +106,6 @@ struct SelectedRelease {
     version: Version,
     release: GithubRelease,
     manifest_url: String,
-    build: Option<BuildIdentity>,
 }
 
 #[derive(Clone)]
@@ -240,19 +238,12 @@ impl ApplicationUpdateService {
         let selected = verified.selected;
         let current = current_version()?;
         let enabled = self.lock_state()?.receive_prerelease_updates;
-        if !manifest::is_newer(
-            &selected.version,
-            selected.build.as_ref(),
-            &current,
-            BuildIdentity::current().as_ref(),
-            enabled,
-        ) {
+        if !manifest::is_newer(&selected.version, &current, enabled) {
             return Err(ApplicationUpdateFailure::new(
                 "update_selection_expired",
-                "selected build is not an allowed update",
+                "selected version is not an allowed update",
             ));
         }
-        let expected_version = selected.version.clone();
         let endpoint: tauri::Url = selected.manifest_url.parse().map_err(|error| {
             ApplicationUpdateFailure::new(
                 "update_manifest_url_invalid",
@@ -265,9 +256,6 @@ impl ApplicationUpdateService {
             .map_err(updater_failure)?
             .pubkey(UPDATER_PUBLIC_KEY)
             .timeout(Duration::from_secs(15))
-            .version_comparator(move |installed, release| {
-                installed == current && release.version == expected_version
-            })
             .build()
             .map_err(updater_failure)?;
         let update = updater
@@ -358,18 +346,10 @@ impl ApplicationUpdateService {
             });
         }
         let include_prerelease = self.lock_state()?.receive_prerelease_updates;
-        let candidate =
-            select_release(fetch_github_releases()?, include_prerelease).filter(|release| {
-                manifest::is_newer(
-                    &release.version,
-                    release.build.as_ref(),
-                    &current,
-                    BuildIdentity::current().as_ref(),
-                    include_prerelease,
-                )
-            });
+        let candidate = select_release(fetch_github_releases()?, include_prerelease)
+            .filter(|release| manifest::is_newer(&release.version, &current, include_prerelease));
         let verified = candidate
-            .map(|mut selected| {
+            .map(|selected| {
                 let bytes = fetch_asset(&selected.manifest_url, 256 * 1024)?;
                 let signature_url = selected
                     .release
@@ -381,7 +361,7 @@ impl ApplicationUpdateService {
                     .clone();
                 let signature = String::from_utf8(fetch_asset(&signature_url, 16 * 1024)?)
                     .map_err(updater_failure)?;
-                let (build, asset) = manifest::verified_asset(
+                let asset = manifest::verified_asset(
                     &bytes,
                     &signature,
                     UPDATER_PUBLIC_KEY,
@@ -398,7 +378,6 @@ impl ApplicationUpdateService {
                         "signed installer is missing from selected release",
                     ));
                 }
-                selected.build = Some(build);
                 Ok(VerifiedRelease { selected, asset })
             })
             .transpose()?;
@@ -560,7 +539,7 @@ fn select_release(
             if release.draft {
                 return None;
             }
-            let (version, build) = manifest::parse_tag(&release.tag_name)?;
+            let version = manifest::parse_tag(&release.tag_name)?;
             let version_is_prerelease = !version.pre.is_empty();
             if version_is_prerelease != release.prerelease {
                 return None;
@@ -578,17 +557,9 @@ fn select_release(
                 version,
                 release,
                 manifest_url,
-                build,
             })
         })
-        .max_by(|left, right| {
-            left.version.cmp_precedence(&right.version).then_with(|| {
-                left.build
-                    .as_ref()
-                    .map(BuildIdentity::order)
-                    .cmp(&right.build.as_ref().map(BuildIdentity::order))
-            })
-        })
+        .max_by(|left, right| left.version.cmp_precedence(&right.version))
 }
 
 fn release_snapshot(selected: &SelectedRelease) -> ApplicationUpdateRelease {
@@ -605,7 +576,6 @@ fn release_snapshot(selected: &SelectedRelease) -> ApplicationUpdateRelease {
         .map(|asset| asset.size);
     ApplicationUpdateRelease {
         tag: release.tag_name.clone(),
-        build: selected.build.as_ref().map(BuildIdentity::id),
         version: selected.version.to_string(),
         title: release
             .name
@@ -683,22 +653,17 @@ mod tests {
     }
 
     #[test]
-    fn repeated_preview_tags_sort_by_build_and_remain_opt_in() {
+    fn build_tags_are_ignored_and_version_tags_are_selected() {
         let selected = select_release(
             vec![
-                release("preview-v0.3.0-alpha.1-b9.9-gaaaaaaa", true),
-                release("preview-v0.3.0-alpha.1-b10.1-gbbbbbbb", true),
-                release("preview-v0.3.0-alpha.1-b10.2-gccccccc", true),
+                release("preview-v0.3.0-alpha.1-b30.1-gaaaaaaa", true),
+                release("v0.3.0-alpha.1", true),
+                release("v0.3.0-alpha.2", true),
             ],
             true,
         )
         .unwrap();
-        assert_eq!(selected.build.unwrap().order(), (10, 2));
-        assert!(select_release(
-            vec![release("preview-v0.3.0-alpha.1-b10.2-gccccccc", true)],
-            false,
-        )
-        .is_none());
+        assert_eq!(selected.version, Version::parse("0.3.0-alpha.2").unwrap());
     }
 
     #[test]

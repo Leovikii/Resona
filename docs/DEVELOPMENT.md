@@ -33,7 +33,7 @@ cargo test --manifest-path src-tauri/Cargo.toml pinned_ffmpeg_test_tools_preserv
 
 固定 FFmpeg 版本、URL、归档/二进制哈希和许可证必须同步审查。测试工具只写入忽略的 `src-tauri/binaries/`；运行时依赖写入 Local AppData 并由 `FfmpegDependencyService` 验证。
 
-预览分发由 `.github/workflows/main-merge-delivery.yml` 的 main push 完成：验证后构建 Windows NSIS 和 Arch 包，统一验签、draft 上传并公开；dev push 不发布。本机产物只测试，留在忽略的 target，不提交/上传。AUR 同步配置与重跑规则见[交付方案](plans/0.3.0-preview-delivery.md)。
+预览分发由 `.github/workflows/main-merge-delivery.yml` 的 main push 完成：验证后构建 Windows NSIS 和 Arch 包，统一验签、draft 上传并公开；dev push 不发布。本机产物只测试，留在忽略的 target，不提交/上传。每个版本只发布 `v<version>` 的一个 Release，已有 tag 时同版本合并跳过；发布说明维护在 `docs/releases/<version>.md`，使用极简英文 Markdown。AUR 同步配置与重跑规则见[交付方案](plans/0.3.0-preview-delivery.md)。
 
 Linux 本机构建使用 `npm run build:linux`，开发与运行使用 `npm run dev:linux` / `npm run start:linux`；不将裸 `cargo build` 的开发服务器模式产物交付测试。KDE 桌面歌词使用系统 `gtk-layer-shell`，MPRIS 使用会话总线；原生自动回归可运行 `python3 scripts/test-linux-desktop.py`（需要 Release、gio/desktop-file-utils，必须先关闭其他实例；也可设置 `RESONA_TEST_BINARY` / `RESONA_TEST_DESKTOP` 检查解包后的真实安装布局）。Linux 的同目录输出采用不覆盖硬链接提交，失败保留源文件。
 

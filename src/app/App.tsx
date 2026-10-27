@@ -1571,9 +1571,7 @@ function SettingsView({ applicationLifetime, applicationUpdate, busy, desktopLyr
   const updateButtonLabel = !applicationUpdate.snapshot.supported
     ? t("settings.versionManual", { version: applicationUpdate.snapshot.currentVersion })
     : applicationUpdate.available
-    ? applicationUpdate.available.version === applicationUpdate.snapshot.currentVersion && applicationUpdate.available.build
-      ? t("settings.buildAvailable", { build: applicationUpdate.available.build })
-      : `v${applicationUpdate.snapshot.currentVersion} -> v${applicationUpdate.available.version}`
+    ? `v${applicationUpdate.snapshot.currentVersion} -> v${applicationUpdate.available.version}`
     : applicationUpdate.status === "checking"
       ? t("settings.versionChecking", { version: applicationUpdate.snapshot.currentVersion })
       : applicationUpdate.checked

@@ -41,3 +41,5 @@ ADR 记录会长期影响代码、依赖或产品边界且无法仅从实现看�
 - [0029 - Wayland 置顶桌面歌词与 KDE 媒体集成](0029-wayland-lyrics-and-mpris.md)
 
 - [0030 - 同版本预览构建、Arch 分发与更新归属](0030-preview-builds-and-linux-distribution.md)
+
+- [0031 - 每个应用版本只发布一次](0031-version-release-tags.md)

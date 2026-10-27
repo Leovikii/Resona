@@ -32,10 +32,6 @@ impl BuildIdentity {
         )
     }
 
-    pub fn order(&self) -> (u64, u64) {
-        (self.run_number, self.run_attempt)
-    }
-
     fn valid(&self) -> bool {
         self.run_number > 0
             && self.run_attempt > 0
@@ -47,56 +43,12 @@ impl BuildIdentity {
     }
 }
 
-pub fn parse_tag(tag: &str) -> Option<(Version, Option<BuildIdentity>)> {
-    if let Some(value) = tag.strip_prefix("preview-v") {
-        let (version, build) = value.rsplit_once("-b")?;
-        let version = Version::parse(version).ok()?;
-        if version.pre.is_empty() {
-            return None;
-        }
-        let (numbers, sha) = build.split_once("-g")?;
-        if sha.len() != 7
-            || !sha
-                .bytes()
-                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
-        {
-            return None;
-        }
-        let (number, attempt) = numbers.split_once('.')?;
-        let identity = BuildIdentity {
-            run_number: number.parse().ok()?,
-            run_attempt: attempt.parse().ok()?,
-            // Full SHA is only trusted after signature verification.
-            sha: format!("{sha}{}", "0".repeat(33)),
-        };
-        if !identity.valid() || format!("preview-v{}-{}", version, identity.id()) != tag {
-            return None;
-        }
-        Some((version, Some(identity)))
-    } else {
-        Some((Version::parse(tag.strip_prefix('v')?).ok()?, None))
-    }
+pub fn parse_tag(tag: &str) -> Option<Version> {
+    Version::parse(tag.strip_prefix('v')?).ok()
 }
 
-pub fn is_newer(
-    version: &Version,
-    build: Option<&BuildIdentity>,
-    current: &Version,
-    current_build: Option<&BuildIdentity>,
-    preview: bool,
-) -> bool {
-    match version.cmp_precedence(current) {
-        std::cmp::Ordering::Greater => preview || version.pre.is_empty(),
-        std::cmp::Ordering::Equal => {
-            version == current
-                && !version.pre.is_empty()
-                && preview
-                && build
-                    .zip(current_build)
-                    .is_some_and(|(next, installed)| next.order() > installed.order())
-        }
-        std::cmp::Ordering::Less => false,
-    }
+pub fn is_newer(version: &Version, current: &Version, preview: bool) -> bool {
+    version.cmp_precedence(current).is_gt() && (preview || version.pre.is_empty())
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -139,7 +91,7 @@ pub fn verified_asset(
     public_key: &str,
     tag: &str,
     version: &Version,
-) -> Result<(BuildIdentity, PlatformAsset), ApplicationUpdateFailure> {
+) -> Result<PlatformAsset, ApplicationUpdateFailure> {
     verify_signature(bytes, signature, public_key)?;
     validate_manifest(bytes, tag, version)
 }
@@ -148,16 +100,12 @@ fn validate_manifest(
     bytes: &[u8],
     tag: &str,
     version: &Version,
-) -> Result<(BuildIdentity, PlatformAsset), ApplicationUpdateFailure> {
+) -> Result<PlatformAsset, ApplicationUpdateFailure> {
     let manifest: Manifest = serde_json::from_slice(bytes).map_err(invalid)?;
     if !manifest.build.valid() {
         return Err(invalid("invalid build identity"));
     }
-    let expected_tag = if version.pre.is_empty() {
-        format!("v{version}")
-    } else {
-        format!("preview-v{version}-{}", manifest.build.id())
-    };
+    let expected_tag = format!("v{version}");
     if manifest.schema != 1
         || manifest.version != *version
         || manifest.tag != tag
@@ -168,7 +116,6 @@ fn validate_manifest(
             } else {
                 "preview"
             }
-        || !manifest.build.valid()
         || manifest.platforms.len() != 1
     {
         return Err(invalid("manifest identity does not match selected release"));
@@ -188,7 +135,7 @@ fn validate_manifest(
     {
         return Err(invalid("invalid NSIS asset or signature"));
     }
-    Ok((manifest.build, asset.clone()))
+    Ok(asset.clone())
 }
 
 fn invalid(error: impl std::fmt::Display) -> ApplicationUpdateFailure {
@@ -210,69 +157,35 @@ mod tests {
     }
 
     #[test]
-    fn preview_order_is_numeric_and_never_overrides_application_version() {
-        let version = Version::parse("0.3.0-alpha.1").unwrap();
+    fn updates_require_a_higher_version_and_respect_the_preview_channel() {
+        let current = Version::parse("0.3.0-alpha.1").unwrap();
+        assert!(!is_newer(&current, &current, true));
+        assert!(!is_newer(&Version::parse("0.2.1").unwrap(), &current, true));
         assert!(is_newer(
-            &version,
-            Some(&build(10, 1)),
-            &version,
-            Some(&build(9, 9)),
-            true
-        ));
-        assert!(is_newer(
-            &version,
-            Some(&build(10, 2)),
-            &version,
-            Some(&build(10, 1)),
-            true
-        ));
-        for (next, installed) in [(build(10, 1), build(10, 1)), (build(9, 9), build(10, 1))] {
-            assert!(!is_newer(
-                &version,
-                Some(&next),
-                &version,
-                Some(&installed),
-                true
-            ));
-        }
-        assert!(!is_newer(
-            &version,
-            Some(&build(999, 1)),
-            &Version::parse("0.3.0").unwrap(),
-            Some(&build(1, 1)),
+            &Version::parse("0.3.0-alpha.2").unwrap(),
+            &current,
             true
         ));
         assert!(!is_newer(
-            &version,
-            Some(&build(10, 1)),
-            &version,
-            Some(&build(9, 1)),
+            &Version::parse("0.3.0-alpha.2").unwrap(),
+            &current,
             false
         ));
+        assert!(is_newer(&Version::parse("0.3.0").unwrap(), &current, false));
         assert!(!is_newer(
-            &version,
-            Some(&build(10, 1)),
-            &version,
-            None,
+            &Version::parse("0.3.0-alpha.1+build.99").unwrap(),
+            &current,
             true
-        ));
-        assert!(is_newer(
-            &Version::parse("0.3.0").unwrap(),
-            Some(&build(1, 1)),
-            &version,
-            Some(&build(999, 1)),
-            false
         ));
     }
 
     #[test]
-    fn tag_parser_rejects_ambiguous_builds() {
-        assert!(parse_tag("preview-v0.3.0-alpha.1-b42.2-gaaaaaaa").is_some());
+    fn tags_use_the_application_version_only() {
+        assert!(parse_tag("v0.3.0-alpha.1").is_some());
+        assert!(parse_tag("v0.3.0").is_some());
         for tag in [
-            "preview-v0.3.0-b42.1-gaaaaaaa",
-            "preview-v0.3.0-alpha.1-b0.1-gaaaaaaa",
-            "preview-v0.3.0-alpha.1-b01.1-gaaaaaaa",
-            "preview-v0.3.0-alpha.1-b42.1-gAAAAAAA",
+            "preview-v0.3.0-alpha.1-b42.1-gaaaaaaa",
+            "v0.3.0-alpha.01",
             "0.3.0",
         ] {
             assert!(parse_tag(tag).is_none(), "{tag}");
@@ -285,7 +198,7 @@ mod tests {
         let signature = include_str!("../../../tests/fixtures/update/latest.json.sig");
         let public_key = include_str!("../../../tests/fixtures/update/public-key.txt");
         let version = Version::parse("0.3.0-alpha.1").unwrap();
-        let tag = "preview-v0.3.0-alpha.1-b42.1-gaaaaaaa";
+        let tag = "v0.3.0-alpha.1";
         verified_asset(bytes, signature, public_key, tag, &version)
             .expect("the fixture must retain its exact signed bytes after checkout");
         let crlf = String::from_utf8(bytes.to_vec())
@@ -300,15 +213,15 @@ mod tests {
     }
 
     #[test]
-    fn manifest_is_bound_to_tag_build_and_installer() {
-        let tag = "preview-v0.3.0-alpha.1-b42.1-gaaaaaaa";
+    fn manifest_is_bound_to_version_tag_and_installer() {
+        let tag = "v0.3.0-alpha.1";
         let version = Version::parse("0.3.0-alpha.1").unwrap();
         let mut json = serde_json::json!({"schema": 1, "version": version, "tag": tag, "channel": "preview", "build": build(42,1), "platforms": {"windows-x86_64": {"url": format!("https://github.com/Leovikii/Resona/releases/download/{tag}/Resona_windows_x86_64-setup.exe"), "signature":"installer-signature"}}});
         let bytes = serde_json::to_vec(&json).unwrap();
         assert!(validate_manifest(&bytes, tag, &version).is_ok());
         assert!(validate_manifest(&bytes, "other-tag", &version).is_err());
         assert!(verified_asset(&bytes, "", "", tag, &version).is_err());
-        json["build"]["runNumber"] = 41.into();
+        json["build"]["runNumber"] = 0.into();
         assert!(validate_manifest(&serde_json::to_vec(&json).unwrap(), tag, &version).is_err());
         json["build"] = serde_json::to_value(build(42, 1)).unwrap();
         json["platforms"]["windows-x86_64"]["url"] = "https://example.com/setup.exe".into();

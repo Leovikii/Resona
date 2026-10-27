@@ -16,7 +16,6 @@ export interface ApplicationUpdateSnapshot {
 
 export interface ApplicationUpdateRelease {
   tag: string;
-  build: string | null;
   version: string;
   title: string;
   notes: string;

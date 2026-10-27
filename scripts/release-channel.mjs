@@ -106,7 +106,7 @@ export function buildIdentity(version, runNumber, runAttempt, sha) {
   const id = `b${runNumber}.${runAttempt}-g${sha.slice(0, 7)}`;
   return {
     runNumber: Number(runNumber), runAttempt: Number(runAttempt), sha, id,
-    tag: parseReleaseVersion(version).prerelease ? `preview-v${version}-${id}` : `v${version}`,
+    tag: `v${version}`,
   };
 }
 
@@ -139,7 +139,7 @@ export function releaseInspection({ base, root = projectRoot } = {}) {
   const identity = process.env.GITHUB_RUN_NUMBER
     ? buildIdentity(parsed.version, process.env.GITHUB_RUN_NUMBER, process.env.GITHUB_RUN_ATTEMPT, process.env.GITHUB_SHA)
     : null;
-  const tag = identity?.tag ?? `v${parsed.version}`;
+  const tag = `v${parsed.version}`;
   const paths = base ? execFileSync("git", ["diff", "--name-only", base, "HEAD"], { cwd: root, encoding: "utf8" }).trim().split("\n") : [];
 
   const tagExists = execFileSync(
