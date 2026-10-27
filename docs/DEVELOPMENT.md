@@ -74,6 +74,14 @@ Linux 本机构建使用 `npm run build:linux`，开发与运行使用 `npm run 
 
 UI 固定格式控件要有稳定尺寸，文本不得溢出或遮挡。压缩窗口最低覆盖 `720x500`，主窗口至少覆盖 `1080x700`、`760x520`、`420x720`、`360x600`。
 
+### 双平台精简执行
+
+- PR 的 Windows job 执行完整 `npm test`（自动发现 `scripts/*.test.mjs`），共享前端纯逻辑不在 Linux job 重复。Linux 的 `npm run test:linux` 保留 POSIX 路径、桌面打包和交付规则；Rust 测试、Clippy 与编译两端各跑，因为平台 adapter 和条件编译不同。最终 PR 门禁仍要求两端成功。
+- Linux 两项 FFmpeg 忽略测试合并为一次 `cargo test --manifest-path src-tauri/Cargo.toml --locked ffmpeg -- --ignored --test-threads=1`。不删文件安全、迁移、取消或真实转换矩阵。窗口切换压力检查用两次完整往返，保留尺寸记忆、并发 resize、最大化恢复和重建断言。
+- 共享 UI 用一组代表性组合覆盖四个规定视口、浅/深色、solid/Mica 预览、压缩窗口和歌词常用/64px 字号，不做所有排列的笛卡尔积。检查溢出、控件可达、键盘焦点、歌词移入/移出及高于 hover 阈值的设置。共享布局不按操作系统重复截图；两端原生 Release 仍分别核查字体、透明背景、主题、窗口按钮/动画和锁定穿透。
+- 原生回归并入现有生命周期测试：Linux 同一用例覆盖 helper 显隐/点击、输入区域和重建；Windows 普通测试直接向自有 HWND 发送 hover/leave/重显消息，断言绘制状态与 alpha。实际鼠标命中、跨进程穿透、DPI 与 Windows Mica 保留短实机清单。浏览器预览不能宣布原生视觉通过。
+- Linux 会话测试串行运行、每次新建 XDG 数据/缓存目录并保留桌面配置；已有实例占用时先退出，避免误测用户会话。更改后只重跑受影响层和必要构建，最终以双平台 CI 汇总；没有新变化不重复完整矩阵。
+
 ## 依赖准入
 
 新增/升级依赖前确认：

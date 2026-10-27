@@ -3,8 +3,13 @@
 use serde::{Deserialize, Serialize};
 use tauri::{
     window::{Effect, EffectsBuilder},
-    AppHandle, Manager, Runtime, Theme, WebviewWindow, WebviewWindowBuilder,
+    AppHandle, Manager, Runtime, WebviewWindow, WebviewWindowBuilder,
 };
+
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) use linux::verify_native_theme;
 
 const MAIN_LABEL: &str = "main";
 const COMPRESSION_LABEL: &str = "audio-compression";
@@ -77,14 +82,20 @@ pub fn sync_theme<R: Runtime>(
     theme: WindowTheme,
 ) -> Result<WindowMaterial, WindowMaterialFailure> {
     let window = managed_window(app, label)?;
-    let native_theme = match theme {
-        WindowTheme::Auto => None,
-        WindowTheme::Light => Some(Theme::Light),
-        WindowTheme::Dark => Some(Theme::Dark),
-    };
-    window
-        .set_theme(native_theme)
-        .map_err(|error| failure("window_theme_failed", error))?;
+    #[cfg(target_os = "linux")]
+    linux::sync(&window, theme)?;
+    #[cfg(not(target_os = "linux"))]
+    {
+        use tauri::Theme;
+        let native_theme = match theme {
+            WindowTheme::Auto => None,
+            WindowTheme::Light => Some(Theme::Light),
+            WindowTheme::Dark => Some(Theme::Dark),
+        };
+        window
+            .set_theme(native_theme)
+            .map_err(|error| failure("window_theme_failed", error))?;
+    }
     let material = preferred_for(label);
     apply_effect(
         &window,

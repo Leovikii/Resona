@@ -17,6 +17,10 @@
 - updater 的平台支持由 distribution adapter 决定并进入类型化快照。Linux 不发起 Release 发现，不提供 Windows 安装器或签名安装动作；UI 明确提示手动更新。
 - Linux 输出提交不能使用会替换既有目标的 POSIX rename；对同目录临时文件用硬链接发布，再删除临时文件。目标出现竞争冲突或文件系统不支持硬链接时返回错误，保留源 WAV；禁止回退到覆盖写入。
 
+## KDE 应用身份修订（0.3.0-alpha.2）
+
+当前 Linux 验收只面向本机 Arch 系 / KDE Plasma / 原生 Wayland。进程在 GTK 初始化前设置 `glib::set_prgname`，并启用 Tauri `app.enableGTKAppId`；实际 xdg-toplevel app_id、desktop basename 与 Icon 均使用 `io.github.vki.resona`。这恢复 KDE 窗口归组、图标及任务栏动画目标；不另建原生 Wayland 窗口栈或模拟窗口特效。主题适配见 ADR 0022，GTK 仍承担输入、窗口角色和 WebKit 集成。
+
 ## 验证与后果
 
 - 前端与 Rust 回归、系统 FFmpeg 矩阵、默认音频设备、格式解码与连续播放在本机运行；显示与硬件结论单独记录。

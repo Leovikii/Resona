@@ -1,8 +1,10 @@
 # Arch Linux / Wayland 开发预览
 
-`0.3.0-alpha.1` 开始支持 Arch Linux 系 x86_64 的原生 Wayland 会话。本机验证环境为 CachyOS、KDE Plasma、PipeWire；其他发行版、X11 和 ARM 不在范围内；普通版本 tag 的公开发行待 main Actions 执行。
+`0.3.0-alpha.1` 开始支持 Arch Linux 系 x86_64 的原生 Wayland 会话。本机验证环境为 CachyOS、KDE Plasma、PipeWire；其他发行版、X11 和 ARM 不在范围内；交付状态见 [STATUS](STATUS.md)。
 
-[跨平台预览交付方案](plans/0.3.0-preview-delivery.md)已获批准并落盘：保持当前应用版本，main 的 Actions 交付 Arch `.pkg.tar.zst`、AUR `-bin` 载荷和配方，Linux 应用内提供包管理器更新引导，不提供 AppImage 或应用自更新。实际公开资产/AUR 上线仍待 main 工作流与凭据配置。
+[跨平台预览交付方案](plans/0.3.0-preview-delivery.md)已获批准并落盘：main 的 Actions 交付 Arch `.pkg.tar.zst`、AUR `-bin` 载荷和配方，Linux 应用内提供包管理器更新引导，不提供 AppImage 或应用自更新。实际公开资产/AUR 状态本轮未重新查询。
+
+当前开发版本 [0.3.0-alpha.2](plans/0.3.0-alpha.2.md) 继续只验收本机 Arch 系 x86_64 / KDE Plasma / 原生 Wayland。使用桌面 portal 初始值与变更信号同步 auto 主题，保留手动覆盖；GTK 应用 ID 和进程名均为 `io.github.vki.resona`，与 desktop/hicolor 图标一致。原生测试已观察到 KWin maximize/squash 动画启动；歌词背景以局部指针状态恢复设置值，锁定 helper 只在鼠标进入时绘制按钮。实际鼠标手感、安装版切换器和多屏仍见计划中的验收限制。
 
 ## 安装、打开方式与更新
 
@@ -42,9 +44,9 @@ GDK_BACKEND=wayland ./src-tauri/target/release/resona /path/to/track.flac
 
 数据遵循 Tauri 的 XDG 目录（应用标识 `io.github.vki.resona`）。测试使用临时 XDG 数据、配置与缓存目录，与用户数据分离。
 
-### 已构建的本机测试包
+### alpha.1 历史本机测试包
 
-本轮提供 `src-tauri/target/test-build/Resona-0.3.0-alpha.1-arch-wayland-x86_64/`，在仓库根目录执行：
+alpha.1 曾提供 `src-tauri/target/test-build/Resona-0.3.0-alpha.1-arch-wayland-x86_64/`，在仓库根目录执行：
 
 ```bash
 ./src-tauri/target/test-build/Resona-0.3.0-alpha.1-arch-wayland-x86_64/start-resona.sh
@@ -80,7 +82,7 @@ GDK_BACKEND=wayland ./src-tauri/target/release/resona /path/to/track.flac
 | 桌面悬浮歌词 | KDE Wayland layer-shell overlay 置顶透明窗口，字号固定高度、两行歌词、拖动/左右调整宽度、锁定穿透及原生 GTK 解锁按钮；关闭后释放 WebView |
 | KDE 媒体面板 / MPRIS | 曲目信息、封面、位置、播放/暂停/停止、前后曲、定位、音量、循环/随机、激活与退出；复用同一播放引擎 |
 | Windows 任务栏控件与 Mica | Linux 不提供 |
-| 自动更新、Linux 包与文件关联安装 | 本轮不提供；设置显示手动更新，不查询或提供 Windows Release 更新 |
+| 安装、文件关联与更新 | 已实现 Arch/AUR 打包与 MP3/WAV/FLAC 打开方式；实际分发状态见 STATUS。应用只给包管理器更新说明，不查询 Release 或安装 Windows 更新 |
 
 桌面歌词必须使用支持 layer-shell 的 Wayland compositor；当前验证 KDE Plasma。置顶由 overlay 协议保证，不抢键盘焦点；系统锁屏仍由 compositor 管理。几何为当前输出内的逻辑坐标，暂不支持拖动跨输出或热拔插恢复。
 
@@ -99,18 +101,19 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D w
 # 本机有真实输出设备和系统 FFmpeg 时，串行运行通常忽略的用例
 cargo test --manifest-path src-tauri/Cargo.toml --locked -- --ignored --skip native_ --test-threads=1
 # KDE Wayland 协议与生命周期测试，单独运行，使用隔离目录
-XDG_DATA_HOME=/tmp/resona-native-test/data XDG_CONFIG_HOME=/tmp/resona-native-test/config \
-XDG_CACHE_HOME=/tmp/resona-native-test/cache GDK_BACKEND=wayland WAYLAND_DEBUG=client \
+resona_native_root=$(mktemp -d)
+XDG_DATA_HOME=$resona_native_root/data XDG_CACHE_HOME=$resona_native_root/cache GDK_BACKEND=wayland WAYLAND_DEBUG=client \
 cargo test --manifest-path src-tauri/Cargo.toml --locked --features tauri/custom-protocol \
   native_layer_surface_lifecycle -- --ignored --nocapture --test-threads=1
 # 原生标题栏命中区、按钮动作和并发几何更新，单独运行
-XDG_DATA_HOME=/tmp/resona-controls-test/data XDG_CACHE_HOME=/tmp/resona-controls-test/cache \
+resona_controls_root=$(mktemp -d)
+XDG_DATA_HOME=$resona_controls_root/data XDG_CACHE_HOME=$resona_controls_root/cache \
 GDK_BACKEND=wayland WAYLAND_DEBUG=client \
 cargo test --manifest-path src-tauri/Cargo.toml --locked --features tauri/custom-protocol \
   native_window_controls_and_geometry -- --ignored --nocapture --test-threads=1
 ```
 
-标题栏测试在主窗口/压缩窗口刚显示时检查事件层不覆盖按钮，一秒内具备完整输入区域，再检查按钮的 GDK 输入窗口与控件尺寸一致（至少 48×48 逻辑像素），通过原生 GTK 按钮信号验证最大化和关闭，并在布局切换期间触发 UI resize 回调。窗口回归还检查实际 GTK 内容区、24 次宽窄切换、两套自定义尺寸、重新加载和压缩窗口重建，避免只验证窗口 API 返回值。最小化以 Wayland 日志中的 `xdg_toplevel.set_minimized()` 为证，不能依赖 Wayland 没有提供的最小化状态确认；真实启动后立即点击、按钮边缘点击和标题栏拖动仍需人工验收。
+标题栏测试在主窗口/压缩窗口刚显示时检查事件层不覆盖按钮，一秒内具备完整输入区域，再检查按钮的 GDK 输入窗口与控件尺寸一致（至少 48×48 逻辑像素），通过原生 GTK 按钮信号验证最大化和关闭，并在布局切换期间触发 UI resize 回调。窗口回归还检查实际 GTK 内容区、4 次宽窄切换（两次完整往返）、两套自定义尺寸、重新加载和压缩窗口重建，避免只验证窗口 API 返回值。测试要求 `qdbus6` 及已启用的 maximize/squash 特效，同时验证 portal light→dark→light 与手动覆盖、GTK 应用 ID，并通过 KWin activeEffects 观察两类动画启动；最小化还检查 Wayland `xdg_toplevel.set_minimized()`，不依赖 Wayland 未提供的最小化状态确认；真实启动后立即点击、按钮边缘点击和标题栏拖动仍需人工验收。
 
 原生 Release 集成回归（先关闭所有 Resona 实例，脚本拒绝复用正在运行的应用）：
 

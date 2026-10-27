@@ -20,6 +20,10 @@ Resona 的功能布局和主要交互已经收口，但普通 WebView 使用完�
 - Mica 初始化在主窗口显示前完成。失败必须记录错误并保持/恢复 `solid` 语义，不能留下透明黑窗、白闪或不可读界面。
 - 主题偏好以 `auto`/`light`/`dark` 原样跨边界传递。`auto` 必须清除原生窗口主题覆盖并使用系统自适应 Mica；手动浅色/深色才同时固定 Mantine、原生标题栏和对应 Mica 变体。不得先把 `auto` 压成当前亮暗值，否则手动主题会反向污染 WebView 的系统主题查询。
 
+### Linux auto 主题修订（0.3.0-alpha.2）
+
+Tao 0.35.3 的 Linux `set_theme(None)` 会写入 GTK 浅色偏好，不能作为恢复系统主题的实现。Linux adapter 通过现有 gio 读取 appearance portal `color-scheme` 并订阅 `SettingChanged`，在 GTK 事件线程保存系统值和原始偏好，再设置进程级 GTK 深色值，驱动标题栏与 WebKit `prefers-color-scheme`；不持久化解析后的主题、不轮询。GTK notify 校正 Tao 的竞争写入，保证手动覆盖不被桌面切换撤销。读取超时 500 ms，失败记录诊断并使用初始 GTK 值。Windows 继续保留上述清除覆盖和 Mica auto 语义。
+
 ### 表面层级
 
 - 共享 CSS 只暴露 `window background`、`chrome surface`、`content surface`、`player surface`、`subtle surface` 和 `hairline` 等语义 token。普通组件继续消费 Mantine token，不感知 Mica。

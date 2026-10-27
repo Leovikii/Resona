@@ -29,6 +29,8 @@ pub fn initialize_process() {
 pub fn initialize_process() {
     // Run before GTK and worker threads: native Wayland is required for layer-shell lyrics.
     std::env::set_var("GDK_BACKEND", "wayland");
+    // GTK's Wayland fallback must also match the installed desktop entry.
+    gtk::glib::set_prgname(Some("io.github.vki.resona"));
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "linux")))]
