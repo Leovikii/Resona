@@ -14,7 +14,7 @@
 | [plans/](plans/README.md) | 活动版本方案与发行门禁 |
 | [decisions/](decisions/README.md) | 长期架构决策 |
 | [performance/](performance/) | 当前正式版性能基线 |
-| [releases/](releases/) | 正式版发布说明 |
+| [releases/](releases/) | 版本发布说明 |
 | [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) | 自动生成的依赖许可证 |
 
 当前入口：[0.3.0 计划与验证](plans/0.3.0.md) · [跨平台预览交付方案](plans/0.3.0-preview-delivery.md) · [Arch Linux / Wayland](LINUX.md)；[0.2.1](plans/0.2.1.md) 保留原有发行门禁，0.2.0 已发布并归入发行说明。

@@ -1,6 +1,6 @@
 # ADR 0030：同版本预览构建、Arch 分发与更新归属
 
-- 状态：Accepted；所有者已批准实施，由 main Actions 交付；本机产物仅测试，提交推送到 dev，main 由所有者 PR。
+- 状态：部分 Superseded（[ADR 0031](0031-version-release-tags.md) 取代同版本发布/tag/更新比较/pkgrel，保留 Arch/AUR 与包管理器更新规则）；所有者已批准实施，由 main Actions 交付；本机产物仅测试，提交推送到 dev，main 由所有者 PR。
 - 日期：2026-10-27
 - 授权：所有者要求先提供当前版本的预览构建方案、保持版本号，并明确 Linux 只构建 Arch/AUR `-bin`，内置更新改为包管理器引导，不提供 AppImage 或 Linux 自更新。
 - 关联：拟补充 [ADR 0024](0024-windows-tray-distribution-and-update.md)、[ADR 0028](0028-arch-linux-wayland-baseline.md)；补充并取代上述 ADR 中仅 Windows/版本变化发布与 Linux 手动预览的分发规则。

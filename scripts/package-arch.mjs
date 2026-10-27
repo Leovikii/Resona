@@ -21,7 +21,7 @@ export function archRecipe({ version, identity, asset, checksum }) {
   return `# Maintained by the Resona release workflow; source: ${identity.sha}
 pkgname=${preview ? "resona-preview-bin" : "resona-bin"}
 pkgver=${archVersion(version)}
-pkgrel=${identity.runNumber}.${identity.runAttempt}
+pkgrel=1
 pkgdesc='Local audio player with desktop lyrics (Arch Wayland, precompiled)'
 arch=('x86_64')
 url='https://github.com/Leovikii/Resona'
@@ -60,7 +60,7 @@ export function packageArch(root, output, binary, identity, version) {
   mkdirSync(output, { recursive: true });
   const metadata = { version, ...identity };
   writeFileSync(resolve(stage, "usr/lib/Resona/build.json"), `${JSON.stringify(metadata, null, 2)}\n`);
-  const asset = `Resona_${version}_${identity.id}_arch_x86_64.tar.gz`;
+  const asset = `Resona_${version}_arch_x86_64.tar.gz`;
   execFileSync("tar", ["-czf", resolve(output, asset), "-C", stage, "usr"]);
   const checksum = createHash("sha256").update(readFileSync(resolve(output, asset))).digest("hex");
   const recipe = resolve(output, "aur");

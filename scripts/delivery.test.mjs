@@ -9,13 +9,16 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { affectsDelivery, buildIdentity, shouldCreateRelease } from "./release-channel.mjs";
 import { archRecipe, archVersion } from "./package-arch.mjs";
-import { collectArtifacts, updateManifest, verifyDraftAssets } from "./publish-release.mjs";
+import { collectArtifacts, publishDraft, updateManifest, verifyDraftAssets } from "./publish-release.mjs";
 const version = "0.3.0-alpha.1";
 const identity = buildIdentity(version, "42", "1", "a".repeat(40));
 
-test("repeat preview builds have immutable, numeric identities without changing application version", () => {
-  assert.equal(identity.tag, "preview-v0.3.0-alpha.1-b42.1-gaaaaaaa");
-  assert.notEqual(identity.tag, buildIdentity(version, 42, 2, "a".repeat(40)).tag);
+test("one version keeps one tag across build attempts", () => {
+  assert.equal(identity.tag, "v0.3.0-alpha.1");
+  assert.equal(identity.tag, buildIdentity(version, 42, 2, "a".repeat(40)).tag);
+  assert.notEqual(identity.id, buildIdentity(version, 42, 2, "a".repeat(40)).id);
+  assert.equal(shouldCreateRelease({ currentVersion: version, previousVersion: version, tagExists: true }), false);
+  assert.equal(shouldCreateRelease({ currentVersion: version, previousVersion: version, tagExists: false }), true);
   assert.equal(buildIdentity("0.3.0", 43, 1, "a".repeat(40)).tag, "v0.3.0");
   for (const invalid of [0, -1, "01", "1.1", "x", Number.MAX_SAFE_INTEGER + 1]) assert.throws(() => buildIdentity(version, invalid, 1, "a".repeat(40)));
   assert.throws(() => buildIdentity(version, 1, 1, "short"));
@@ -31,7 +34,7 @@ test("Arch package revisions and preview mapping sort before final releases", { 
   const probe = spawnSync("vercmp", ["1", "1"]);
   if (probe.error?.code === "ENOENT") return;
   assert.ifError(probe.error);
-  const versions = ["0.3.0alpha1-42.1", "0.3.0alpha1-42.2", "0.3.0alpha1-43.1", "0.3.0alpha2-1", "0.3.0-1"];
+  const versions = ["0.3.0alpha1-1", "0.3.0alpha2-1", "0.3.0beta1-1", "0.3.0rc1-1", "0.3.0-1"];
   for (let i = 1; i < versions.length; i++) assert.equal(spawnSync("vercmp", [versions[i - 1], versions[i]], { encoding: "utf8" }).stdout.trim(), "-1");
   assert.equal(archVersion(version), "0.3.0alpha1");
   assert.equal(archVersion("0.3.0-rc.10"), "0.3.0rc10");
@@ -47,7 +50,7 @@ test("makepkg can parse the generated recipe without evaluating remote input", {
     writeFileSync(join(dir, "PKGBUILD"), archRecipe({ version, identity, asset: "Resona.tar.gz", checksum: "b".repeat(64) }));
     const result = spawnSync("makepkg", ["--printsrcinfo"], { cwd: dir, encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
-    for (const field of ["pkgbase = resona-preview-bin", "pkgver = 0.3.0alpha1", "pkgrel = 42.1", "depends = gtk-layer-shell", `sha256sums = ${"b".repeat(64)}`]) assert.ok(result.stdout.includes(field), field);
+    for (const field of ["pkgbase = resona-preview-bin", "pkgver = 0.3.0alpha1", "pkgrel = 1", "depends = gtk-layer-shell", `sha256sums = ${"b".repeat(64)}`]) assert.ok(result.stdout.includes(field), field);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -64,8 +67,8 @@ test("publishing requires both platform identities and the exact checksummed pay
     writeFileSync(join(windows, "build.json"), metadata);
     assert.throws(() => collectArtifacts(input, output, version, identity));
     writeFileSync(join(linux, "build.json"), metadata);
-    const installer = `Resona_${version}_${identity.id}_windows_x86_64-setup.exe`;
-    const payload = `Resona_${version}_${identity.id}_arch_x86_64.tar.gz`;
+    const installer = `Resona_${version}_windows_x86_64-setup.exe`;
+    const payload = `Resona_${version}_arch_x86_64.tar.gz`;
     writeFileSync(join(windows, installer), "binary");
     writeFileSync(join(windows, `${installer}.sig`), "signature");
     writeFileSync(join(linux, payload), "payload");
@@ -176,5 +179,54 @@ exit 1
     writeFileSync(payload, "tampered");
     assert.notEqual(run().status, 0);
     assert.equal(readFileSync(log, "utf8"), "");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+
+test("publication uses one version tag and minimal notes, retries drafts and preserves published releases", () => {
+  const dir = mkdtempSync(join(tmpdir(), "resona-publish-"));
+  writeFileSync(join(dir, "installer.exe"), "installer");
+  const notes = "docs/releases/0.3.0-alpha.1.md";
+  const run = ({ existing, failUpload = false, missingAsset = false, externallyPublished = false, failEdit = false } = {}) => {
+    const calls = [];
+    const gh = (args) => {
+      calls.push(args);
+      if (args[0] === "api") return JSON.stringify(existing ? [{ tag_name: identity.tag, draft: existing === "draft" }] : []);
+      if (args[1] === "upload" && failUpload) throw new Error("upload failed");
+      if (args[1] === "view") return JSON.stringify({ isDraft: !externallyPublished, assets: missingAsset ? [] : [{ name: "installer.exe" }] });
+      if (args[1] === "edit" && failEdit) throw new Error("publish response lost");
+      return "";
+    };
+    let error;
+    try { publishDraft(gh, identity, version, true, dir, notes); } catch (caught) { error = caught; }
+    return { calls, error };
+  };
+  try {
+    for (const existing of [undefined, "draft"]) {
+      const { calls, error } = run({ existing });
+      assert.ifError(error);
+      const create = calls.find((args) => args[1] === "create");
+      assert.equal(create[2], "v0.3.0-alpha.1");
+      assert.equal(create[create.indexOf("--title") + 1], "Resona 0.3.0-alpha.1");
+      assert.equal(create[create.indexOf("--notes-file") + 1], notes);
+      assert.ok(create.includes("--prerelease"));
+      assert.ok(!create.includes("--generate-notes"));
+      assert.equal(calls.filter((args) => args[1] === "delete").length, existing ? 1 : 0);
+      assert.equal(calls.at(-1)[1], "edit");
+    }
+    const published = run({ existing: "published" });
+    assert.match(published.error.message, /already published/);
+    assert.equal(published.calls.length, 1);
+    for (const options of [{ failUpload: true }, { missingAsset: true }]) {
+      const { calls, error } = run(options);
+      assert.ok(error);
+      assert.equal(calls.at(-1)[1], "delete");
+      assert.ok(!calls.some((args) => args[1] === "edit"));
+    }
+    for (const options of [{ failUpload: true, externallyPublished: true }, { failEdit: true }]) {
+      const { calls, error } = run(options);
+      assert.ok(error);
+      assert.ok(!calls.some((args) => args[1] === "delete"));
+    }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

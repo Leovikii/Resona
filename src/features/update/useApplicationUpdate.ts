@@ -20,7 +20,6 @@ const previewUpdateAvailable =
 
 const previewUpdateRelease: ApplicationUpdateRelease = {
   tag: "v0.1.0",
-  build: null,
   version: "0.1.0",
   title: "Resona 0.1.0",
   notes: [

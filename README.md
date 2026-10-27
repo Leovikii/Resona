@@ -14,12 +14,33 @@
 
 - Local MP3, WAV and FLAC playback with playlists and timed lyrics
 - Windows SMTC, taskbar controls, tray controls and desktop lyrics
-- Lossless WAV-to-FLAC compression through an optional verified FFmpeg download
+- Arch / KDE Wayland always-on-top desktop lyrics and MPRIS media controls
+- Lossless WAV-to-FLAC compression with FFmpeg (verified download on Windows, system package on Linux)
 - Local SQLite data; no account, telemetry or cloud library
 
 ## Install
 
-Download the Windows x64 NSIS installer from [GitHub Releases](https://github.com/Leovikii/Resona/releases). The 0.1.0 installer is not Authenticode-signed, so Windows may show a SmartScreen prompt; use only the official release page and verify its published SHA-256. In-app updates remain cryptographically signed.
+### Windows x64
+
+Download the `.exe` NSIS installer from [GitHub Releases](https://github.com/Leovikii/Resona/releases). Preview versions are marked **Pre-release**. The installer is not Authenticode-signed, so Windows may show a SmartScreen prompt. Use the official release page and verify `SHA256SUMS`; in-app updates use Tauri signature verification.
+
+### Arch Linux x86_64 · Wayland
+
+The recommended package is AUR `resona-preview-bin` for previews; stable releases will use `resona-bin`. The first AUR sync is pending. Once available, install with either helper:
+
+```bash
+yay -S resona-preview-bin
+# or
+paru -S resona-preview-bin
+```
+
+The current preview package will be available after main Actions publishes it. While AUR is pending, download the `.pkg.tar.zst` package from [GitHub Releases](https://github.com/Leovikii/Resona/releases) and install it:
+
+```bash
+sudo pacman -U ./resona-preview-bin-0.3.0alpha1-1-x86_64.pkg.tar.zst
+```
+
+The package registers MP3/WAV/FLAC opening in your desktop. Updates use `yay -Syu` / `paru -Syu`; manual package installs require downloading and installing the next package. Linux provides package-manager guidance in the app and uses system FFmpeg for compression. KDE Plasma is the tested desktop; other distributions, X11 and ARM are outside the current scope. See the [Linux guide](docs/LINUX.md).
 
 ## Development
 
@@ -28,6 +49,6 @@ npm ci
 npm run tauri dev
 ```
 
-Arch Linux x86_64 / KDE Wayland development preview includes overlay desktop lyrics and MPRIS media controls and is available in `0.3.0-alpha.1`; see the [Linux guide](docs/LINUX.md) for dependencies, build commands and capability limits. Linux packages and in-app updates are not published yet.
+For Arch Linux dependencies and build commands, see the [Linux guide](docs/LINUX.md).
 
 See [the development guide](docs/DEVELOPMENT.md). Resona is licensed under [GPL-3.0-only](LICENSE).
