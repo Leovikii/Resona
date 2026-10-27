@@ -47,16 +47,20 @@ export default function DesktopLyricsWindow() {
   useEffect(() => {
     if (!initialized || !isTauriRuntime()) return;
     let cancelled = false;
-    requestAnimationFrame(() => requestAnimationFrame(() => {
+    const ready = () => {
       if (cancelled) return;
       void invokeTauri("desktop_lyrics_window_ready").catch((readyError) => {
         console.error("Unable to show the prepared desktop lyrics window", readyError);
       });
-    }));
+    };
+    // Hidden WebKitGTK surfaces suspend animation frames until they are mapped.
+    const timer = desktopLyrics.snapshot.layerShell ? window.setTimeout(ready, 0) : null;
+    if (timer === null) requestAnimationFrame(() => requestAnimationFrame(ready));
     return () => {
       cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
     };
-  }, [initialized]);
+  }, [initialized, desktopLyrics.snapshot.layerShell]);
 
   const display = useMemo(() => {
     if (!initialized) return { current: "", next: "" };
@@ -103,8 +107,37 @@ export default function DesktopLyricsWindow() {
     status: playback.status,
   });
 
+  const gestureRef = useRef<{ kind: "move" | "east" | "west"; pending: Promise<unknown>; busy: boolean } | null>(null);
+  const beginGesture = (event: PointerEvent<HTMLElement>, kind: "move" | "east" | "west") => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!isTauriRuntime() || desktopLyrics.snapshot.locked) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const pending = invokeTauri("desktop_lyrics_pointer", { phase: "begin", kind, x: event.clientX, y: event.clientY });
+    gestureRef.current = { kind, pending, busy: false };
+    void pending.catch((error) => console.error("Unable to start lyrics gesture", error));
+  };
+  const updateGesture = (event: PointerEvent<HTMLElement>) => {
+    const gesture = gestureRef.current;
+    if (!gesture || gesture.busy) return;
+    gesture.busy = true;
+    const { clientX: x, clientY: y } = event;
+    gesture.pending = gesture.pending.then(() => invokeTauri("desktop_lyrics_pointer", {
+      phase: "update", kind: gesture.kind, x, y,
+    })).catch((error) => console.error("Unable to move lyrics surface", error)).finally(() => {
+      requestAnimationFrame(() => { gesture.busy = false; });
+    });
+  };
+  const endGesture = () => {
+    const gesture = gestureRef.current;
+    gestureRef.current = null;
+    if (gesture) void gesture.pending.then(() => invokeTauri("desktop_lyrics_pointer", {
+      phase: "end", kind: gesture.kind, x: 0, y: 0,
+    })).catch((error) => console.error("Unable to finish lyrics gesture", error));
+  };
   const startDragging = (event: PointerEvent<HTMLElement>) => {
     if (event.button !== 0 || !isTauriRuntime()) return;
+    if (desktopLyrics.snapshot.layerShell) { beginGesture(event, "move"); return; }
     event.preventDefault();
     void invokeTauri("start_desktop_lyrics_drag");
   };
@@ -124,6 +157,7 @@ export default function DesktopLyricsWindow() {
   const startResizing = (direction: "East" | "West") => (event: PointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
+    if (desktopLyrics.snapshot.layerShell) { beginGesture(event, direction === "East" ? "east" : "west"); return; }
     if (isTauriRuntime() && !desktopLyrics.snapshot.locked) {
       void startCurrentWindowResize(direction).catch((resizeError) => {
         console.error("Unable to resize the desktop lyrics window", resizeError);
@@ -150,6 +184,10 @@ export default function DesktopLyricsWindow() {
       data-ready={initialized || undefined}
       data-testid="desktop-lyrics-window"
       onPointerDown={startDragging}
+      onPointerMove={updateGesture}
+      onPointerUp={endGesture}
+      onPointerCancel={endGesture}
+      onLostPointerCapture={endGesture}
       style={style}
     >
       <div aria-hidden="true" className="desktop-lyrics-background" />

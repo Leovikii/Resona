@@ -6,13 +6,17 @@ export const applicationIsPrerelease = applicationVersion
   .includes("-");
 
 export interface ApplicationUpdateSnapshot {
+  supported: boolean;
   currentVersion: string;
+  currentBuild: string | null;
   currentIsPrerelease: boolean;
   receivePrereleaseUpdates: boolean;
   updaterConfigured: boolean;
 }
 
 export interface ApplicationUpdateRelease {
+  tag: string;
+  build: string | null;
   version: string;
   title: string;
   notes: string;
@@ -38,7 +42,9 @@ export interface ApplicationUpdateFailure {
 }
 
 export const defaultApplicationUpdateSnapshot: ApplicationUpdateSnapshot = {
+  supported: false,
   currentVersion: applicationVersion,
+  currentBuild: null,
   currentIsPrerelease: applicationIsPrerelease,
   receivePrereleaseUpdates: true,
   updaterConfigured: false,

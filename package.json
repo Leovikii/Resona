@@ -1,7 +1,7 @@
 {
   "name": "resona",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.3.0-alpha.1",
   "type": "module",
   "scripts": {
     "dev": "vite --port 1420",
@@ -13,12 +13,15 @@
     "icons:windows": "node scripts/generate-windows-shell-icons.mjs",
     "installer:artwork": "node scripts/generate-nsis-artwork.mjs",
     "preview": "vite preview --port 1421",
-    "test": "node --test scripts/release-channel.test.mjs scripts/preference-value.test.mjs scripts/full-player-paging.test.mjs scripts/compression-root-expansion.test.mjs scripts/compression-progress.test.mjs scripts/playlist-ordering.test.mjs scripts/playlist-tree.test.mjs scripts/edge-auto-scroll.test.mjs scripts/desktop-lyrics-timing.test.mjs",
-    "test:release": "node --test scripts/release-channel.test.mjs",
+    "test": "node --test scripts/release-channel.test.mjs scripts/preference-value.test.mjs scripts/full-player-paging.test.mjs scripts/compression-root-expansion.test.mjs scripts/compression-progress.test.mjs scripts/playlist-ordering.test.mjs scripts/playlist-tree.test.mjs scripts/edge-auto-scroll.test.mjs scripts/desktop-lyrics-timing.test.mjs scripts/linux-platform.test.mjs scripts/delivery.test.mjs",
+    "test:release": "node --test scripts/release-channel.test.mjs scripts/delivery.test.mjs",
     "verify:fixtures": "node scripts/generate-audio-fixtures.mjs --verify",
     "prepare:test-tools": "node scripts/prepare-ffmpeg-test-tools.mjs",
     "release:windows": "node scripts/prepare-updater-config.mjs && tauri build --bundles nsis --config src-tauri/target/updater.config.json",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build:linux": "tauri build --no-bundle",
+    "dev:linux": "GDK_BACKEND=wayland tauri dev",
+    "start:linux": "GDK_BACKEND=wayland ./src-tauri/target/release/resona"
   },
   "dependencies": {
     "@mantine/core": "^9.4.1",

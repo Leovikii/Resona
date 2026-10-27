@@ -154,12 +154,12 @@ pub async fn check_application_update(
 
 #[tauri::command]
 pub async fn install_application_update(
-    version: String,
+    tag: String,
     app: AppHandle,
     service: State<'_, ManagedApplicationUpdateService>,
 ) -> Result<(), ApplicationUpdateFailure> {
     log::info!("application update installation started");
-    let result = Arc::clone(service.inner()).install(app, version).await;
+    let result = Arc::clone(service.inner()).install(app, tag).await;
     match &result {
         Ok(()) => log::info!("application update installer launched"),
         Err(error) => log::warn!(
@@ -1030,4 +1030,15 @@ fn playlist_sync_failure(failure: PlaybackFailure) -> PersistenceFailure {
         code: "playback_sequence_sync_failed".to_owned(),
         message: failure.message,
     }
+}
+
+#[tauri::command]
+pub async fn desktop_lyrics_pointer(
+    phase: String,
+    kind: String,
+    x: f64,
+    y: f64,
+    service: State<'_, ManagedDesktopLyricsWindowService>,
+) -> Result<(), DesktopLyricsWindowFailure> {
+    crate::platform::desktop_lyrics::pointer(&service, phase, kind, x, y)
 }

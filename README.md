@@ -2,7 +2,7 @@
   <img src="assets/resona-resonance-wordmark.svg" width="420" alt="Resona">
 </p>
 
-<p align="center">A local-first Windows audio player built for focused listening.</p>
+<p align="center">A local-first desktop audio player built for focused listening.</p>
 
 <p align="center">
   <a href="README.zh-CN.md">简体中文</a> ·
@@ -27,5 +27,7 @@ Download the Windows x64 NSIS installer from [GitHub Releases](https://github.co
 npm ci
 npm run tauri dev
 ```
+
+Arch Linux x86_64 / KDE Wayland development preview includes overlay desktop lyrics and MPRIS media controls and is available in `0.3.0-alpha.1`; see the [Linux guide](docs/LINUX.md) for dependencies, build commands and capability limits. Linux packages and in-app updates are not published yet.
 
 See [the development guide](docs/DEVELOPMENT.md). Resona is licensed under [GPL-3.0-only](LICENSE).

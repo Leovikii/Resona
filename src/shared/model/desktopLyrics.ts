@@ -1,5 +1,6 @@
 export interface DesktopLyricsWindowSnapshot {
   supported: boolean;
+  layerShell?: boolean;
   visible: boolean;
   locked: boolean;
 }
@@ -10,7 +11,7 @@ export interface DesktopLyricsWindowFailure {
 }
 
 export const initialDesktopLyricsWindowSnapshot: DesktopLyricsWindowSnapshot = {
-  supported: true,
+  supported: false,
   visible: false,
   locked: false,
 };

@@ -31,23 +31,23 @@ use commands::{
     cancel_audio_compression, cancel_audio_compression_scan, cancel_ffmpeg_dependency_install,
     check_application_update, clear_audio_compression_inputs, clear_default_playlist,
     clear_playlist_items, confirm_application_exit, create_playlist, delete_other_playlists,
-    delete_playlist, desktop_lyrics_window_ready, fit_desktop_lyrics_window,
-    get_application_lifetime_state, get_application_update_state, get_audio_compression_scan_state,
-    get_audio_compression_state, get_audio_file_info, get_default_playlist,
-    get_desktop_lyrics_window_state, get_ffmpeg_dependency_state, get_main_window_state,
-    get_now_playing_state, get_playback_state, get_track_details, get_track_summaries,
-    hide_desktop_lyrics_window, install_application_update, install_ffmpeg_dependency,
-    list_playlist_items, list_playlists, lock_desktop_lyrics_window, main_window_ready,
-    move_default_playlist_item, move_playlist, move_playlist_item, next_playback,
-    open_external_url, open_main_settings, open_media_context, open_project_page, pause_playback,
-    play_default_playlist_item, play_queue_item, play_user_playlist_item, previous_playback,
-    refresh_output_devices, remove_audio_compression_inputs, remove_default_playlist_items,
-    remove_playlist_item, remove_playlist_items, rename_playlist, resolve_main_window_close,
-    resume_playback, reveal_audio_file, scan_audio_compression_inputs, seek_playback,
-    select_output_device, set_close_behavior, set_main_window_layout_mode, set_playback_mode,
-    set_playback_volume, set_receive_prerelease_updates, show_audio_compression_window,
-    show_desktop_lyrics_window, start_audio_compression, start_desktop_lyrics_drag,
-    sync_window_theme, unlock_desktop_lyrics_window,
+    delete_playlist, desktop_lyrics_pointer, desktop_lyrics_window_ready,
+    fit_desktop_lyrics_window, get_application_lifetime_state, get_application_update_state,
+    get_audio_compression_scan_state, get_audio_compression_state, get_audio_file_info,
+    get_default_playlist, get_desktop_lyrics_window_state, get_ffmpeg_dependency_state,
+    get_main_window_state, get_now_playing_state, get_playback_state, get_track_details,
+    get_track_summaries, hide_desktop_lyrics_window, install_application_update,
+    install_ffmpeg_dependency, list_playlist_items, list_playlists, lock_desktop_lyrics_window,
+    main_window_ready, move_default_playlist_item, move_playlist, move_playlist_item,
+    next_playback, open_external_url, open_main_settings, open_media_context, open_project_page,
+    pause_playback, play_default_playlist_item, play_queue_item, play_user_playlist_item,
+    previous_playback, refresh_output_devices, remove_audio_compression_inputs,
+    remove_default_playlist_items, remove_playlist_item, remove_playlist_items, rename_playlist,
+    resolve_main_window_close, resume_playback, reveal_audio_file, scan_audio_compression_inputs,
+    seek_playback, select_output_device, set_close_behavior, set_main_window_layout_mode,
+    set_playback_mode, set_playback_volume, set_receive_prerelease_updates,
+    show_audio_compression_window, show_desktop_lyrics_window, start_audio_compression,
+    start_desktop_lyrics_drag, sync_window_theme, unlock_desktop_lyrics_window,
 };
 use compression::CompressionService;
 use ffmpeg_dependency::FfmpegDependencyService;
@@ -65,7 +65,7 @@ pub fn run() {
     let media_import_service = Arc::new(MediaImportService::new(Arc::clone(&playback_engine)));
     let playback_for_restore = Arc::clone(&playback_engine);
     let lyrics_service = Arc::new(LyricsService::default());
-    let desktop_lyrics_service = Arc::new(DesktopLyricsWindowService::default());
+    let desktop_lyrics_service = Arc::new(platform::desktop_lyrics::create_service());
     let metadata_service = Arc::new(MetadataService::default());
     let metadata_for_projection = Arc::clone(&metadata_service);
     #[cfg(target_os = "windows")]
@@ -147,6 +147,9 @@ pub fn run() {
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
             restore_playback_preferences(&playback_for_restore, &database);
             app.manage(Arc::new(database));
+            if let Some(window) = app.get_webview_window("main") {
+                platform::window_controls::apply(&window);
+            }
             let main_window = Arc::new(main_window::MainWindowService::load(&data_dir));
             if let Err(error) = main_window.restore(app.handle()) {
                 eprintln!("main window restore failed: {error:?}");
@@ -164,13 +167,29 @@ pub fn run() {
                 )
                 .map_err(std::io::Error::other)?,
             );
-            let tray = platform::tray::TrayService::create(
+            #[cfg(target_os = "linux")]
+            app.state::<Arc<DesktopLyricsWindowService>>().initialize(app.handle());
+            match platform::tray::TrayService::create(
                 app.handle(),
                 native_projection.subscribe(),
-            )
-            .map_err(|error| std::io::Error::other(format!("无法创建系统托盘：{error}")))?;
+            ) {
+                Ok(tray) => { app.manage(tray); }
+                Err(error) => log::warn!("system tray unavailable: {error}"),
+            }
+            #[cfg(target_os = "linux")]
+            {
+                let placeholder = app.path().resource_dir()?.join("icons/default-artwork.png");
+                match platform::media_session::MediaSessionAdapter::start(
+                    app.handle().clone(),
+                    Arc::clone(app.state::<Arc<RodioPlaybackEngine>>().inner()),
+                    &placeholder, app.path().app_cache_dir()?.join("mpris-artwork"),
+                    native_projection.subscribe(),
+                ) {
+                    Ok(session) => { app.manage(session); log::info!("MPRIS worker started"); }
+                    Err(error) => log::warn!("MPRIS unavailable: {error}"),
+                }
+            }
             app.manage(native_projection);
-            app.manage(tray);
             log::info!("application services initialized");
             let arguments = std::env::args().collect::<Vec<_>>();
             let current_directory = std::env::current_dir().unwrap_or_default();
@@ -240,6 +259,7 @@ pub fn run() {
             lock_desktop_lyrics_window,
             unlock_desktop_lyrics_window,
             start_desktop_lyrics_drag,
+            desktop_lyrics_pointer,
             fit_desktop_lyrics_window,
             open_main_settings,
             list_playlists,

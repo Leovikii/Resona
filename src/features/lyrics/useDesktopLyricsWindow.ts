@@ -19,7 +19,11 @@ export function useDesktopLyricsWindow() {
   const documentVisible = useDocumentVisibility();
   const preview = !isTauriRuntime();
   const [snapshot, setSnapshot] = useState<DesktopLyricsWindowSnapshot>(
-    initialDesktopLyricsWindowSnapshot,
+    () => ({
+      ...initialDesktopLyricsWindowSnapshot,
+      supported: preview,
+      layerShell: preview && new URLSearchParams(window.location.search).get("platform") === "linux",
+    }),
   );
   const [error, setError] = useState<DesktopLyricsWindowFailure | null>(null);
   const [busy, setBusy] = useState(false);
@@ -38,8 +42,9 @@ export function useDesktopLyricsWindow() {
   }, [preview]);
 
   useEffect(() => {
-    if (preview || !documentVisible) return;
+    if (preview) return;
     void refresh();
+    if (!documentVisible) return;
     const timer = window.setInterval(() => void refresh(), 1_500);
     return () => window.clearInterval(timer);
   }, [documentVisible, preview, refresh]);
@@ -79,6 +84,7 @@ function sameSnapshot(
   right: DesktopLyricsWindowSnapshot,
 ) {
   return left.supported === right.supported
+    && left.layerShell === right.layerShell
     && left.visible === right.visible
     && left.locked === right.locked;
 }

@@ -20,7 +20,7 @@ Rust application services
         │
         ├─ persistence (SQLite + JSON preferences)
         ├─ playback engine (Rodio)
-        └─ platform adapters (SMTC / taskbar / tray / windows)
+        └─ platform adapters (SMTC / MPRIS / taskbar / tray / layer-shell)
 ```
 
 Tauri commands 负责 DTO 转换和服务调用，不包含领域分支。长任务在 Rust 后台线程或 actor 中运行；WebView 隐藏时停止无意义轮询，恢复可见后立即读取权威快照。
@@ -49,9 +49,10 @@ Tauri commands 负责 DTO 转换和服务调用，不包含领域分支。长任
 
 播放列表通过 `MetadataService` 的独立轻量摘要分批读取标题、音轨号与时长；该路径关闭封面解析，批量请求有上限并使用小型 LRU，不占用当前曲目封面缓存。同一物理文件的 CUE 项共享摘要，React 只依据 Rust 已解析的逻辑起止区间形成曲目、目录段和整表合计；未知时长不得猜测。文件信息弹窗只在用户明确打开时读取完整标签与音频属性。文件管理器定位经 Tauri opener 的跨平台 reveal 能力封装在 bridge/command 边界，不向 UI 暴露 Explorer、Shell 或 Linux 文件管理器细节。
 
-`NativePlaybackProjection` 合并权威播放快照和共享封面，低频发布给 SMTC、任务栏和托盘：
+`NativePlaybackProjection` 合并权威播放快照、标签（CUE 逻辑曲目信息优先）和共享封面，低频发布给 SMTC、任务栏和托盘：
 
 - SMTC 使用标题、艺术家、专辑、时长、时间轴、可用动作和真实封面；归一化指纹直接映射缓存文件，最近使用的不同封面最多保留 16 个，重复封面只占一个文件。带封面提交失败时重试占位图和无封面元数据。
+- Linux MPRIS 在独立线程发布媒体属性，回调只排队操作；权威 actor 校验定位范围和 track ID，封面使用正确转义的本地 URI 与 16 项缓存。
 - 任务栏工具栏固定上一首、播放/暂停、下一首；进度只在时长确定且可定位时显示。
 - DWM iconic thumbnail/live preview 只绘制等比居中的封面或占位图。平台工作线程按归一化指纹复用当前 GDI 位图组；只有指纹变化时才预生成新的有界固定尺寸组，并在完整后替换旧组。窗口消息回调只选择不超过系统请求的最近缓存并立即提交，不在 Explorer 同步等待的回调内缩放、创建位图、读文件或投递补偿渲染。
 
@@ -63,7 +64,7 @@ Win32/COM 回调必须快速返回，通过 channel 或缓存与服务交互。�
 
 ## 压缩
 
-`FfmpegDependencyService` 管理固定归档的按需下载、SHA-256、安全解压、取消和同卷原子启用。网络只由用户明确下载依赖触发。
+`FfmpegDependencyService` 用同一 DTO/command 选择平台 adapter。Windows 管理固定归档的按需下载、SHA-256、安全解压、取消和同卷原子启用；Arch Linux 检查 `/usr/bin/ffmpeg` 和 `ffprobe`，缺失时提示系统包安装，应用不提权或下载。网络只由 Windows 用户明确下载依赖触发。
 
 `CompressionService` 管理扫描与批次快照：
 
@@ -73,14 +74,16 @@ Win32/COM 回调必须快速返回，通过 channel 或缓存与服务交互。�
 - React 依据 Rust 快照展开首次活动项目的祖先目录，当前批次内手动折叠优先；不自动滚动。固定汇总与主窗口工具入口共享处理进度投影，失败计入已处理但不计入成功体积；展示规则见 [ADR 0027](decisions/0027-compression-progress-and-close-dialog.md)。
 - 终态批次保留醒目结果，前端和 Rust 均阻止重复启动。只有添加/移除/清空输入成功后重置任务；输入变更和 start 共用批次锁，阻止扫描/转换竞态，并重新识别已有输出冲突。结果中的删除数量只取实际 sourceDeleted。
 - 每项维护单调进度、源体积、成功输出体积、状态与错误。取消会终止所有活动子进程并清理未提交临时文件。
-- 已存在输出永不覆盖；验证后原子 rename，源删除只能发生在提交成功之后。部分失败不回滚已成功文件。
+- 已存在输出永不覆盖；验证后通过平台 adapter 原子提交（Windows `MoveFileExW` 不设置替换标志；Linux 同目录硬链接发布后清理临时文件），源删除只能发生在提交成功之后。部分失败不回滚已成功文件。
 - 压缩窗口关闭时由服务在批次锁内区分当前任务与旧工作区：运行/取消中的批次保留并继续，其他状态连同扫描输入、统计、警告和错误恢复为初始值。窗口保持关闭时，当前批次进入终态后再清理；完成前重开会取消延迟清理。
 
 ## 持久化与更新
 
 SQLite schema v7 只保存用户播放列表、列表项目（含可空导入根目录与 CUE 逻辑音轨字段）和应用状态。旧 `recent_plays`、`managed_folders` 和 `media_records` 会迁移删除；根目录上下文不建立媒体库或文件夹监视。偏好由 Rust 类型化存储；目录展开等窗口临时 UI 状态只留在前端会话。
 
-更新检查由 `ApplicationUpdateService` 单飞协调，设置连接与总超时。应用首帧后每进程静默检查一次；只有发现更新才加载 Markdown 弹窗。下载、签名验证和安装使用 Tauri updater。外链只允许 HTTP(S) 并经 Rust opener。
+普通窗口尺寸统一以逻辑内容区宽高保存，主窗口宽/窄模式各自记忆正常尺寸，切换期间过滤尚未到达目标的中间几何。Linux 通过 GTK 内容区 allocation 读取尺寸，避免 Tao 的装饰/阴影缓存反复累加；Windows 位置继续使用物理坐标。Arch Wayland 仅恢复尺寸、布局和主窗口最大化状态，全局位置归 compositor 管理。桌面歌词使用 layer-shell overlay 置顶、空输入区域穿透与原生 GTK 解锁按钮，KDE 媒体控制使用 MPRIS；托盘无宿主或创建失败时拒绝隐藏主窗口。具体能力边界见 [ADR 0028](decisions/0028-arch-linux-wayland-baseline.md) 和 [ADR 0029](decisions/0029-wayland-lyrics-and-mpris.md)。
+
+更新检查由 `ApplicationUpdateService` 单飞协调，设置连接与总超时。Windows 应用首帧后每进程静默检查一次；只有发现更新才加载 Markdown 弹窗。同版本预览按数值构建二元组比较，完整清单用 Minisign 验证身份，安装请求绑定检查时的 tag、版本、URL 和签名，再由 Tauri updater 下载验签安装。Linux distribution capability 禁用更新发现/安装，UI 只提供包管理器更新说明与命令复制，启动不调用更新检查。外链只允许 HTTP(S) 并经 Rust opener。
 
 ## 故障隔离
 

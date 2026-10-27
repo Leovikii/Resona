@@ -16,6 +16,7 @@ export interface FfmpegDependencyFailure {
 
 export interface FfmpegDependencySnapshot {
   status: FfmpegDependencyStatus;
+  managedBySystem: boolean;
   version: string;
   sourceUrl: string;
   license: string;
@@ -85,6 +86,7 @@ export const emptyCompressionSnapshot: CompressionSnapshot = {
 
 export const checkingFfmpegDependency: FfmpegDependencySnapshot = {
   status: "checking",
+  managedBySystem: false,
   version: "8.1.2",
   sourceUrl: "https://github.com/GyanD/codexffmpeg/releases/download/8.1.2/ffmpeg-8.1.2-essentials_build.zip",
   license: "GPL-3.0-or-later",

@@ -99,6 +99,7 @@ const CACHED_ARTWORK_DIMENSION: u32 = 512;
 const MAX_ARTWORK_DIRECTORY_ENTRIES: usize = 128;
 
 #[derive(Clone, Debug)]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub struct Artwork {
     pub fingerprint: [u8; 32],
     pub mime_type: String,
@@ -285,6 +286,7 @@ fn read_track_details(path: &Path) -> TrackDetails {
     MetadataService::default().load(path).details
 }
 
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub fn read_artwork_file(path: &Path) -> Result<Arc<Artwork>, String> {
     let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
     decode_artwork("image/png", &bytes)

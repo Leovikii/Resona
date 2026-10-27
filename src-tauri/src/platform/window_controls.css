@@ -1,0 +1,14 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Match GTK's input window to the button bounds, including the vertical edges. */
+window.resona-native-controls headerbar button.titlebutton {
+  min-width: 38px;
+  min-height: 38px;
+  padding: 4px;
+  margin: 0;
+  /* Breeze paints its symbol as a background rather than a GtkImage. */
+  background-size: 28px 28px;
+}
+
+window.resona-native-controls headerbar button.titlebutton image {
+  -gtk-icon-transform: scale(1.375);
+}

@@ -90,9 +90,8 @@ export function useDesktopLyricsNowPlaying() {
   }, [acceptPlayback, playback, preview]);
 
   useEffect(() => {
-    if (!documentVisible) return;
     void refresh();
-    if (preview) return;
+    if (preview || !documentVisible) return;
     const timer = window.setInterval(() => void refresh(), 750);
     return () => window.clearInterval(timer);
   }, [documentVisible, preview, refresh]);

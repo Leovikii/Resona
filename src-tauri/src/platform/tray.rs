@@ -39,12 +39,25 @@ impl TrayService {
         app: &AppHandle,
         projection: Receiver<NativePlaybackSnapshot>,
     ) -> tauri::Result<Self> {
+        #[cfg(target_os = "linux")]
+        require_status_notifier_host()?;
         let show = MenuItem::with_id(app, SHOW_ID, "打开 Resona", true, None::<&str>)?;
         let title = MenuItem::with_id(app, TITLE_ID, "未在播放", false, None::<&str>)?;
         let previous = MenuItem::with_id(app, PREVIOUS_ID, "上一曲", false, None::<&str>)?;
         let play_pause = MenuItem::with_id(app, PLAY_PAUSE_ID, "播放", false, None::<&str>)?;
         let next = MenuItem::with_id(app, NEXT_ID, "下一曲", false, None::<&str>)?;
-        let lyrics = CheckMenuItem::with_id(app, LYRICS_ID, "桌面歌词", true, false, None::<&str>)?;
+        let lyrics_supported = app
+            .state::<Arc<DesktopLyricsWindowService>>()
+            .snapshot()
+            .supported;
+        let lyrics = CheckMenuItem::with_id(
+            app,
+            LYRICS_ID,
+            "桌面歌词",
+            lyrics_supported,
+            false,
+            None::<&str>,
+        )?;
         let exit = MenuItem::with_id(app, EXIT_ID, "退出 Resona", true, None::<&str>)?;
         let separator_one = PredefinedMenuItem::separator(app)?;
         let separator_two = PredefinedMenuItem::separator(app)?;
@@ -110,6 +123,31 @@ impl TrayService {
             projection_worker: Mutex::new(Some(projection_worker)),
         };
         Ok(service)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn require_status_notifier_host() -> tauri::Result<()> {
+    let result = std::process::Command::new("/usr/bin/busctl")
+        .args([
+            "--user",
+            "--timeout=2s",
+            "--auto-start=no",
+            "get-property",
+            "org.kde.StatusNotifierWatcher",
+            "/StatusNotifierWatcher",
+            "org.kde.StatusNotifierWatcher",
+            "IsStatusNotifierHostRegistered",
+        ])
+        .output()?;
+    if result.status.success() && String::from_utf8_lossy(&result.stdout).trim() == "b true" {
+        Ok(())
+    } else {
+        Err(std::io::Error::other(format!(
+            "No StatusNotifier host is available; hiding to tray is disabled: {}",
+            String::from_utf8_lossy(&result.stderr).trim()
+        ))
+        .into())
     }
 }
 

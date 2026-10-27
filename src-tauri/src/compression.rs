@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
@@ -700,7 +700,7 @@ impl CompressionService {
         ));
         let _ = fs::remove_file(&temp);
         let target_bits = if input.bits_per_sample <= 16 { 16 } else { 24 };
-        let mut command = background_command(&self.ffmpeg);
+        let mut command = crate::platform::compression_tools::background_command(&self.ffmpeg);
         command
             .args(["-hide_banner", "-nostdin", "-v", "error", "-y", "-i"])
             .arg(source)
@@ -804,7 +804,7 @@ impl CompressionService {
                 "FLAC validation did not preserve the required audio properties".to_owned(),
             );
         }
-        fs::rename(&temp, &output).map_err(|error| {
+        crate::platform::file_commit::commit_new_file(&temp, &output).map_err(|error| {
             let _ = fs::remove_file(&temp);
             format!("failed to commit FLAC output: {error}")
         })?;
@@ -1341,32 +1341,11 @@ fn scan_warning(path: &Path, code: &str, error: impl std::fmt::Display) -> Compr
     }
 }
 
-fn background_command(program: &Path) -> Command {
-    let mut command = Command::new(program);
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-    command
-}
-
 fn resolve_ffmpeg_binary() -> PathBuf {
     if let Ok(ffmpeg) = std::env::var("RESONA_FFMPEG_PATH") {
         return ffmpeg.into();
     }
-    let release_dir = std::env::current_exe()
-        .ok()
-        .and_then(|path| path.parent().map(Path::to_path_buf));
-    if let Some(directory) = release_dir {
-        let ffmpeg = directory.join("ffmpeg.exe");
-        if ffmpeg.is_file() {
-            return ffmpeg;
-        }
-    }
-    let binaries = Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries");
-    binaries.join("ffmpeg-x86_64-pc-windows-msvc.exe")
+    crate::platform::compression_tools::default_ffmpeg_binary()
 }
 
 #[cfg(test)]

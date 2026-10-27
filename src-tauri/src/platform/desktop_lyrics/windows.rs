@@ -71,6 +71,7 @@ impl Lifecycle {
     fn snapshot(&self) -> DesktopLyricsWindowSnapshot {
         DesktopLyricsWindowSnapshot {
             supported: true,
+            layer_shell: false,
             visible: self.visible,
             locked: self.locked,
         }
@@ -1442,6 +1443,7 @@ mod tests {
             lifecycle.snapshot(),
             DesktopLyricsWindowSnapshot {
                 supported: true,
+                layer_shell: false,
                 visible: true,
                 locked: true,
             }

@@ -5,17 +5,22 @@ This inventory is an engineering aid, not legal advice. Release review must also
 
 ## Optional FFmpeg dependency
 
-Resona does not bundle FFmpeg. After an explicit user action, the installed application downloads a pinned FFmpeg 8.1.2 essentials static build from an immutable GitHub Release asset. The build enables GPLv3 and is compatible with Resona's GPL-3.0-only distribution. It is used only for audio compression.
+Resona does not bundle FFmpeg. On Windows, after an explicit user action, the installed application downloads a pinned FFmpeg 8.1.2 essentials static build from an immutable GitHub Release asset. The build enables GPLv3 and is compatible with Resona's GPL-3.0-only distribution. It is used only for audio compression.
 
 - Source archive: `https://github.com/GyanD/codexffmpeg/releases/download/8.1.2/ffmpeg-8.1.2-essentials_build.zip`
 - Archive SHA-256: `DB580001CAA24AC104C8CB856CD113A87B0A443F7BDF47D8C12B1D740584A2EC`
 - Build configuration includes `--enable-gpl --enable-version3 --enable-static`.
 - Binary details and hashes: [`src-tauri/binaries/README.md`](../src-tauri/binaries/README.md)
 - FFmpeg license and source information: `https://ffmpeg.org/legal.html`
+- Arch Linux uses `/usr/bin/ffmpeg` and `/usr/bin/ffprobe` from the system `ffmpeg` package (`sudo pacman -S ffmpeg`); Resona neither downloads nor updates them. Its actual version and build configuration belong to the distribution package.
 
-- Rust packages: 599
+- Rust packages: 606
 - npm packages: 214
 - Unknown license declarations: 0
+
+## Linux desktop runtime
+
+Wayland desktop lyrics dynamically link the Arch system gtk-layer-shell library (LGPL-3.0-or-later; https://github.com/wmww/gtk-layer-shell). The GTK 3 Rust bindings are MIT and pinned to match Tauri GTK 0.18; the binding package is marked unmaintained. MPRIS uses mpris-server 0.9.0 (MPL-2.0) and zbus 5. These dependencies require no runtime downloads, activation, telemetry, or network services; MPRIS uses only the local session bus.
 
 ## Rust
 
@@ -76,6 +81,7 @@ Resona does not bundle FFmpeg. After an explicit user action, the installed appl
 | cesu8 | 1.1.0 | Apache-2.0/MIT |
 | cfb | 0.7.3 | MIT |
 | cfg-expr | 0.15.8 | MIT OR Apache-2.0 |
+| cfg-expr | 0.20.10 | MIT OR Apache-2.0 |
 | cfg-if | 1.0.4 | MIT OR Apache-2.0 |
 | chrono | 0.4.45 | MIT OR Apache-2.0 |
 | cocoa | 0.24.1 | MIT / Apache-2.0 |
@@ -192,6 +198,8 @@ Resona does not bundle FFmpeg. After an explicit user action, the installed appl
 | glob | 0.3.3 | MIT OR Apache-2.0 |
 | gobject-sys | 0.18.0 | MIT |
 | gtk | 0.18.2 | MIT |
+| gtk-layer-shell | 0.8.2 | MIT |
+| gtk-layer-shell-sys | 0.7.2 | MIT |
 | gtk-sys | 0.18.2 | MIT |
 | gtk3-macros | 0.18.2 | MIT |
 | hashbrown | 0.12.3 | MIT OR Apache-2.0 |
@@ -268,6 +276,7 @@ Resona does not bundle FFmpeg. After an explicit user action, the installed appl
 | miniz_oxide | 0.8.9 | MIT OR Zlib OR Apache-2.0 |
 | mio | 1.2.2 | MIT |
 | moxcms | 0.8.1 | BSD-3-Clause OR Apache-2.0 |
+| mpris-server | 0.9.0 | MPL-2.0 |
 | muda | 0.19.3 | Apache-2.0 OR MIT |
 | ndk | 0.9.0 | MIT OR Apache-2.0 |
 | ndk-context | 0.1.1 | MIT OR Apache-2.0 |
@@ -433,10 +442,12 @@ Resona does not bundle FFmpeg. After an explicit user action, the installed appl
 | sync_wrapper | 1.0.2 | Apache-2.0 |
 | synstructure | 0.13.2 | MIT |
 | system-deps | 6.2.2 | MIT OR Apache-2.0 |
+| system-deps | 7.0.8 | MIT OR Apache-2.0 |
 | tao | 0.35.3 | Apache-2.0 |
 | tao-macros | 0.1.3 | MIT OR Apache-2.0 |
 | tar | 0.4.46 | MIT OR Apache-2.0 |
 | target-lexicon | 0.12.16 | Apache-2.0 WITH LLVM-exception |
+| target-lexicon | 0.13.5 | Apache-2.0 WITH LLVM-exception |
 | tauri | 2.11.5 | Apache-2.0 OR MIT |
 | tauri-build | 2.6.3 | Apache-2.0 OR MIT |
 | tauri-codegen | 2.6.3 | Apache-2.0 OR MIT |
@@ -485,6 +496,7 @@ Resona does not bundle FFmpeg. After an explicit user action, the installed appl
 | tracing | 0.1.44 | MIT |
 | tracing-attributes | 0.1.31 | MIT |
 | tracing-core | 0.1.36 | MIT |
+| trait-variant | 0.1.3 | MIT OR Apache-2.0 |
 | tray-icon | 0.24.1 | MIT OR Apache-2.0 |
 | try-lock | 0.2.5 | MIT |
 | typed-path | 0.12.3 | MIT OR Apache-2.0 |
