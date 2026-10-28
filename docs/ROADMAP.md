@@ -13,4 +13,4 @@
 
 Linux 当前提供本机构建开发预览，复用领域层与 React UI；已实现 layer-shell 桌面歌词和 KDE MPRIS；正式发行格式、签名和多屏验收仍有开放门禁。
 
-[跨平台预览交付](plans/0.3.0-preview-delivery.md)已接受并实现：Windows NSIS/Tauri 签名更新、Arch/AUR 安装和包管理器更新引导，当前版本递增至 `0.3.0-alpha.2`。每个版本只发布一个普通版本 tag；main Actions 已按此规则完成 alpha.2 发布；AUR 配置与 Windows 原生覆盖更新仍待验收。
+[alpha.3](plans/0.3.0-alpha.3.md) 使用 GitHub Arch 原生包与应用内 Tauri 下载验签、Polkit/Pacman 安装，移除 AUR；Windows NSIS 与界面设计沿用。每个版本只发布一个普通版本 tag，双平台完整交付与实际测试边界见 [STATUS](STATUS.md)。

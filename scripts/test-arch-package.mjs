@@ -9,7 +9,7 @@ import { buildIdentity, readProjectVersion } from "./release-channel.mjs";
 assert.equal(process.env.GITHUB_ACTIONS, "true");
 assert.equal(process.getuid(), 0);
 assert.match(fs.readFileSync("/etc/os-release", "utf8"), /^ID=arch$/m);
-const run = (cmd, args) => execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+const run = (cmd, args, options = {}) => execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], ...options });
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "resona-package-"));
 const { version } = readProjectVersion();
 const name = version.includes("-") ? "resona-preview-bin" : "resona-bin";
@@ -21,7 +21,7 @@ try {
     const out = path.join(root, archVersion(v));
     packageArch(process.cwd(), out, process.env.RESONA_PACKAGE_BINARY, buildIdentity(v, 1, 1, "a".repeat(40)), v);
     run("chown", ["-R", "resona-builder:resona-builder", out]);
-    run("runuser", ["-u", "resona-builder", "--", "makepkg", "--dir", path.join(out, "package"), "--nodeps", "--noconfirm"]);
+    run("runuser", ["-u", "resona-builder", "--", "makepkg", "--nodeps", "--noconfirm"], { cwd: path.join(out, "package") });
     const file = fs.readdirSync(path.join(out, "package")).find(f => f.endsWith(".pkg.tar.zst"));
     assert.ok(file);
     const packagePath = path.join(out, "package", file);

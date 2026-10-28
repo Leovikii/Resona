@@ -123,6 +123,9 @@ export function useApplicationUpdate() {
             currentVersion: snapshot.currentVersion,
             update: previewUpdateAvailable ? previewUpdateRelease : null,
           };
+      if (isTauriRuntime()) {
+        setSnapshot(await invokeTauri<ApplicationUpdateSnapshot>("get_application_update_state"));
+      }
       setAvailable(result.update);
       setChecked(true);
       return result.update;
@@ -132,7 +135,8 @@ export function useApplicationUpdate() {
       return null;
     } finally {
       operationRef.current = "idle";
-      setStatus("idle");
+      setStatus(["downloading", "verifying", "preparing", "installing"].includes(previewPhase)
+        ? "installing" : "idle");
     }
   }, [snapshot.currentVersion, snapshot.supported]);
 
@@ -174,7 +178,7 @@ export function useApplicationUpdate() {
     let disposed = false;
     const timer = window.setInterval(() => {
       void invokeTauri<ApplicationUpdateSnapshot>("get_application_update_state").then(next => {
-        if (!disposed) setSnapshot(next);
+        if (!disposed && operationRef.current === "installing") setSnapshot(next);
       }).catch(cause => { if (!disposed) setError(normalizeFailure(cause)); });
     }, 200);
     return () => { disposed = true; window.clearInterval(timer); };
