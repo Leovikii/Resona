@@ -360,14 +360,10 @@ impl ApplicationUpdateService {
             .endpoints(vec![endpoint])
             .map_err(updater_failure)?
             .pubkey(UPDATER_PUBLIC_KEY)
-            .timeout(Duration::from_secs(if cfg!(target_os = "linux") {
-                600
-            } else {
-                15
-            }))
+            .timeout(Duration::from_secs(15))
             .build()
             .map_err(updater_failure)?;
-        let update = updater
+        let mut update = updater
             .check()
             .await
             .map_err(updater_failure)?
@@ -408,6 +404,8 @@ impl ApplicationUpdateService {
             *active = Some(abort_handle);
         }
 
+        // Updater 2.10.1 does not carry the check timeout into Update::download.
+        update.timeout = Some(Duration::from_secs(600));
         let mut downloaded_bytes = 0_u64;
         let progress_app = app.clone();
         let finish_service = Arc::clone(self);
