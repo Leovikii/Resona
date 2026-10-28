@@ -12,6 +12,7 @@ on:
   push:
     branches:
       - main
+      - dev
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -25,7 +26,7 @@ defaults:
     shell: bash
 
 concurrency:
-  group: ${{ github.event_name == 'push' && 'main-delivery' || github.run_id }}
+  group: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && 'main-delivery' || github.run_id }}
   cancel-in-progress: false
   queue: max
 
@@ -35,7 +36,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     concurrency:
-      group: pr-validation-${{ github.event.pull_request.number }}
+      group: windows-validation-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: true
     permissions:
       contents: read
@@ -132,7 +133,7 @@ jobs:
 
   verify:
     name: Prepare delivery
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: windows-latest
     permissions:
       contents: read

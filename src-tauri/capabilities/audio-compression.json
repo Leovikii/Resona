@@ -2,11 +2,18 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "audio-compression",
   "description": "Minimal permissions for the Resona audio compression workspace",
-  "windows": ["audio-compression"],
+  "windows": [
+    "audio-compression"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-set-title",
     "core:window:allow-show",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging",
+    "core:window:allow-start-resize-dragging"
   ]
 }

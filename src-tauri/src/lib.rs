@@ -26,6 +26,8 @@ use tauri::{Emitter, Manager, WindowEvent};
 
 use application_lifetime::{ApplicationLifetimeService, CloseDisposition};
 use application_update::ApplicationUpdateService;
+#[cfg(target_os = "linux")]
+use commands::set_window_blur_content_rect;
 use commands::{
     add_default_playlist_items, add_playlist_items, cancel_application_update,
     cancel_audio_compression, cancel_audio_compression_scan, cancel_ffmpeg_dependency_install,
@@ -46,8 +48,9 @@ use commands::{
     resolve_main_window_close, resume_playback, reveal_audio_file, scan_audio_compression_inputs,
     seek_playback, select_output_device, set_close_behavior, set_main_window_layout_mode,
     set_playback_mode, set_playback_volume, set_receive_prerelease_updates,
-    show_audio_compression_window, show_desktop_lyrics_window, start_audio_compression,
-    start_desktop_lyrics_drag, sync_window_theme, unlock_desktop_lyrics_window,
+    show_audio_compression_window, show_desktop_lyrics_window, show_window_menu,
+    start_audio_compression, start_desktop_lyrics_drag, sync_window_theme,
+    unlock_desktop_lyrics_window,
 };
 use compression::CompressionService;
 use ffmpeg_dependency::FfmpegDependencyService;
@@ -93,6 +96,12 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .on_page_load(|webview, payload| {
+            if matches!(webview.label(), "main" | "audio-compression") && payload.event() == PageLoadEvent::Finished {
+                #[cfg(target_os = "windows")]
+                if let Some(window) = webview.app_handle().get_webview_window(webview.label()) {
+                    platform::window_controls::apply(&window);
+                }
+            }
             if webview.label() == compression_window::LABEL
                 && payload.event() == PageLoadEvent::Finished {
                 if let Err(error) = webview.window().show() {
@@ -235,6 +244,9 @@ pub fn run() {
             set_main_window_layout_mode,
             main_window_ready,
             sync_window_theme,
+            show_window_menu,
+            #[cfg(target_os = "linux")]
+            set_window_blur_content_rect,
             get_now_playing_state,
             get_track_details,
             get_audio_file_info,

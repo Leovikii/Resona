@@ -52,7 +52,7 @@ pub fn show<R: Runtime>(app: &AppHandle<R>) -> Result<(), CompressionFailure> {
         .inner_size(DEFAULT_WIDTH, DEFAULT_HEIGHT)
         .min_inner_size(MIN_WIDTH as f64, MIN_HEIGHT as f64)
         .resizable(true)
-        .decorations(true)
+        .decorations(false)
         .background_color((16, 17, 19, 255).into())
         .visible(false)
         .center();

@@ -5,6 +5,8 @@
 - 补充：[ADR 0006](0006-application-shell-theme-and-locale.md) 的固定宽屏应用壳
 - 补充：[ADR 0017](0017-full-player-as-main-content-view.md) 的完整播放器布局
 
+> alpha.4 修订：顶部布局、普通窗口装饰和 Linux 材质约束由 [ADR 0033](0033-frameless-titlebar-and-kde-material.md) 替代；下文保留历史决定与其他仍有效约束。
+
 ## 背景
 
 Resona 当前主窗口固定使用“左侧栏 + 右侧主内容 + 底栏”，最小尺寸为 `760×520`。该约束避免普通桌面窗口被动坍缩成不可用的移动网页，但用户也需要主动选择一种竖向窄窗口，在较小屏幕区域内完成列表、设置、播放和歌词操作。

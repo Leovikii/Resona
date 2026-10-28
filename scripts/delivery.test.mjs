@@ -12,6 +12,18 @@ import { collectArtifacts, publishDraft, updateManifest, verifyDraftAssets } fro
 const version = "0.3.0-alpha.1";
 const identity = buildIdentity(version, "42", "1", "a".repeat(40));
 
+test("dev pushes validate both platforms but cannot enter release jobs", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/main-merge-delivery.yml", import.meta.url), "utf8");
+  assert.match(workflow, /push:\s+branches:\s+- main\s+- dev/);
+  const releaseGate = workflow.split("\n  verify:")[1].split("\n  windows-build:")[0];
+  assert.match(releaseGate, /if: github.event_name == 'push' && github.ref == 'refs\/heads\/main'/);
+  for (const job of ["windows-build", "arch-build", "publish"]) {
+    const section = workflow.split(`\n  ${job}:`)[1];
+    assert.ok(section, job);
+    assert.match(section.split(/\n  [a-z][a-z-]+:/)[0], /needs:.*verify|needs:\s+.*verify/s, job);
+  }
+});
+
 test("one version keeps one tag across build attempts", () => {
   assert.equal(identity.tag, "v0.3.0-alpha.1");
   assert.equal(identity.tag, buildIdentity(version, 42, 2, "a".repeat(40)).tag);

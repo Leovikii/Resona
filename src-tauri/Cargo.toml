@@ -1,6 +1,6 @@
 [package]
 name = "resona"
-version = "0.3.0-alpha.3"
+version = "0.3.0-alpha.4"
 description = "A local desktop audio player"
 authors = ["Viki"]
 edition = "2021"
@@ -47,10 +47,15 @@ ureq = { version = "3.3.0", features = ["win-system-proxy"] }
 [target.'cfg(target_os = "windows")'.dependencies]
 zip = { version = "8.2.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 souvlaki = { version = "0.8.3", default-features = false }
-windows = { version = "0.44", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_UI_Accessibility", "Win32_UI_Controls", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.44", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_UI_Accessibility", "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 windows-version = "0.1.7"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
 gtk-layer-shell = { version = "=0.8.2", features = ["v0_6"] }
 mpris-server = "=0.9.0"
+wayland-backend = { version = "=0.3.17", features = ["client_system"] }
+wayland-client = "=0.31.15"
+wayland-protocols-plasma = { version = "=0.3.12", features = ["client"] }
+gdkwayland-sys = "=0.18.2"
+wayland-protocols = { version = "=0.32.13", features = ["client", "staging"] }

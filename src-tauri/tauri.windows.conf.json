@@ -13,7 +13,8 @@
         "backgroundColor": "#00000000",
         "transparent": true,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "decorations": false
       }
     ]
   },

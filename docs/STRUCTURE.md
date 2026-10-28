@@ -21,7 +21,7 @@ Resona/
 │  │  ├─ settings/                 # 偏好展示
 │  │  └─ update/                   # 更新协调 hook
 │  ├─ shared/
-│  │  ├─ bridge/                   # Tauri、对话框、窗口外观
+│  │  ├─ bridge/                   # Tauri、对话框、窗口外观与窗口操作
 │  │  ├─ model/                    # 跨层 TypeScript DTO
 │  │  ├─ i18n/                     # 中英文资源
 │  │  └─ ui/                       # 无业务共享组件
@@ -46,11 +46,12 @@ Resona/
 │  │     ├─ playback_projection.rs
 │  │     ├─ taskbar.rs
 │  │     ├─ tray.rs
-│  │     ├─ window_controls.rs     # GTK 原生标题栏按钮命中区域
+│  │     ├─ window_controls.rs     # 自绘标题栏的 Win32 Snap / GTK 窗口菜单
 │  │     ├─ window_geometry.rs     # 内容区逻辑尺寸 / Wayland 几何适配
 │  │     ├─ file_commit.rs         # 不覆盖原子提交
 │  │     ├─ distribution/          # updater 平台能力与 Arch 事务安装 adapter
 │  │     ├─ compression_tools.rs   # 默认测试/开发工具路径
+│  │     ├─ window_material/     # GTK 主题与 KDE 原生背景效果
 │  │     ├─ window_material.rs
 │  │     └─ desktop_lyrics/           # Win32 / Wayland layer-shell
 │  ├─ capabilities/                # Tauri 最小权限

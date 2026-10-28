@@ -1,11 +1,10 @@
 import { Fragment, memo, useRef } from "react";
-import type { ReactNode, WheelEvent } from "react";
+import type { WheelEvent } from "react";
 import { ActionIcon, ScrollArea, Tabs, Tooltip } from "@mantine/core";
-import { ArrowDown, ArrowUp, Eraser, ListX, Pencil, Plus, Settings, Trash2, Wrench } from "lucide-react";
+import { ArrowDown, ArrowUp, Eraser, ListX, Pencil, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { ActivePlaylistSnapshot, PlaylistSummary } from "../model/library";
-import { BrandWordmark } from "./BrandWordmark";
 import { AppContextMenu } from "./AppContextMenu";
 import { usePointerReorder } from "./usePointerReorder";
 
@@ -75,24 +74,6 @@ export const CompactTopNavigation = memo(function CompactTopNavigation({
 
   return (
     <header className="compact-top-navigation">
-      <div className="compact-global-navigation">
-        <BrandWordmark className="compact-brand-wordmark" />
-        <nav className="compact-global-actions" aria-label={t("app.name")}>
-          <CompactNavButton
-            active={selection.kind === "tools"}
-            icon={<Wrench size={17} />}
-            label={t("nav.tools")}
-            onClick={() => onSelect({ kind: "tools" })}
-          />
-          <CompactNavButton
-            active={selection.kind === "settings"}
-            icon={<Settings size={17} />}
-            label={t("nav.settings")}
-            onClick={() => onSelect({ kind: "settings" })}
-          />
-        </nav>
-      </div>
-
       <div className="compact-playlist-navigation">
         <ScrollArea
           className="compact-playlist-scroll"
@@ -219,7 +200,7 @@ export const CompactTopNavigation = memo(function CompactTopNavigation({
           </Tabs>
         </ScrollArea>
         <Tooltip label={t("library.create")}>
-          <ActionIcon aria-label={t("library.create")} onClick={onCreatePlaylist} size="sm" variant="subtle">
+          <ActionIcon aria-label={t("library.create")} onClick={onCreatePlaylist} size={36} variant="subtle">
             <Plus size={16} />
           </ActionIcon>
         </Tooltip>
@@ -240,29 +221,6 @@ function CompactPlaylistGap({ active, position }: { active: boolean; position: n
     >
       <i />
     </span>
-  );
-}
-
-function CompactNavButton({ active, icon, label, onClick }: {
-  active: boolean;
-  icon: ReactNode;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <Tooltip label={label}>
-      <ActionIcon
-        aria-current={active ? "page" : undefined}
-        aria-label={label}
-        className="compact-global-action"
-        data-active={active || undefined}
-        onClick={onClick}
-        size="sm"
-        variant="subtle"
-      >
-        {icon}
-      </ActionIcon>
-    </Tooltip>
   );
 }
 

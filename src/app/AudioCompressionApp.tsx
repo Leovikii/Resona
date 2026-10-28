@@ -46,6 +46,7 @@ import type {
   CompressionPreset,
   CompressionScanNode,
 } from "../shared/model/compression";
+import { WindowTitleBar } from "../shared/ui/WindowTitleBar";
 import { AddMediaMenu } from "../shared/ui/AddMediaMenu";
 import {
   indexCompressionAncestors,
@@ -208,14 +209,7 @@ export default function AudioCompressionApp() {
         setDragActive(false);
       }}
     >
-      <header className="compression-window-header">
-        <Group gap="sm" wrap="nowrap">
-          <ThemeIcon size={32} variant="light"><Wrench size={17} /></ThemeIcon>
-          <div className="compression-window-title">
-            <Title order={1}>{t("tools.compression")}</Title>
-          </div>
-        </Group>
-      </header>
+      <WindowTitleBar title={`${t("app.name")} · ${t("tools.compression")}`} />
 
       <section className="compression-toolbar" aria-label={t("compression.inputs")}>
         <Group className="compression-input-actions" gap="xs" wrap="nowrap">

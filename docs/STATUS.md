@@ -2,7 +2,17 @@
 
 最后更新：2026-10-28
 
-## 当前版本与交付
+## alpha.4 实施与验证
+
+- 版本已提升为 `0.3.0-alpha.4`。所有者批准设计并授权实现、测试、推送 dev；本轮暂不合并、不发布。
+- 正式主/压缩窗口采用共享无边框标题栏；宽屏侧栏字标已移除，窄屏工具/设置并入 48px 标题栏，36px 标签行保留排序、拖放、菜单。
+- Windows 保留 Mica，新增 Win32 最大化按钮命中、Snap hover 路径与系统菜单；关闭仍进入现有生命周期。KDE 接入新旧背景效果协议探测、区域更新、能力撤回回退与 GTK 同连接生命周期；实机效果待验证。
+- 前端 TypeScript、生产 build、Node 59 项（4 项平台跳过）通过；Windows Rust 初轮 133 项通过、10 项条件忽略，Clippy 通过。最新新增 DPI 命中测试和原生验证仍在运行。
+- 本机 WSL 未安装，没有 KDE 会话；dev push 已配置双平台验证，发布 gate 仍仅允许 main，新增自动契约测试防止 dev 发布。后续记录以实际 CI 结果为准。
+- 正式前端验收页：`/alpha4-preview.html?production=1`，iframe 加载真实 App；普通 `/alpha4-preview.html` 仍是已批准的独立设计稿。
+
+## alpha.3 历史交付
+
 
 - 版本为 `0.3.0-alpha.3`，所有者已批准实施并授权 dev → main PR、合并交付及分支同步。[开发方案](plans/0.3.0-alpha.3.md)、[ADR 0032](decisions/0032-arch-in-app-update.md)。
 - 旧 alpha.1 / alpha.2 两条 Release 及资产已按授权删除，其他 Releases、Git tags 与历史提交保留。旧用户首次手动安装 alpha.3，用户列表、偏好和音频保留。

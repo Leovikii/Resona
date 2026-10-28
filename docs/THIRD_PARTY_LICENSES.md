@@ -14,9 +14,13 @@ Resona does not bundle FFmpeg. On Windows, after an explicit user action, the in
 - FFmpeg license and source information: `https://ffmpeg.org/legal.html`
 - Arch Linux uses `/usr/bin/ffmpeg` and `/usr/bin/ffprobe` from the system `ffmpeg` package (`sudo pacman -S ffmpeg`); Resona neither downloads nor updates them. Its actual version and build configuration belong to the distribution package.
 
-- Rust packages: 606
+- Rust packages: 615
 - npm packages: 214
 - Unknown license declarations: 0
+
+## KDE background effects
+
+KDE blur uses pinned wayland-client/backend and official wayland-protocols/plasma Rust bindings (MIT; protocol XML includes MIT and LGPL-2.1-or-later notices, compatible with GPL-3.0-only). GTK borrows its existing local Wayland display/surface. No Qt stack, sidecar, runtime downloads, activation or telemetry is added; libwayland-client is a system dependency of GTK.
 
 ## Linux desktop runtime
 
@@ -127,9 +131,11 @@ Wayland desktop lyrics dynamically link the Arch system gtk-layer-shell library 
 | dispatch | 0.2.0 | MIT |
 | dispatch2 | 0.3.1 | Zlib OR Apache-2.0 OR MIT |
 | displaydoc | 0.2.6 | MIT OR Apache-2.0 |
+| dlib | 0.5.3 | MIT |
 | dlopen2 | 0.8.2 | MIT |
 | dlopen2_derive | 0.4.3 | MIT |
 | dom_query | 0.27.0 | MIT |
+| downcast-rs | 1.2.1 | MIT/Apache-2.0 |
 | dpi | 0.1.2 | Apache-2.0 AND MIT |
 | dtoa | 1.0.11 | MIT OR Apache-2.0 |
 | dtoa-short | 0.3.5 | MPL-2.0 |
@@ -387,6 +393,7 @@ Wayland desktop lyrics dynamically link the Arch system gtk-layer-shell library 
 | schemars | 0.9.0 | MIT |
 | schemars | 1.2.1 | MIT |
 | schemars_derive | 0.8.22 | MIT |
+| scoped-tls | 1.0.1 | MIT/Apache-2.0 |
 | scopeguard | 1.2.0 | MIT OR Apache-2.0 |
 | security-framework | 3.7.0 | MIT OR Apache-2.0 |
 | security-framework-sys | 2.17.0 | MIT OR Apache-2.0 |
@@ -534,6 +541,12 @@ Wayland desktop lyrics dynamically link the Arch system gtk-layer-shell library 
 | wasm-bindgen-macro-support | 0.2.126 | MIT OR Apache-2.0 |
 | wasm-bindgen-shared | 0.2.126 | MIT OR Apache-2.0 |
 | wasm-streams | 0.5.0 | MIT OR Apache-2.0 |
+| wayland-backend | 0.3.17 | MIT |
+| wayland-client | 0.31.15 | MIT |
+| wayland-protocols | 0.32.13 | MIT |
+| wayland-protocols-plasma | 0.3.12 | MIT |
+| wayland-scanner | 0.31.11 | MIT |
+| wayland-sys | 0.31.11 | MIT |
 | web_atoms | 0.2.5 | MIT OR Apache-2.0 |
 | web-sys | 0.3.103 | MIT OR Apache-2.0 |
 | webkit2gtk | 2.0.2 | MIT |
