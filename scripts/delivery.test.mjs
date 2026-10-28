@@ -12,21 +12,33 @@ import { collectArtifacts, publishDraft, updateManifest, verifyDraftAssets } fro
 const version = "0.3.0-alpha.1";
 const identity = buildIdentity(version, "42", "1", "a".repeat(40));
 
-test("only main pushes start CI; cached validation still gates release jobs", () => {
-  const workflow = readFileSync(new URL("../.github/workflows/main-merge-delivery.yml", import.meta.url), "utf8");
-  assert.match(workflow, /on:\s+push:\s+branches:\s+- main\s+env:/);
-  assert.doesNotMatch(workflow, /pull_request:|workflow_dispatch:|\n\s+- dev\b/);
-  assert.equal((workflow.match(/cache: npm/g) || []).length, 6);
-  assert.equal((workflow.match(/uses: Swatinem\/rust-cache@[a-f0-9]{40}/g) || []).length, 4);
-  assert.equal((workflow.match(/key: \$\{\{ env\.RESONA_NATIVE_CACHE \}\}/g) || []).length, 2);
-  const releaseGate = workflow.split("\n  verify:")[1].split("\n  windows-build:")[0];
-  assert.match(releaseGate, /if: github.event_name == 'push' && github.ref == 'refs\/heads\/main'/);
-  for (const job of ["windows-build", "arch-build", "publish"]) {
-    const section = workflow.split(`\n  ${job}:`)[1];
-    assert.ok(section, job);
-    assert.match(section.split(/\n  [a-z][a-z-]+:/)[0], /needs:.*verify|needs:\s+.*verify/s, job);
-    if (job !== "publish") assert.match(section.split(/\n  [a-z][a-z-]+:/)[0], /needs: \[verify, windows-validation, linux-validation\]/);
+test("main PRs require dual-platform CI; main pushes only run CD", () => {
+  const ci = readFileSync(new URL("../.github/workflows/pr-validation.yml", import.meta.url), "utf8").replaceAll("\r\n", "\n");
+  const cd = readFileSync(new URL("../.github/workflows/main-merge-delivery.yml", import.meta.url), "utf8").replaceAll("\r\n", "\n");
+  assert.match(ci, /on:\s+pull_request:\s+branches:\s+- main\s+env:/);
+  assert.doesNotMatch(ci, /\n  push:|environment:|secrets\.|queue: max/);
+  assert.match(cd, /on:\s+push:\s+branches:\s+- main\s+env:/);
+  assert.doesNotMatch(cd, /pull_request:|windows-validation:|linux-validation:/);
+  for (const workflow of [ci, cd]) assert.doesNotMatch(workflow, /pull_request_target:|workflow_dispatch:|\n\s+- dev\b/);
+  assert.equal(((ci + cd).match(/cache: npm/g) || []).length, 6);
+  assert.equal(((ci + cd).match(/uses: Swatinem\/rust-cache@[a-f0-9]{40}/g) || []).length, 4);
+  assert.equal(((ci + cd).match(/key: \$\{\{ env\.RESONA_NATIVE_CACHE \}\}/g) || []).length, 2);
+  const job = (workflow, name) => workflow.split(`\n  ${name}:`)[1].split(/\n  [a-z][a-z-]+:/)[0];
+  assert.match(job(ci, "windows-validation"), /BASE_SHA: \$\{\{ github.event.pull_request.base.sha \}\}/);
+  assert.match(job(ci, "validation"), /name: PR validation/);
+  assert.match(job(ci, "validation"), /if: always\(\) && github.event_name == 'pull_request'/);
+  assert.match(job(ci, "validation"), /needs: \[windows-validation, linux-validation\]/);
+  assert.match(job(ci, "validation"), /test "\$WINDOWS_RESULT" = success && test "\$LINUX_RESULT" = success/);
+  assert.match(job(cd, "verify"), /if: github.event_name == 'push' && github.ref == 'refs\/heads\/main'/);
+  for (const name of ["windows-build", "arch-build"]) {
+    assert.match(job(cd, name), /needs: \[verify\]/);
+    assert.match(job(cd, name), /if: needs.verify.outputs.release == 'true'/);
+    assert.match(job(cd, name), /environment: release/);
   }
+  assert.match(job(cd, "publish"), /needs: \[verify, windows-build, arch-build\]/);
+  assert.match(job(cd, "publish"), /environment: release/);
+  assert.match(ci, /cancel-in-progress: true/);
+  assert.match(cd, /cancel-in-progress: false\n  queue: max/);
 });
 
 test("one version keeps one tag across build attempts", () => {

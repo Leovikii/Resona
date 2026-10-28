@@ -136,6 +136,6 @@ python3 scripts/test-linux-desktop.py
 
 脚本生成静音 FLAC、封面和 LRC，使用临时 XDG 数据/缓存目录启动 Release，读取既有桌面字体配置，通过 StatusNotifier/D-Bus 验证实际歌词前端 ready 与销毁重建，以及 MPRIS 元数据、控制和退出；不修改用户音频或既有应用数据。
 
-CI 只在 main 更新后运行，使用固定摘要的官方 Arch `base-devel` 容器，执行构建、测试、Clippy 和真实 FFmpeg 转换，并验证真实 Pacman 首次安装、旧包升级、重装、包身份、文件关联和卸载。dev 和 PR 更新不触发自动 CI。容器没有图形 Polkit 代理、物理音频设备或 Wayland compositor，不能据此声称桌面实机验收通过。
+指向 main 的 PR CI 使用固定摘要的官方 Arch `base-devel` 容器，执行构建、测试、Clippy 和真实 FFmpeg 转换，并验证真实 Pacman 首次安装、旧包升级、重装、包身份、文件关联和卸载。`PR validation` 汇总 Windows/Arch 结果，成功且跟上 main 才能合并；dev push 不单独触发，已有 PR 的更新会触发。main 更新只进行双平台构建、包验证、签名和发布 CD。容器没有图形 Polkit 代理、物理音频设备或 Wayland compositor，不能据此声称桌面实机验收通过。
 
 本轮实测和剩余门禁见 [0.3.0 计划](plans/0.3.0.md)，长期决定见 [ADR 0028](decisions/0028-arch-linux-wayland-baseline.md) 和 [ADR 0029](decisions/0029-wayland-lyrics-and-mpris.md)。

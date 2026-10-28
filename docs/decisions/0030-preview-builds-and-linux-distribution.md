@@ -6,7 +6,7 @@
 - 关联：拟补充 [ADR 0024](0024-windows-tray-distribution-and-update.md)、[ADR 0028](0028-arch-linux-wayland-baseline.md)；补充并取代上述 ADR 中仅 Windows/版本变化发布与 Linux 手动预览的分发规则。
 
 - alpha.3 修订：Linux 安装与更新条款由 [ADR 0032](0032-arch-in-app-update.md) 取代，移除 AUR，启用应用内下载验签与 Polkit/Pacman 安装；以下保留历史决定。
-- alpha.4 修订：[ADR 0034](0034-main-only-ci-and-dependency-cache.md) 取代自动 PR validation 门禁，只在 main 更新后运行 CI；以下保留历史决定。
+- alpha.4 修订：[ADR 0034](0034-main-only-ci-and-dependency-cache.md) 修订为 PR 到 main 时运行双平台 CI、必需 `PR validation` 成功后合并、main 只执行 CD；以下保留历史决定。
 
 ## 背景
 
