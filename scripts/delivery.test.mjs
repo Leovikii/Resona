@@ -13,8 +13,8 @@ const version = "0.3.0-alpha.1";
 const identity = buildIdentity(version, "42", "1", "a".repeat(40));
 
 test("main PRs require dual-platform CI; main pushes only run CD", () => {
-  const ci = readFileSync(new URL("../.github/workflows/pr-validation.yml", import.meta.url), "utf8");
-  const cd = readFileSync(new URL("../.github/workflows/main-merge-delivery.yml", import.meta.url), "utf8");
+  const ci = readFileSync(new URL("../.github/workflows/pr-validation.yml", import.meta.url), "utf8").replaceAll("\r\n", "\n");
+  const cd = readFileSync(new URL("../.github/workflows/main-merge-delivery.yml", import.meta.url), "utf8").replaceAll("\r\n", "\n");
   assert.match(ci, /on:\s+pull_request:\s+branches:\s+- main\s+env:/);
   assert.doesNotMatch(ci, /\n  push:|environment:|secrets\.|queue: max/);
   assert.match(cd, /on:\s+push:\s+branches:\s+- main\s+env:/);
