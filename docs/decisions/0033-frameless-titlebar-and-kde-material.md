@@ -1,6 +1,6 @@
 # ADR 0033：无边框标题栏与 KDE 原生模糊外壳
 
-- 状态：Accepted；所有者于 2026-10-28 批准方案并授权实现、测试和推送 dev，暂不合并。
+- 状态：Accepted；所有者于 2026-10-28 批准方案并授权实现；本机测试通过后，进一步授权 dev → main PR 合并、分支同步与发布。
 - 日期：2026-10-28。
 - 替代 ADR 0020/0021/0022 的顶部结构、原生标题栏和 Linux 实色限制。
 - 详细布局、尺寸、参考、交互和验证见 [alpha.4 方案](../plans/0.3.0-alpha.4.md)。
@@ -25,9 +25,10 @@ Windows 的 Mica 与原生标题栏能形成连续外壳；Linux 的 GTK 标题�
 ## 实现边界
 
 - 共享 48px 标题栏；窄屏 36px 标签行，五个 44×48px 按钮。宽屏侧栏 208px，删除字标和旧品牌行。压缩复用普通标题栏；歌词保持独立。
+- 所有者于 2026-10-28 实测后批准标题栏视觉统一：品牌图标 16px，标题宽窄均为 13px/400，右侧图标统一 16px 画布和 1.5px 实际线宽，默认使用同一中性灰。保留 8px 工具/窗口控件分组、主题色选中、红色关闭悬停及高对比度覆盖；尺寸只改变图形，不缩小命中区域。
 - Windows 使用 Tauri 原生操作、Win32 HTMAXBUTTON 与系统菜单，按每次命中时的 DPI 计算几何。可访问按钮、窗口状态事件、八方向原生 resize 保留。
 - KDE 使用官方生成的 `wayland-client` / `wayland-protocols` / `wayland-protocols-plasma` 绑定和 GTK 同连接的借用 surface。优先 ext-background-effect-v1 capability，兼容 org_kde_kwin_blur_manager；不支持的 compositor 使用实色。新版 capability 撤回或旧 global 移除通知前端回退。
 - 正文使用不透明内容面；只请求正文矩形之外的外壳区域。ResizeObserver 仅在几何变化提交区域，不进入播放轮询。KDE 样式不使用 backdrop-filter 或整体 opacity。
 - GTK 负责读取共享 socket；adapter 每 200ms 仅 drain 自己的 pending protocol queue，不阻塞 GTK、不读第二连接、不轮询桌面画面。此低频事件队列调度是已知简化，原生性能测试后再决定是否改用专用 GLib source。
 - 初始化失败/超时记录诊断并回退；窗口 unrealize 清理协议对象，不能销毁 GTK 拥有的 display/surface。新协议由 GTK 下一次绘制提交，不直接 commit 借用 surface。
-- 本机无 WSL/KDE 会话；Arch CI 负责编译/纯逻辑/包回归，模糊视觉、系统菜单与实机 GPU/功耗仍属于 KDE 原生门禁。
+- 初次实施在无 WSL/KDE 的 Windows 主机完成；后续 CachyOS/KDE 原生补验见 [Linux 本机记录](../plans/0.3.0-alpha.4-linux-validation.md)。编译、纯逻辑、真实音频、协议和桌面集成已执行；所有者已确认最终测试程序的功能和标题栏视觉通过；压缩最小化动画自动观察仍失败，系统菜单/鼠标未逐项记录，GPU/功耗未测。

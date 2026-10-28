@@ -5,6 +5,8 @@ import { useTranslation } from "react-i18next";
 import icon from "../../../assets/resona-icon.svg";
 import { observeWindowState, performWindowAction, resizeWindow, type WindowAction } from "../bridge/windowControls";
 
+const titleBarIconProps = { size: 16, strokeWidth: 1.5, absoluteStrokeWidth: true };
+
 export function WindowTitleBar({ title = "Resona", compact = false, selection, onNavigate }: {
   title?: string;
   compact?: boolean;
@@ -37,7 +39,7 @@ export function WindowTitleBar({ title = "Resona", compact = false, selection, o
       {compact && onNavigate && <nav className="window-titlebar-navigation" aria-label={t("app.name")}>
         {(["tools", "settings"] as const).map((kind) => <Tooltip key={kind} label={t(`nav.${kind}`)} events={{ hover: true, focus: true, touch: false }}>
           <ActionIcon aria-current={selection === kind ? "page" : undefined} aria-label={t(`nav.${kind}`)} className="window-titlebar-button" data-active={selection === kind || undefined} onClick={() => onNavigate(kind)} radius={0} size={44} variant="subtle">
-            {kind === "tools" ? <Wrench size={18} /> : <Settings size={18} />}
+            {kind === "tools" ? <Wrench {...titleBarIconProps} /> : <Settings {...titleBarIconProps} />}
           </ActionIcon>
         </Tooltip>)}
       </nav>}
@@ -46,7 +48,7 @@ export function WindowTitleBar({ title = "Resona", compact = false, selection, o
           const label = t(`window.${action === "maximize" && state.maximized ? "restore" : action}`);
           return <Tooltip key={action} label={label} events={{ hover: true, focus: true, touch: false }}>
             <ActionIcon aria-label={label} className="window-titlebar-button" data-caption={action} data-native-hover={action === "maximize" && state.nativeMaximizeHovered || undefined} onClick={() => act(action)} radius={0} size={44} variant="subtle">
-              {action === "minimize" ? <Minus size={14} /> : action === "close" ? <X size={16} /> : state.maximized ? <Copy size={13} /> : <Square size={12} />}
+              {action === "minimize" ? <Minus {...titleBarIconProps} /> : action === "close" ? <X {...titleBarIconProps} /> : state.maximized ? <Copy {...titleBarIconProps} /> : <Square {...titleBarIconProps} />}
             </ActionIcon>
           </Tooltip>;
         })}

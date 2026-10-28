@@ -106,13 +106,13 @@ body {
   gap: 8px;
   padding-left: 16px;
   font-size: 13px;
+  font-weight: 400;
 }
 
 /* Tauri's drag-region handler tests the event target, not its ancestors. */
 .window-titlebar-drag > * { pointer-events: none; }
 .window-titlebar-drag img { width: 16px; height: 16px; flex: 0 0 16px; }
 .window-titlebar-drag span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.window-titlebar[data-compact] .window-titlebar-drag span { max-width: 42px; font-size: 12px; }
 .window-titlebar[data-focused="false"] .window-titlebar-drag { color: var(--mantine-color-dimmed); }
 .window-titlebar-navigation, .window-caption-buttons { display: flex; flex: 0 0 auto; }
 .window-titlebar-navigation { margin-right: 8px; }
@@ -120,7 +120,7 @@ body {
   width: 44px;
   height: 48px;
   min-width: 44px;
-  color: var(--mantine-color-text);
+  color: light-dark(var(--mantine-color-gray-7), var(--mantine-color-dark-1));
   background: transparent;
 }
 .window-titlebar .window-titlebar-button:hover,

@@ -63,7 +63,7 @@ Resona/
 ├─ tests/                          # 前端与发布规则测试
 ├─ assets/                         # 品牌 SVG、图标规范与直接引用正式资源的预览页
 ├─ docs/                           # 当前规范、ADR 和活动计划
-└─ .github/workflows/              # PR 门禁与 main 自动交付
+└─ .github/workflows/              # main 双平台验证与自动交付
 ```
 
 实际文件以仓库为准；本页只维护职责边界，不列举每个测试或组件。

@@ -104,6 +104,19 @@ def check_contract():
     bus("call", NAME, PATH, "org.mpris.MediaPlayer2", "Quit")
 
 
+def check_startup_update(root):
+    logs = root / "data/io.github.vki.resona/logs/resona.log"
+    deadline = time.monotonic() + 20
+    while True:
+        content = logs.read_text()
+        assert content.count("application update check started") <= 1, "Startup update check ran more than once"
+        if "application update check completed" in content or "application update check failed" in content:
+            assert content.count("application update check started") == 1
+            return
+        assert time.monotonic() < deadline, "Startup update check did not finish"
+        time.sleep(0.1)
+
+
 def check_file_associations(root, first, environment, binary):
     desktop = Path(os.environ.get("RESONA_TEST_DESKTOP", ROOT / "packaging/arch/io.github.vki.resona.desktop"))
     subprocess.run(["desktop-file-validate", str(desktop)], check=True, timeout=5)
@@ -170,8 +183,8 @@ def main():
                     time.sleep(0.1)
                 check_lyrics(root)
                 check_file_associations(root, first, environment, binary)
+                check_startup_update(root)
                 check_contract()
-                assert "application update check started" not in (root / "data/io.github.vki.resona/logs/resona.log").read_text()
                 assert process.wait(timeout=10) == 0
                 assert NAME not in bus("call", "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "ListNames")
                 check_cold_desktop_open(first, environment, binary)
@@ -190,7 +203,7 @@ def main():
                     except subprocess.TimeoutExpired:
                         process.kill()
                         process.wait()
-    print("PASS: desktop-entry MP3/WAV/FLAC opening and single instance; no Linux startup update check; native overlay lyrics readiness/recreation; MPRIS metadata/artwork, transport, seek/stale IDs, volume, modes, Raise and Quit")
+    print("PASS: desktop-entry MP3/WAV/FLAC opening and single instance; one bounded startup update check; native overlay lyrics readiness/recreation; MPRIS metadata/artwork, transport, seek/stale IDs, volume, modes, Raise and Quit")
 
 
 if __name__ == "__main__":

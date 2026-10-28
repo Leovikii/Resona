@@ -2,15 +2,15 @@
 
 `0.3.0-alpha.1` 开始支持 Arch Linux 系 x86_64 的原生 Wayland 会话。本机验证环境为 CachyOS、KDE Plasma、PipeWire；其他发行版、X11 和 ARM 不在范围内；交付状态见 [STATUS](STATUS.md)。
 
-当前开发版本为 [0.3.0-alpha.4](plans/0.3.0-alpha.4.md)，尚未发布；公开安装包仍为 alpha.3。安装与更新规则见 [ADR 0032](decisions/0032-arch-in-app-update.md)。alpha.4 改用无边框标题栏与 KDE 模糊外壳，历史 GTK 装饰实机结论不能代替新版验收；完整步骤、已知 CI 结果和性能记录见 [alpha.4 Linux 实机交接](plans/0.3.0-alpha.4-linux-validation.md)。
+当前版本为 [0.3.0-alpha.4](plans/0.3.0-alpha.4.md)，所有者已确认本机测试通过并授权发布；双平台交付状态以 [main Actions](https://github.com/Leovikii/Resona/actions/workflows/main-merge-delivery.yml) 和下方 Release 资产为准。安装与更新规则见 [ADR 0032](decisions/0032-arch-in-app-update.md)。alpha.4 改用无边框标题栏与 KDE 模糊外壳，本机自动回归已完成，压缩窗口 squash 动画严格门禁仍失败，最终功能与标题栏视觉已由所有者确认，鼠标/菜单专项未逐项记录，性能未测；完整步骤、CI 历史与本机结果见 [alpha.4 Linux 实机交接](plans/0.3.0-alpha.4-linux-validation.md)。
 
 ## 安装、打开方式与更新
 
-从 [alpha.3 Release](https://github.com/Leovikii/Resona/releases/tag/v0.3.0-alpha.3) 下载原生包与 SHA256SUMS：
+从 [alpha.4 Release](https://github.com/Leovikii/Resona/releases/tag/v0.3.0-alpha.4) 下载原生包与 SHA256SUMS：
 
 ```bash
 sha256sum --ignore-missing -c SHA256SUMS
-sudo pacman -U ./resona-preview-bin-0.3.0alpha3-1-x86_64.pkg.tar.zst
+sudo pacman -U ./resona-preview-bin-0.3.0alpha4-1-x86_64.pkg.tar.zst
 # 卸载，保留用户数据与音频
 sudo pacman -R resona-preview-bin
 ```
@@ -20,7 +20,7 @@ sudo pacman -R resona-preview-bin
 - 同包名升级；预览与正式包之间切换需手动安装。旧 alpha 用户首次手动安装 alpha.3，用户列表和偏好保留。旧测试包的 test-profile 不自动合并。
 - 系统 `LocalFileSigLevel` 继续生效；`.tauri.sig` 不能替代 OpenPGP。定制系统若强制本地包 OpenPGP 签名，需要按系统政策处理，应用不会关闭该要求。
 - 预览最多保留 30 分钟，安装前重查包、内容与事务。安装期间不允许退出或新文件任务；有扫描/转换时先完成或明确取消。下载可以取消，Pacman 安装不可强杀。失败保留诊断，不删系统锁；成功复核数据库后提示重启。
-- 包声明 `polkit`，桌面需运行图形授权代理；无代理、授权取消、锁或依赖冲突均在当前弹窗报告。此 Windows 主机不能验证 KDE 授权会话。
+- 包声明 `polkit`，桌面需运行图形授权代理；无代理、授权取消、锁或依赖冲突均在当前弹窗报告。本轮尚未执行真实图形授权与安装升级。
 - 桌面入口、图标、MP3/WAV/FLAC 打开方式保持；不更改系统默认播放器。标准卸载钩子清理桌面缓存。
 
 ## 环境与运行
@@ -51,6 +51,10 @@ GDK_BACKEND=wayland ./src-tauri/target/release/resona /path/to/track.flac
 `build:linux` 使用 Tauri `--no-bundle`，启用 `custom-protocol`；无需 Vite 服务。它不生成 NSIS、AppImage、deb 或 updater 资产，也不安装到系统目录。可执行文件仍依赖本机 GTK / WebKitGTK 等共享库，不是跨发行版便携包。`dev:linux`、`start:linux` 明确选择 Wayland，不以 XWayland 启动成功代替原生验证。
 
 数据遵循 Tauri 的 XDG 目录（应用标识 `io.github.vki.resona`）。测试使用临时 XDG 数据、配置与缓存目录，与用户数据分离。
+
+### alpha.4 本机测试程序
+
+本轮程序与同名压缩包保存在忽略目录 `src-tauri/target/test-build/Resona-0.3.0-alpha.4-titlebar-v2-arch-wayland-x86_64/`；执行其中 `start-resona.sh` 即可。数据隔离、依赖和人工清单见 [本机记录](plans/0.3.0-alpha.4-linux-validation.md#可直接运行的本机程序)。alpha.4 使用本机已安装的 gtk-layer-shell，不附带私有库；历史 alpha.1 包规则保留如下。
 
 ### alpha.1 历史本机测试包
 
@@ -85,7 +89,7 @@ alpha.1 曾提供 `src-tauri/target/test-build/Resona-0.3.0-alpha.1-arch-wayland
 | MP3 / WAV / FLAC、CUE、输出设备、列表、封面、普通同步歌词 | 复用现有 Rust 服务与 React 界面 |
 | WAV → FLAC | 检查 `/usr/bin/ffmpeg`、`/usr/bin/ffprobe` 的真实版本；缺失时提示 pacman 安装并提供“重新检查”，不执行提权或下载 Windows 二进制 |
 | 文件安全 | 临时文件在目标目录内；校验后以硬链接原子发布新文件，再移除临时文件；已有目标不会被 POSIX rename 覆盖。文件系统不支持硬链接时明确失败并保留源文件 |
-| 主窗口与压缩窗口 | 共享无边框标题栏，KDE 原生背景效果探测、外壳区域模糊与实色回退；实机待验收。保存尺寸与布局，主窗口保存最大化状态；位置由 compositor 管理，不查询或恢复全局坐标 |
+| 主窗口与压缩窗口 | 共享无边框标题栏，KDE 原生背景效果探测、外壳区域模糊与实色回退；协议与几何自动回归已执行，最终功能与标题栏视觉已由所有者确认；压缩最小化动画自动观察仍失败，鼠标/菜单专项未逐项记录。保存尺寸与布局，主窗口保存最大化状态；位置由 compositor 管理，不查询或恢复全局坐标 |
 | 系统托盘 | 需要 StatusNotifier host；启动时经 Arch 自带的 `busctl` 有界检查一次。宿主或托盘创建失败不阻止播放，并拒绝隐藏主窗口；不持续轮询宿主 |
 | 桌面悬浮歌词 | KDE Wayland layer-shell overlay 置顶透明窗口，字号固定高度、两行歌词、拖动/左右调整宽度、锁定穿透及原生 GTK 解锁按钮；关闭后释放 WebView |
 | KDE 媒体面板 / MPRIS | 曲目信息、封面、位置、播放/暂停/停止、前后曲、定位、音量、循环/随机、激活与退出；复用同一播放引擎 |
@@ -107,7 +111,8 @@ cargo fmt --manifest-path src-tauri/Cargo.toml --check
 cargo test --manifest-path src-tauri/Cargo.toml --locked
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
 # 本机有真实输出设备和系统 FFmpeg 时，串行运行通常忽略的用例
-cargo test --manifest-path src-tauri/Cargo.toml --locked -- --ignored --skip native_ --test-threads=1
+cargo test --manifest-path src-tauri/Cargo.toml --locked -- --ignored --skip native_ --skip packaged_update_metadata --test-threads=1
+# packaged_update_metadata 需先构建真实 Arch 包，并设置 RESONA_TEST_PACKAGE 指向包文件
 # KDE Wayland 协议与生命周期测试，单独运行，使用隔离目录
 resona_native_root=$(mktemp -d)
 XDG_DATA_HOME=$resona_native_root/data XDG_CACHE_HOME=$resona_native_root/cache GDK_BACKEND=wayland WAYLAND_DEBUG=client \
