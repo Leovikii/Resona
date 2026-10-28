@@ -47,3 +47,5 @@ ADR 记录会长期影响代码、依赖或产品边界且无法仅从实现看�
 - [0032 - GitHub Arch 原生包与应用内更新](0032-arch-in-app-update.md)
 - [0033 - 无边框标题栏与 KDE 原生模糊外壳](0033-frameless-titlebar-and-kde-material.md)
 - [0034 - PR CI、main CD 与依赖缓存](0034-main-only-ci-and-dependency-cache.md)
+
+- [0035 - 统一 Arch 包名与 alpha.4 重发](0035-unified-arch-package.md)

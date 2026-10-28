@@ -5,6 +5,8 @@
 - 授权：所有者批准 alpha.3 方案，要求实现、双平台验证并通过 dev → main PR 交付。
 - 修订：ADR 0028/0030/0031 中的 AUR、Linux 不检查/不提权/不安装条款。每版本单一 tag、签名与 main Actions 发布规则继续有效。
 
+- alpha.4 修订：[ADR 0035](0035-unified-arch-package.md) 统一包名为 `resona`，不实现旧包名兼容；所有者明确授权本次删除 alpha.4 Release/tag 后同版本重发。以下分包条款保留为历史。
+
 ## 决定
 
 1. Linux 范围保持 Arch 系 x86_64 / KDE Wayland。首次从具体 GitHub Release 下载 `.pkg.tar.zst`，核对 SHA256SUMS 后执行本地 `pacman -U`；移除 AUR 同步、配方分发和 yay/paru 引导。系统库、文件归属、升级与卸载仍由 Pacman 管理。

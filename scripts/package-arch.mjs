@@ -10,7 +10,6 @@ export function archVersion(version) {
 export function archRecipe({ version }) {
   let recipe = readFileSync(new URL("../packaging/arch/PKGBUILD", import.meta.url), "utf8");
   recipe = recipe.replace(/^pkgver=.*$/m, `pkgver=${archVersion(version)}`);
-  if (!version.includes("-")) recipe = recipe.replace("pkgname=resona-preview-bin", "pkgname=resona-bin").replace("conflicts=('resona' 'resona-bin')", "conflicts=('resona' 'resona-preview-bin')");
   return recipe;
 }
 export function packageArch(root, output, binary, identity, version) {
@@ -25,9 +24,8 @@ export function packageArch(root, output, binary, identity, version) {
   install("src-tauri/icons/default-artwork.png", "usr/lib/Resona/icons/default-artwork.png");
   install("packaging/arch/io.github.vki.resona.desktop", "usr/share/applications/io.github.vki.resona.desktop");
   install("src-tauri/icons/128x128.png", "usr/share/icons/hicolor/128x128/apps/io.github.vki.resona.png");
-  const name = version.includes("-") ? "resona-preview-bin" : "resona-bin";
-  install("LICENSE", `usr/share/licenses/${name}/LICENSE`);
-  install("docs/THIRD_PARTY_LICENSES.md", `usr/share/licenses/${name}/THIRD_PARTY_LICENSES.md`);
+  install("LICENSE", "usr/share/licenses/resona/LICENSE");
+  install("docs/THIRD_PARTY_LICENSES.md", "usr/share/licenses/resona/THIRD_PARTY_LICENSES.md");
   const metadata = `${JSON.stringify({ version, ...identity }, null, 2)}\n`;
   writeFileSync(resolve(stage, "usr/lib/Resona/build.json"), metadata);
   writeFileSync(resolve(output, "build.json"), metadata);

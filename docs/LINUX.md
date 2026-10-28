@@ -10,14 +10,15 @@
 
 ```bash
 sha256sum --ignore-missing -c SHA256SUMS
-sudo pacman -U ./resona-preview-bin-0.3.0alpha4-1-x86_64.pkg.tar.zst
+sudo pacman -U ./resona-0.3.0alpha4-1-x86_64.pkg.tar.zst
 # 卸载，保留用户数据与音频
-sudo pacman -R resona-preview-bin
+sudo pacman -R resona
 ```
 
-- 不再分发 AUR 配方。安装包名保留 `resona-preview-bin` / `resona-bin`，系统依赖由 Pacman 检查；不会执行 `pacman -Sy`、自动全系统升级或绕过依赖/签名检查。
+- 不再分发 AUR 配方。预览与正式版包名统一为 `resona`，系统依赖由 Pacman 检查；不会执行 `pacman -Sy`、自动全系统升级或绕过依赖/签名检查。
 - 关于页和启动静默检查使用现有 Release、SemVer 与签名清单；用户触发下载后 Tauri 验签，展示包变更，再由图形 Polkit 代理授权 Pacman 安装。只有系统官方包且当前进程版本匹配时可安装，开发版/解压运行需先手动安装。
-- 同包名升级；预览与正式包之间切换需手动安装。旧 alpha 用户首次手动安装 alpha.3，用户列表和偏好保留。旧测试包的 test-profile 不自动合并。
+- 预览到正式版沿用同一个 `resona` 包名，严格按更高 SemVer 升级。没有旧包名兼容或自动迁移：测试环境若装有 `resona-preview-bin` / `resona-bin`，先执行 `sudo pacman -R <实际旧包名>`，再安装新包；用户数据和音频保留。旧测试包的 test-profile 不自动合并。
+- 本次按所有者授权删除旧 alpha.4 Release/tag 后同版本重发；已安装 alpha.4 的程序不会收到同版本自动升级，需手动重装。[ADR 0035](decisions/0035-unified-arch-package.md)。
 - 系统 `LocalFileSigLevel` 继续生效；`.tauri.sig` 不能替代 OpenPGP。定制系统若强制本地包 OpenPGP 签名，需要按系统政策处理，应用不会关闭该要求。
 - 预览最多保留 30 分钟，安装前重查包、内容与事务。安装期间不允许退出或新文件任务；有扫描/转换时先完成或明确取消。下载可以取消，Pacman 安装不可强杀。失败保留诊断，不删系统锁；成功复核数据库后提示重启。
 - 包声明 `polkit`，桌面需运行图形授权代理；无代理、授权取消、锁或依赖冲突均在当前弹窗报告。本轮尚未执行真实图形授权与安装升级。
