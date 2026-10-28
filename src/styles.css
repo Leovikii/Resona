@@ -190,6 +190,10 @@ html[data-window="audio-compression"] #root {
   background: var(--resona-window-background);
 }
 
+html[data-window-material="kde_blur"][data-window="audio-compression"],
+html[data-window-material="kde_blur"][data-window="audio-compression"] body,
+html[data-window-material="kde_blur"][data-window="audio-compression"] #root { background: transparent; }
+
 .compression-window {
   width: 100%;
   height: 100vh;

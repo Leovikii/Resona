@@ -49,6 +49,7 @@ struct BlurState {
     effect_manager: Option<(u32, ExtBackgroundEffectManagerV1)>,
     effect: Option<ExtBackgroundEffectSurfaceV1>,
     blur_capability: bool,
+    capabilities_received: bool,
     content: ContentRect,
     size: (i32, i32),
     ready: bool,
@@ -108,7 +109,7 @@ impl BlurState {
         if let Err(error) = self.connection.flush() {
             log::warn!("KDE blur flush failed: {error}");
         }
-        if self.ready {
+        if self.ready && (self.effect_manager.is_none() || self.capabilities_received) {
             let material = self.material();
             (self.notify)(material);
             for sender in self.waiting.drain(..) {
@@ -149,6 +150,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for BlurState {
                     manager.destroy();
                 }
                 state.blur_capability = false;
+                state.capabilities_received = false;
                 state.update(qh);
             }
             wl_registry::Event::Global {
@@ -184,6 +186,7 @@ impl Dispatch<ExtBackgroundEffectManagerV1, ()> for BlurState {
     ) {
         if let ext_background_effect_manager_v1::Event::Capabilities { flags } = event {
             state.blur_capability = matches!(flags, wayland_client::WEnum::Value(flags) if flags.contains(ext_background_effect_manager_v1::Capability::Blur));
+            state.capabilities_received = true;
             state.update(qh);
         }
     }
@@ -222,7 +225,10 @@ pub(super) fn sync<R: Runtime>(window: &WebviewWindow<R>) -> Result<WindowMateri
             let result = SESSIONS.with(|sessions| {
                 if let Some(session) = sessions.borrow().get(native.label()) {
                     let mut session = session.borrow_mut();
-                    if session.state.ready {
+                    if session.state.ready
+                        && (session.state.effect_manager.is_none()
+                            || session.state.capabilities_received)
+                    {
                         let _ = sender.send(Ok(session.state.material()));
                     } else {
                         session.state.waiting.push(sender.clone());
@@ -261,10 +267,10 @@ fn initialize<R: Runtime>(
     let (connection, surface, compositor) = unsafe {
         let display_ptr: *mut gdk::ffi::GdkDisplay = display.to_glib_none().0;
         let surface_ptr: *mut gdk::ffi::GdkWindow = surface.to_glib_none().0;
-        let raw_display = gdkwayland_sys::gdk_wayland_display_get_wl_display(display_ptr.cast());
-        let raw_surface = gdkwayland_sys::gdk_wayland_window_get_wl_surface(surface_ptr.cast());
+        let raw_display = gdk_wayland_sys::gdk_wayland_display_get_wl_display(display_ptr.cast());
+        let raw_surface = gdk_wayland_sys::gdk_wayland_window_get_wl_surface(surface_ptr.cast());
         let raw_compositor =
-            gdkwayland_sys::gdk_wayland_display_get_wl_compositor(display_ptr.cast());
+            gdk_wayland_sys::gdk_wayland_display_get_wl_compositor(display_ptr.cast());
         if raw_display.is_null() || raw_surface.is_null() || raw_compositor.is_null() {
             return Err("Wayland handles unavailable".into());
         }
@@ -302,6 +308,7 @@ fn initialize<R: Runtime>(
             effect_manager: None,
             effect: None,
             blur_capability: false,
+            capabilities_received: false,
             content: ContentRect {
                 x: 0,
                 y: 48,

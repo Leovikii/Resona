@@ -35,7 +35,7 @@ pub fn apply<R: Runtime>(window: &WebviewWindow<R>) {
                     MENU_EVENTS.with(|events| {
                         events
                             .borrow_mut()
-                            .insert(event_label.clone(), event.clone().into());
+                            .insert(event_label.clone(), (**event).clone());
                     });
                 }
                 gtk::glib::Propagation::Proceed
@@ -53,7 +53,6 @@ pub fn show_menu<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
     return windows::show_menu(window);
     #[cfg(target_os = "linux")]
     {
-        use gtk::prelude::*;
         let window_copy = window.clone();
         return window
             .run_on_main_thread(move || {
