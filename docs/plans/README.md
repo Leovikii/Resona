@@ -4,7 +4,7 @@
 
 | 版本 | 状态 | 入口 |
 | --- | --- | --- |
-| 0.3.0-alpha.3 | Development Complete；以 Arch 原生包安装和应用内更新替代 AUR，沿用现有界面与 Windows 设计 | [开发方案](0.3.0-alpha.3.md) |
+| 0.3.0-alpha.3 | Development Complete；双平台 CI 通过、PR #18 已合并，Linux 图形授权与 Windows 安装版仍有实机门禁 | [开发方案](0.3.0-alpha.3.md) |
 | 0.3.0-alpha.2 | Completed；已发布，本机官方包自动回归通过，所有者确认五项 KDE 实际效果正常 | [问题核对与开发计划](0.3.0-alpha.2.md) |
 | 0.3.0 | 基础兼容 Development Complete；预览交付实现已落盘，alpha.3 更新与交付范围见新计划 | [计划与验证](0.3.0.md) · [预览交付方案](0.3.0-preview-delivery.md) · [Linux 指南](../LINUX.md) |
 | 0.2.1 | Ready for owner release，所有者实测通过，尚未发布 | [计划](0.2.1.md) · [UI 方案](0.2.1-ui.md) · [验证记录](0.2.1-validation.md) |
