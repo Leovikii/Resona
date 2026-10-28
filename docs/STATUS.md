@@ -2,7 +2,24 @@
 
 最后更新：2026-10-28
 
-## 当前版本与交付
+## alpha.4 实施与验证
+
+- 所有者本机实测功能正常，并于 2026-10-28 确认标题栏优化后的测试程序通过。已将共享主/压缩标题栏图标画布统一为 16px、实际线宽 1.5px、宽窄标题统一 13px/400，中性灰随明暗切换；保留品牌图标、44×48px 命中区、8px 分组间距、紫色选中与关闭红色悬停。
+- 标题栏优化后的 TypeScript/Vite/Tauri Release 构建通过；真实前端覆盖主窗口四个规定尺寸与压缩 720×500 的代表性明暗组合，无横向溢出，五按钮测得 44×48px、SVG 16px。新测试程序从 `/tmp` 独立启动、隔离数据及 MPRIS 退出通过；所有者已确认本机最新程序测试通过；不将该确认扩展为未逐项记录的硬件或性能测试。
+- 版本已提升为 `0.3.0-alpha.4`。所有者已授权更新文档、推送 dev、创建并合并到 main 的 PR、将 dev 快进同步到合并后的 main，并通过 main 双平台流水线发布。交付结果以 [main Actions](https://github.com/Leovikii/Resona/actions/workflows/main-merge-delivery.yml) 和 [alpha.4 Release](https://github.com/Leovikii/Resona/releases/tag/v0.3.0-alpha.4) 为准。
+- 正式主/压缩窗口采用共享无边框标题栏；宽屏侧栏字标已移除，窄屏工具/设置并入 48px 标题栏，36px 标签行保留排序、拖放、菜单。
+- Windows 保留 Mica，新增 Win32 最大化按钮命中、Snap hover 路径与系统菜单；关闭仍进入现有生命周期。KDE 接入新旧背景效果协议探测、区域更新、能力撤回回退与 GTK 同连接生命周期；所有者已完成本机功能验收，专项边界见下文。
+- 前端 TypeScript、生产 build、Node 59 项（4 项平台跳过）通过；Windows Rust 134 项通过、10 项条件忽略，fmt/Clippy、嵌入前端 debug 构建通过。[第二轮 CI](https://github.com/Leovikii/Resona/actions/runs/40667001692) Windows validation 成功。
+- 本机 CachyOS / KDE Wayland 已核对远端 dev `f5e7dee`：Linux Node 12 项与完整 Node 63 项、Rust 124 项（12 项条件忽略）、fmt、Clippy、TypeScript/生产前端和嵌入前端 Release 构建通过。另有真实 FFmpeg/音频条件测试 9 项、真实 Arch 包只读元数据/事务 1 项及歌词 layer-shell 生命周期 1 项通过；许可证重新生成无差异。未再次触发 Actions。
+- 正式 App 的四个规定尺寸、720×500 压缩窗口、代表性明暗/中英、长名称新建、工具/设置、添加菜单/Escape 与焦点恢复已检查。Windows 原生最大化/还原可操作；自动化后续无法读取原生窗口，未确认 Snap hover、Alt+Space、Mica 视觉与真实 DPI。
+- 本机原生 Release 与独立测试目录的桌面集成通过：MP3/WAV/FLAC 中文/空格路径、单实例、歌词 ready/重建、MPRIS 控制与退出、每进程一次启动更新检查。旧脚本的“Linux 不检查更新”断言已按 alpha.3 规则修正。KWin 新协议 Blur capability 与排除正文的区域请求已确认；所有者已确认功能与标题栏优化通过；专项菜单、阴影/圆角、真实鼠标命中未逐项记录，GPU/功耗未测。
+- 原生窗口用例的尺寸/模式记忆、并发 resize、最大化恢复、压缩重建、两个窗口的最大化/最小化请求和 CloseRequested 均到达并通过；主窗口 maximize/squash、压缩 maximize 动画已捕获。**压缩窗口 squash 动画未捕获，整项严格用例仍失败**，未降低门禁。测试已修正聚焦插入 resize/configure 往返及仅等待首帧造成的竞态。
+- 最新本机测试程序为忽略目录 `src-tauri/target/test-build/Resona-0.3.0-alpha.4-titlebar-v2-arch-wayland-x86_64/` 与同名 `.tar.gz`；原始 alpha.4 测试目录保留，含隔离启动器、低音量 WAV/LRC 样本、许可证及 SHA256SUMS。无需构建工具；依赖本机系统库。详细结果和人工清单见 [Linux 实机交接](plans/0.3.0-alpha.4-linux-validation.md)。
+- 所有者最新要求：**只有 main 更新自动 CI，dev 推送与 PR 更新不触发**；本轮已有 CI 失败跟踪只是临时安排。npm/Cargo 缓存、系统库版本隔离和发布门禁已实现，Node 契约测试与 actionlint 1.7.12 通过；缓存实际命中待下一次 main 运行。已按所有者授权移除远程 main 规则中过时的 `PR validation` 要求，保留 PR 合并、禁止强推与删除保护。[ADR 0034](decisions/0034-main-only-ci-and-dependency-cache.md)。
+- 正式前端验收页：`/alpha4-preview.html?production=1`，iframe 加载真实 App；普通 `/alpha4-preview.html` 仍是已批准的独立设计稿。
+
+## alpha.3 历史交付
+
 
 - 版本为 `0.3.0-alpha.3`，所有者已批准实施并授权 dev → main PR、合并交付及分支同步。[开发方案](plans/0.3.0-alpha.3.md)、[ADR 0032](decisions/0032-arch-in-app-update.md)。
 - 旧 alpha.1 / alpha.2 两条 Release 及资产已按授权删除，其他 Releases、Git tags 与历史提交保留。旧用户首次手动安装 alpha.3，用户列表、偏好和音频保留。
@@ -11,7 +28,7 @@
 - 显式设置 updater 检查 15 秒、下载 600 秒超时；锁定插件不会自动将检查超时传给下载。Pacman 安装不受该超时强杀。
 - [PR #18](https://github.com/Leovikii/Resona/pull/18) 已通过[双平台门禁](https://github.com/Leovikii/Resona/actions/runs/40629669622)并合并，初始实现提交为 `bee44e5`。超时修正和验证记录由 [PR #19](https://github.com/Leovikii/Resona/pull/19) 跟踪。Actions 使用内部 PKGBUILD 与 Arch PR 包安装测试；签名仅在 main 的 release Environment，Windows/Arch 同 SHA 完成后统一草稿验签公开。[main 交付流水线](https://github.com/Leovikii/Resona/actions/workflows/main-merge-delivery.yml)，公开包入口为 [alpha.3 Release](https://github.com/Leovikii/Resona/releases/tag/v0.3.0-alpha.3)。
 
-## 本轮已验证
+## alpha.3 历史验证
 
 - Windows 本机 Rust：133 项通过、10 项按硬件/工具条件忽略；包括新的更新互斥、文件任务安装互斥、Arch 事务解析、错平台/版本包与签名清单校验。Clippy、fmt 通过。
 - PR 的 Windows 与 Arch 编译、Rust、Clippy、前端及发布契约检查均通过。Arch 常规 Rust 123 项通过、12 项条件忽略；另外 2 项真实 FFmpeg 和 1 项 Pacman 元数据测试通过，真实包首装、alpha.2→alpha.3 升级、重装、桌面注册和卸载通过。
@@ -22,7 +39,7 @@
 
 ## 开放门禁与限制
 
-- 此主机没有可用 Linux/WSL；Linux 结果来自 Arch CI。没有 KDE/Polkit 会话的容器不能代替真实授权、应用内跨版本升级和重启验证。
+- 当前主机为 CachyOS / KDE Plasma 6.8.1 / 原生 Wayland，双屏均为 150% 缩放；本轮未更改系统安装版。alpha.4 Arch 包已构建并只读验证，实际 Pacman 首装/升级/重装/卸载未跑：专用脚本只允许 disposable Actions root 容器，不在个人系统执行。Polkit 授权、应用内跨版本升级与重启仍未验收。
 - Linux 系统 `LocalFileSigLevel` 不变；Tauri `.tauri.sig` 不是 OpenPGP。无图形授权代理、包锁、冲突或严格本地签名政策时明确失败，程序不删锁、不关闭检查、不自动全系统升级。
 - Windows NSIS 真实跨版本覆盖、取消、卸载及完整 SMTC/托盘/Mica/文件关联仍需安装版实机回归；本机测试和 CI 构建不能替代。安装包尚无 Authenticode，Tauri 包与清单签名保留。
 - 多屏/DPI、物理媒体键、睡眠/蓝牙恢复等既有人工门禁保持；歌词跨输出拖动/热拔插恢复、托盘宿主热重启恢复未实现或未验收。Linux 转换目标文件系统需支持同卷硬链接；不支持则保留源文件并失败。

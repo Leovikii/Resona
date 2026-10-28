@@ -6,6 +6,8 @@
 - 补充：[ADR 0016](0016-audio-compression-workspace-window.md) 的普通辅助窗口
 - 保留：[ADR 0012](0012-desktop-lyrics-window-and-unlock-helper.md) 的桌面歌词透明窗口边界
 
+> alpha.4 修订：顶部布局、普通窗口装饰和 Linux 材质约束由 [ADR 0033](0033-frameless-titlebar-and-kde-material.md) 替代；下文保留历史决定与其他仍有效约束。
+
 ## 背景
 
 Resona 的功能布局和主要交互已经收口，但普通 WebView 使用完全不透明的统一页面背景，主窗口与音频压缩窗口仍有较强网页感。Windows 11 提供 Mica 应用背景，Tauri 2 已直接暴露 Window Effects；若用全局 CSS 模糊、自绘标题栏或第二套 Fluent 组件库实现类似效果，会增加 GPU 成本、窗口行为风险和跨平台维护面。

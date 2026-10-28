@@ -31,7 +31,9 @@ Tauri commands 负责 DTO 转换和服务调用，不包含领域分支。长任
 
 主窗口有宽屏和窄屏两种信息架构，但共享同一状态。完整播放器是主内容互斥视图；底部播放器稳定挂载。设置、更新和压缩窗口不得创建第二份播放状态。
 
-普通窗口材质由 Rust `window_material` adapter 决定。Windows 11 可用 Mica，其他环境使用实色 token；桌面歌词保持专用透明窗口，不复用普通窗口材质。
+普通窗口材质由 Rust `window_material` adapter 决定。Windows 11 可用 Mica；KDE Wayland 探测 ext-background-effect/旧 KWin blur 协议，为外壳区域请求合成器模糊，能力不可用时使用实色 token；桌面歌词保持专用透明窗口，不复用普通窗口材质。
+
+普通主/压缩窗口共享 `WindowTitleBar`，原生窗口状态由事件读取，关闭仍发出原生 CloseRequested 并进入既有生命周期。Win32 adapter 保留 HTMAXBUTTON/Snap hover 和系统菜单；Linux 从真实 GTK 按钮事件保留 Wayland 序列号，调用 compositor 窗口菜单。尺寸仍由 Rust 管理。
 
 ## 播放与列表
 

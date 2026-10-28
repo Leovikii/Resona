@@ -7,7 +7,11 @@ use tauri::{
 };
 
 #[cfg(target_os = "linux")]
+mod kde;
+#[cfg(target_os = "linux")]
 mod linux;
+#[cfg(target_os = "linux")]
+pub use kde::{set_content_rect, ContentRect};
 #[cfg(all(test, target_os = "linux"))]
 pub(crate) use linux::verify_native_theme;
 
@@ -21,6 +25,8 @@ const WINDOWS_11_FIRST_BUILD: u32 = 22_000;
 pub enum WindowMaterial {
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     Mica,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    KdeBlur,
     #[default]
     Solid,
 }
@@ -29,6 +35,7 @@ impl WindowMaterial {
     pub fn query_value(self) -> &'static str {
         match self {
             Self::Mica => "mica",
+            Self::KdeBlur => "kde_blur",
             Self::Solid => "solid",
         }
     }
@@ -67,11 +74,18 @@ pub fn configure_builder<'a, R: Runtime, M: Manager<R>>(
     builder: WebviewWindowBuilder<'a, R, M>,
     material: WindowMaterial,
 ) -> WebviewWindowBuilder<'a, R, M> {
+    #[cfg(target_os = "linux")]
+    let builder = builder
+        .transparent(true)
+        .background_color((0, 0, 0, 0).into());
     match material {
         WindowMaterial::Mica => builder
             .transparent(true)
             .background_color((0, 0, 0, 0).into())
             .effects(mica_effect(None)),
+        WindowMaterial::KdeBlur => builder
+            .transparent(true)
+            .background_color((0, 0, 0, 0).into()),
         WindowMaterial::Solid => builder,
     }
 }
@@ -84,6 +98,8 @@ pub fn sync_theme<R: Runtime>(
     let window = managed_window(app, label)?;
     #[cfg(target_os = "linux")]
     linux::sync(&window, theme)?;
+    #[cfg(target_os = "linux")]
+    return kde::sync(&window).map_err(|error| failure("window_material_failed", error));
     #[cfg(not(target_os = "linux"))]
     {
         use tauri::Theme;
@@ -95,17 +111,17 @@ pub fn sync_theme<R: Runtime>(
         window
             .set_theme(native_theme)
             .map_err(|error| failure("window_theme_failed", error))?;
+        let material = preferred_for(label);
+        apply_effect(
+            &window,
+            material,
+            match theme {
+                WindowTheme::Auto => None,
+                explicit => Some(explicit),
+            },
+        )?;
+        Ok(material)
     }
-    let material = preferred_for(label);
-    apply_effect(
-        &window,
-        material,
-        match theme {
-            WindowTheme::Auto => None,
-            explicit => Some(explicit),
-        },
-    )?;
-    Ok(material)
 }
 
 fn managed_window<R: Runtime>(
@@ -135,7 +151,7 @@ fn apply_effect<R: Runtime>(
         WindowMaterial::Mica => window
             .set_effects(mica_effect(theme))
             .map_err(|error| failure("window_material_failed", error)),
-        WindowMaterial::Solid => Ok(()),
+        WindowMaterial::KdeBlur | WindowMaterial::Solid => Ok(()),
     }
 }
 

@@ -215,6 +215,23 @@ pub async fn sync_window_theme(
 }
 
 #[tauri::command]
+pub async fn show_window_menu(window: tauri::WebviewWindow) -> Result<(), String> {
+    if !matches!(window.label(), "main" | "audio-compression") {
+        return Err("Window controls are unavailable for this window".into());
+    }
+    crate::platform::window_controls::show_menu(&window)
+}
+
+#[cfg(target_os = "linux")]
+#[tauri::command]
+pub async fn set_window_blur_content_rect(
+    window: tauri::WebviewWindow,
+    rect: window_material::ContentRect,
+) -> Result<(), String> {
+    window_material::set_content_rect(&window, rect)
+}
+
+#[tauri::command]
 pub async fn show_audio_compression_window(
     app: AppHandle,
     dependency: State<'_, ManagedFfmpegDependencyService>,

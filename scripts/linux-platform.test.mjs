@@ -14,7 +14,8 @@ test("Linux builds cannot inherit the Windows installer or signed updater artifa
   assert.deepEqual(common.bundle.targets, []);
   assert.equal(common.bundle.createUpdaterArtifacts, false);
   assert.equal(common.bundle.windows, undefined);
-  assert.equal(common.app.windows[0].transparent, undefined);
+  assert.equal(common.app.windows[0].transparent, true);
+  assert.equal(common.app.windows[0].decorations, false);
   assert.deepEqual(Object.keys(common.bundle.resources), ["icons/default-artwork.png"]);
 });
 

@@ -495,7 +495,7 @@ mod tests {
     #[ignore = "requires KDE Wayland, qdbus6 and maximize/squash effects; run alone with fresh XDG data"]
     fn native_window_controls_and_geometry() {
         crate::platform::initialize_process();
-        fn wait_for_effect(effect: &str) {
+        fn wait_for_effect(effect: &str) -> bool {
             let deadline = std::time::Instant::now() + Duration::from_secs(1);
             loop {
                 let output = std::process::Command::new("qdbus6")
@@ -516,12 +516,12 @@ mod tests {
                     .any(|name| name == effect)
                 {
                     println!("KWin {effect} animation active");
-                    return;
+                    return true;
                 }
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "KWin {effect} animation did not run"
-                );
+                if std::time::Instant::now() >= deadline {
+                    eprintln!("KWin {effect} animation was not observed");
+                    return false;
+                }
                 std::thread::sleep(Duration::from_millis(10));
             }
         }
@@ -532,21 +532,9 @@ mod tests {
         };
         use std::time::Duration;
 
-        fn title_buttons(widget: &gtk::Widget, buttons: &mut Vec<gtk::Button>) {
-            if let Some(button) = widget.downcast_ref::<gtk::Button>() {
-                if button.style_context().has_class("titlebutton") {
-                    buttons.push(button.clone());
-                }
-            }
-            if let Some(container) = widget.downcast_ref::<gtk::Container>() {
-                container.forall(|child| title_buttons(child, buttons));
-            }
-        }
-
         fn wait_for_size(app: &AppHandle, window: &WebviewWindow, expected: (i32, i32)) {
             let deadline = Instant::now() + Duration::from_secs(2);
             let mut first_frame = None;
-            window.set_focus().unwrap();
             loop {
                 let native = window.clone();
                 let (done, received) = mpsc::sync_channel(1);
@@ -569,10 +557,13 @@ mod tests {
                         panic!("{} expected {expected:?}: {error}", window.label())
                     });
                 if actual.0 == expected {
-                    if first_frame.is_some_and(|frame| actual.1 > frame) {
+                    // KWin may deliver an older activation configure after the first frame.
+                    if first_frame.is_some_and(|(frame, since): (_, Instant)| {
+                        actual.1 > frame && since.elapsed() >= Duration::from_millis(100)
+                    }) {
                         return;
                     }
-                    first_frame.get_or_insert(actual.1);
+                    first_frame.get_or_insert((actual.1, Instant::now()));
                 } else {
                     first_frame = None;
                 }
@@ -625,29 +616,10 @@ mod tests {
                                 gtk::glib::timeout_add_local(
                                     Duration::from_millis(10),
                                     move || {
-                                        let titlebar = native.titlebar().unwrap();
-                                        let mut buttons = Vec::new();
-                                        title_buttons(&titlebar, &mut buttons);
-                                        let ready = buttons.len() == 3
-                                            && buttons.iter().all(|button| {
-                                                button.is_mapped()
-                                                    && button.is_sensitive()
-                                                    && button.event_window().is_some_and(|input| {
-                                                        let (_, _, width, height) =
-                                                            input.geometry();
-                                                        let bounds = button.allocation();
-                                                        width >= 48
-                                                            && height >= 48
-                                                            && (width, height)
-                                                                == (bounds.width(), bounds.height())
-                                                    })
-                                            });
+                                        let ready = !native.is_decorated() && native.child().is_some_and(|child| child.is_mapped());
                                         let elapsed = shown.elapsed();
                                         if ready || elapsed >= Duration::from_secs(1) {
-                                            let intercepts = titlebar
-                                                .downcast_ref::<gtk::EventBox>()
-                                                .is_some_and(|wrapper| wrapper.is_above_child());
-                                            done.send((ready, intercepts, elapsed)).unwrap();
+                                            done.send((ready, elapsed)).unwrap();
                                             gtk::glib::ControlFlow::Break
                                         } else {
                                             gtk::glib::ControlFlow::Continue
@@ -656,14 +628,13 @@ mod tests {
                                 );
                             })
                             .unwrap();
-                            let (ready, intercepts, elapsed) =
+                            let (ready, elapsed) =
                                 received.recv_timeout(Duration::from_secs(5)).unwrap();
                             assert!(
                                 ready && elapsed < Duration::from_secs(1),
                                 "{label} controls not ready within one second: {elapsed:?}"
                             );
-                            assert!(!intercepts, "{label} titlebar intercepts button input");
-                            println!("{label} native input ready after {elapsed:?}");
+                            println!("{label} frameless GTK content ready after {elapsed:?}");
                             let expected = if label == "main" {
                                 let state = service.lock_state().unwrap();
                                 let geometry = state.geometry(state.layout_mode).unwrap();
@@ -772,36 +743,23 @@ mod tests {
                         wait_for_size(&app, &main, (760, 520));
                         println!("custom sizes, reload and compression recreation preserved client dimensions");
                         // Wayland cannot acknowledge deiconify: test geometry before minimizing.
+                        let mut missing_animations = Vec::new();
                         for label in ["main", crate::compression_window::LABEL] {
                             let window = app.get_webview_window(label).unwrap();
+                            // Focus before actions, not between a resize and its configure reply.
+                            window.set_focus().unwrap();
+                            std::thread::sleep(Duration::from_millis(300));
                             for action in ["maximize", "minimize", "close"] {
-                                let native = window.clone();
-                                let (done, received) = mpsc::sync_channel(1);
-                                app.run_on_main_thread(move || {
-                                    let native = native.gtk_window().unwrap();
-                                    let mut buttons = Vec::new();
-                                    title_buttons(&native.titlebar().unwrap(), &mut buttons);
-                                    for button in &buttons {
-                                        let bounds = button.allocation();
-                                        let (_, _, width, height) =
-                                            button.event_window().unwrap().geometry();
-                                        assert!(width >= 48 && height >= 48);
-                                        assert_eq!(
-                                            (width, height),
-                                            (bounds.width(), bounds.height())
-                                        );
-                                    }
-                                    buttons
-                                        .iter()
-                                        .find(|button| button.style_context().has_class(action))
-                                        .unwrap()
-                                        .emit_clicked();
-                                    done.send(()).unwrap();
-                                })
-                                .unwrap();
-                                received.recv_timeout(Duration::from_secs(5)).unwrap();
+                                match action {
+                                    "maximize" => window.maximize().unwrap(),
+                                    "minimize" => window.minimize().unwrap(),
+                                    "close" => window.close().unwrap(),
+                                    _ => unreachable!(),
+                                }
                                 if action == "maximize" {
-                                    wait_for_effect("maximize");
+                                    if !wait_for_effect("maximize") {
+                                        missing_animations.push(format!("{label}: maximize"));
+                                    }
                                     let deadline =
                                         std::time::Instant::now() + Duration::from_secs(5);
                                     while !window.is_maximized().unwrap() {
@@ -814,7 +772,9 @@ mod tests {
                                     window.unmaximize().unwrap();
                                     std::thread::sleep(Duration::from_millis(200));
                                 } else if action == "minimize" {
-                                    wait_for_effect("squash");
+                                    if !wait_for_effect("squash") {
+                                        missing_animations.push(format!("{label}: squash"));
+                                    }
                                     // Wayland has no minimized-state acknowledgement; check the protocol trace.
                                     std::thread::sleep(Duration::from_millis(200));
                                     window.unminimize().unwrap();
@@ -832,6 +792,7 @@ mod tests {
                             );
                             std::thread::sleep(Duration::from_millis(10));
                         }
+                        assert!(missing_animations.is_empty(), "KWin animations not observed: {missing_animations:?}");
                     }));
                     finished.send(checked.is_ok()).unwrap();
                     app.exit(0);

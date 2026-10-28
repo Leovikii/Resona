@@ -2,6 +2,7 @@ export const resources = {
   "zh-CN": {
     translation: {
       app: { name: "Resona" },
+      window: { controls: "窗口控件", minimize: "最小化", maximize: "最大化", restore: "还原", close: "关闭", failed: "窗口操作失败" },
       nav: {
         playlists: "播放列表",
         tools: "工具",
@@ -345,6 +346,7 @@ export const resources = {
   en: {
     translation: {
       app: { name: "Resona" },
+      window: { controls: "Window controls", minimize: "Minimize", maximize: "Maximize", restore: "Restore", close: "Close", failed: "Window action failed" },
       nav: {
         playlists: "Playlists",
         tools: "Tools",

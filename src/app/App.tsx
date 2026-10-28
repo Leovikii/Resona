@@ -105,7 +105,7 @@ import {
   closeActiveContextMenu,
   type AppContextMenuItem,
 } from "../shared/ui/AppContextMenu";
-import { BrandWordmark } from "../shared/ui/BrandWordmark";
+import { WindowTitleBar } from "../shared/ui/WindowTitleBar";
 import { CompactTopNavigation, type CompactNavigationSelection } from "../shared/ui/CompactTopNavigation";
 import { OverflowMarquee } from "../shared/ui/OverflowMarquee";
 import {
@@ -575,6 +575,7 @@ export default function App() {
   );
   return (
     <main className="app-shell" data-layout={mainWindow.snapshot.layoutMode}>
+      <WindowTitleBar compact={compact} selection={selection.kind} onNavigate={(kind) => selectNavigation({ kind })} />
       {compact ? (
         <>
           <CompactTopNavigation
@@ -945,7 +946,6 @@ function Sidebar({
   });
   return (
     <aside className="sidebar">
-      <BrandLockup />
 
       <nav className="sidebar-primary" aria-label={t("app.name")}>
         <div className="playlist-nav-heading">
@@ -1079,14 +1079,6 @@ function Sidebar({
         />
       </nav>
     </aside>
-  );
-}
-
-function BrandLockup() {
-  return (
-    <div className="brand-lockup">
-      <BrandWordmark className="brand-wordmark-sidebar" />
-    </div>
   );
 }
 

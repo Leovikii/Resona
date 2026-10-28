@@ -33,7 +33,7 @@ cargo test --manifest-path src-tauri/Cargo.toml pinned_ffmpeg_test_tools_preserv
 
 固定 FFmpeg 版本、URL、归档/二进制哈希和许可证必须同步审查。测试工具只写入忽略的 `src-tauri/binaries/`；运行时依赖写入 Local AppData 并由 `FfmpegDependencyService` 验证。
 
-预览分发由 `.github/workflows/main-merge-delivery.yml` 的 main push 完成：验证后构建 Windows NSIS 和 Arch 包，统一验签、draft 上传并公开；dev push 不发布。本机产物只测试，留在忽略的 target，不提交/上传。每个版本只发布 `v<version>` 的一个 Release，已有 tag 时同版本合并跳过；发布说明维护在 `docs/releases/<version>.md`，使用极简英文 Markdown。Linux 原生包与双平台签名规则见 [ADR 0032](decisions/0032-arch-in-app-update.md)，不再同步 AUR。Arch PR CI 的 `scripts/test-arch-package.mjs` 仅允许在 disposable Actions 容器 root 环境运行，覆盖真实 Pacman 安装/升级/重装/卸载。
+预览分发由 `.github/workflows/main-merge-delivery.yml` 的 main push 完成：合并后验证双平台，再构建 Windows NSIS 和 Arch 包，统一验签、draft 上传并公开。**dev push、PR 创建/更新不触发 CI**；不为日常提交手动补跑整套 Actions。合并前运行受影响的本机检查，Linux 可由维护者在审阅阶段或实机环境单独验证，必须准确记录未测项目。npm/Cargo 依赖缓存规则见 [ADR 0034](decisions/0034-main-only-ci-and-dependency-cache.md)。本机产物只测试，留在忽略的 target，不提交/上传。每个版本只发布 `v<version>` 的一个 Release，已有 tag 时同版本合并跳过；发布说明维护在 `docs/releases/<version>.md`，使用极简英文 Markdown。Linux 原生包与双平台签名规则见 [ADR 0032](decisions/0032-arch-in-app-update.md)，不再同步 AUR。`scripts/test-arch-package.mjs` 仅允许在 disposable Actions 容器 root 环境运行，覆盖真实 Pacman 安装/升级/重装/卸载。
 
 Linux 本机构建使用 `npm run build:linux`，开发与运行使用 `npm run dev:linux` / `npm run start:linux`；不将裸 `cargo build` 的开发服务器模式产物交付测试。KDE 桌面歌词使用系统 `gtk-layer-shell`，MPRIS 使用会话总线；原生自动回归可运行 `python3 scripts/test-linux-desktop.py`（需要 Release、gio/desktop-file-utils，必须先关闭其他实例；也可设置 `RESONA_TEST_BINARY` / `RESONA_TEST_DESKTOP` 检查解包后的真实安装布局）。Linux 的同目录输出采用不覆盖硬链接提交，失败保留源文件。
 
@@ -42,7 +42,7 @@ Linux 本机构建使用 `npm run build:linux`，开发与运行使用 `npm run 
 - 先沿用现有 module/service/adapter；只有消除真实重复或隔离平台/安全边界时才新增抽象。
 - Rust 是领域状态权威。前端不推演播放、列表、更新、依赖或压缩终态；Tauri command 不承载业务状态机。
 - 跨层 DTO 必须类型化并使用稳定 camelCase 序列化。不要暴露 Rodio、CPAL、数据库行或 Win32 类型。
-- Mantine 用于组件行为和可访问性，应用 token/CSS 负责布局与材质。不得加入第二套组件库、全局 Acrylic/blur 或自绘标题栏。
+- Mantine 用于组件行为和可访问性，应用 token/CSS 负责布局与材质。不得加入第二套组件库或全局 CSS Acrylic/blur；普通窗口复用 ADR 0033 的共享无边框标题栏，平台动作由 Tauri/adapter 执行。
 - 短时通知使用 Mantine `Notification` 及其原生图标插槽；文案按“结果：实际原因”组织，在无歧义前提下尽量简短。只有无需持续处理的临时反馈才自动消失，持续错误保留在对应工作流中。
 - 平台能力放入 `platform` adapter。Win32/COM 回调只读缓存或发 typed command，不能做文件 I/O、图片解码、等待播放锁或直接控制 Rodio。
 - 同步窗口查询可能等待 UI 线程；查询尺寸、位置或窗口状态时不得持有 UI 事件处理也会使用的 service mutex。先读取窗口快照，再加锁更新服务状态，避免布局切换与 resize/close 事件互相等待。
@@ -76,7 +76,7 @@ UI 固定格式控件要有稳定尺寸，文本不得溢出或遮挡。压缩�
 
 ### 双平台精简执行
 
-- PR 的 Windows job 执行完整 `npm test`（自动发现 `scripts/*.test.mjs`），共享前端纯逻辑不在 Linux job 重复。Linux 的 `npm run test:linux` 保留 POSIX 路径、桌面打包和交付规则；Rust 测试、Clippy 与编译两端各跑，因为平台 adapter 和条件编译不同。最终 PR 门禁仍要求两端成功。
+- main 更新后的 Windows job 执行完整 `npm test`（自动发现 `scripts/*.test.mjs`），共享前端纯逻辑不在 Linux job 重复。Linux 的 `npm run test:linux` 保留 POSIX 路径、桌面打包和交付规则；Rust 测试、Clippy 与编译两端各跑，因为平台 adapter 和条件编译不同。发布门禁仍要求两端成功，不再自动运行 PR 门禁。
 - Linux 两项 FFmpeg 忽略测试合并为一次 `cargo test --manifest-path src-tauri/Cargo.toml --locked ffmpeg -- --ignored --test-threads=1`。不删文件安全、迁移、取消或真实转换矩阵。窗口切换压力检查用两次完整往返，保留尺寸记忆、并发 resize、最大化恢复和重建断言。
 - 共享 UI 用一组代表性组合覆盖四个规定视口、浅/深色、solid/Mica 预览、压缩窗口和歌词常用/64px 字号，不做所有排列的笛卡尔积。检查溢出、控件可达、键盘焦点、歌词移入/移出及高于 hover 阈值的设置。共享布局不按操作系统重复截图；两端原生 Release 仍分别核查字体、透明背景、主题、窗口按钮/动画和锁定穿透。
 - 原生回归并入现有生命周期测试：Linux 同一用例覆盖 helper 显隐/点击、输入区域和重建；Windows 普通测试直接向自有 HWND 发送 hover/leave/重显消息，断言绘制状态与 alpha。实际鼠标命中、跨进程穿透、DPI 与 Windows Mica 保留短实机清单。浏览器预览不能宣布原生视觉通过。

@@ -1,6 +1,6 @@
 # CI stages the already compiled application in stage/usr.
 pkgname=resona-preview-bin
-pkgver=0.3.0alpha3
+pkgver=0.3.0alpha4
 pkgrel=1
 pkgdesc='Local audio player with desktop lyrics (Arch Wayland, precompiled)'
 arch=('x86_64')
