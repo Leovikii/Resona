@@ -6,6 +6,8 @@ export const applicationIsPrerelease = applicationVersion
   .includes("-");
 
 export interface ApplicationUpdateSnapshot {
+  distribution: "nsis" | "pacman";
+  stage: { phase: string; changes: string[] };
   supported: boolean;
   currentVersion: string;
   currentBuild: string | null;
@@ -41,6 +43,8 @@ export interface ApplicationUpdateFailure {
 }
 
 export const defaultApplicationUpdateSnapshot: ApplicationUpdateSnapshot = {
+  distribution: "nsis",
+  stage: { phase: "", changes: [] },
   supported: false,
   currentVersion: applicationVersion,
   currentBuild: null,

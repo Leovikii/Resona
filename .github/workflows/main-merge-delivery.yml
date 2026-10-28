@@ -99,7 +99,7 @@ jobs:
       contents: read
     steps:
       - name: Install Arch build dependencies
-        run: pacman -Syu --noconfirm --needed git rust nodejs npm webkit2gtk-4.1 libayatana-appindicator alsa-lib openssl ffmpeg gtk-layer-shell
+        run: pacman -Syu --noconfirm --needed git rust nodejs npm webkit2gtk-4.1 libayatana-appindicator alsa-lib openssl ffmpeg gtk-layer-shell polkit desktop-file-utils
 
       - name: Check out the pull request merge commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
@@ -115,6 +115,7 @@ jobs:
           cargo test --manifest-path src-tauri/Cargo.toml --locked ffmpeg -- --ignored --test-threads=1
           cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
           npm run build:linux -- --debug
+          RESONA_PACKAGE_BINARY=src-tauri/target/debug/resona node scripts/test-arch-package.mjs
 
   pr-validation:
     name: PR validation
@@ -193,23 +194,26 @@ jobs:
           retention-days: 7
 
   arch-build:
-    name: Build Arch package and AUR recipe
+    name: Build Arch package
     needs: [verify, windows-validation, linux-validation]
     if: needs.verify.outputs.release == 'true'
     runs-on: ubuntu-latest
     container:
       image: archlinux:base-devel@sha256:3cbf69d2d5958d6a294f3722c5668e6187c4df8e00fa27f72352f0bf83e495e1
     timeout-minutes: 45
+    environment: release
     permissions:
       contents: read
     steps:
       - name: Install Arch build and package dependencies
-        run: pacman -Syu --noconfirm --needed git rust nodejs npm webkit2gtk-4.1 libayatana-appindicator alsa-lib openssl gtk-layer-shell namcap desktop-file-utils
+        run: pacman -Syu --noconfirm --needed git rust nodejs npm webkit2gtk-4.1 libayatana-appindicator alsa-lib openssl gtk-layer-shell namcap desktop-file-utils polkit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
           ref: ${{ github.sha }}
       - name: Build embedded frontend and stage package
+        env:
+          RESONA_UPDATER_PUBLIC_KEY: ${{ vars.RESONA_UPDATER_PUBLIC_KEY }}
         run: |
           npm ci
           npm run build:linux
@@ -218,13 +222,13 @@ jobs:
           ldd src-tauri/target/release/resona | tee src-tauri/target/delivery/linked-libraries.txt
           if grep -q 'not found' src-tauri/target/delivery/linked-libraries.txt; then exit 1; fi
           desktop-file-validate packaging/arch/io.github.vki.resona.desktop
-      - name: Build the AUR recipe as an ordinary user
+      - name: Package the compiled application as an ordinary user
         run: |
           useradd --create-home builder
-          cp -a src-tauri/target/delivery/aur /home/builder/package
+          cp -a src-tauri/target/delivery/package /home/builder/package
           chown -R builder:builder /home/builder/package
-          runuser -u builder -- bash -c 'cd /home/builder/package && makepkg --verifysource && makepkg --nodeps --cleanbuild --noconfirm && makepkg --printsrcinfo > .SRCINFO'
-          cp /home/builder/package/*.pkg.tar.zst /home/builder/package/PKGBUILD /home/builder/package/.SRCINFO src-tauri/target/delivery/
+          runuser -u builder -- bash -c 'cd /home/builder/package && makepkg --nodeps --cleanbuild --noconfirm'
+          cp /home/builder/package/*.pkg.tar.zst /home/builder/package/PKGBUILD src-tauri/target/delivery/
       - name: Verify clean-container package installation and removal
         run: |
           pacman -U --noconfirm src-tauri/target/delivery/*.pkg.tar.zst
@@ -244,10 +248,8 @@ jobs:
         with:
           name: arch-delivery
           path: |
-            src-tauri/target/delivery/*.tar.gz
             src-tauri/target/delivery/*.pkg.tar.zst
             src-tauri/target/delivery/PKGBUILD
-            src-tauri/target/delivery/.SRCINFO
             src-tauri/target/delivery/build.json
             src-tauri/target/delivery/arch-packages.txt
           include-hidden-files: true
@@ -284,31 +286,3 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: node scripts/publish-release.mjs
-
-  aur-sync:
-    name: Synchronize published AUR recipe
-    needs: [verify, publish]
-    if: vars.RESONA_AUR_ENABLED == 'true'
-    runs-on: ubuntu-latest
-    environment: aur
-    container:
-      image: archlinux:base-devel@sha256:3cbf69d2d5958d6a294f3722c5668e6187c4df8e00fa27f72352f0bf83e495e1
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - run: pacman -Syu --noconfirm --needed git openssh nodejs curl
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: arch-delivery
-          path: src-tauri/target/aur-sync
-      - name: Publish recipe without downgrading AUR
-        env:
-          RESONA_AUR_SSH_KEY: ${{ secrets.RESONA_AUR_SSH_KEY }}
-          RESONA_AUR_KNOWN_HOSTS: ${{ vars.RESONA_AUR_KNOWN_HOSTS }}
-          RESONA_RELEASE_TAG: ${{ needs.verify.outputs.tag }}
-        run: bash scripts/sync-aur.sh src-tauri/target/aur-sync

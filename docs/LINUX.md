@@ -2,25 +2,33 @@
 
 `0.3.0-alpha.1` 开始支持 Arch Linux 系 x86_64 的原生 Wayland 会话。本机验证环境为 CachyOS、KDE Plasma、PipeWire；其他发行版、X11 和 ARM 不在范围内；交付状态见 [STATUS](STATUS.md)。
 
-[跨平台预览交付方案](plans/0.3.0-preview-delivery.md)已获批准并落盘：main 的 Actions 交付 Arch `.pkg.tar.zst`、AUR `-bin` 载荷和配方，Linux 应用内提供包管理器更新引导，不提供 AppImage 或应用自更新。alpha.2 完整公开资产及本机官方包安装已验证；AUR 同步本次未启用，见 STATUS。
-
-当前预览版本 [0.3.0-alpha.2](plans/0.3.0-alpha.2.md) 继续只验收本机 Arch 系 x86_64 / KDE Plasma / 原生 Wayland。使用桌面 portal 初始值与变更信号同步 auto 主题，保留手动覆盖；GTK 应用 ID 和进程名均为 `io.github.vki.resona`，与 desktop/hicolor 图标一致。原生测试已观察到 KWin maximize/squash 动画启动；歌词背景以局部指针状态恢复设置值，锁定 helper 只在鼠标进入时绘制按钮。所有者已确认安装版五项 KDE 实际效果均正常；多屏与极端边界仍见计划中的限制。
+当前版本为 [0.3.0-alpha.3](plans/0.3.0-alpha.3.md)，安装与更新规则见 [ADR 0032](decisions/0032-arch-in-app-update.md)。alpha.2 的主题、应用身份、歌词与窗口设计沿用；历史实机结论不替代本版更新授权验收。
 
 ## 安装、打开方式与更新
 
-- AUR 预览包名为 `resona-preview-bin`；首次同步后可通过 yay/paru 安装。AUR 配方从 GitHub 固定 Release 下载已编译载荷，`pkgrel=1`，后续发布递增应用版本；正式版包名为 `resona-bin`。
-- 直接下载安装包时，使用 `sudo pacman -U ./resona-preview-bin-<pkgver>-<pkgrel>-x86_64.pkg.tar.zst`；本地包不会订阅更新仓库。更新时下载新包重复安装，或改用 AUR。
-- 安装会注册 Resona 桌面入口、图标与 MP3/WAV/FLAC 的“打开方式”。可在 KDE 文件管理器中选择 Resona 并按个人需要设为默认；程序不擅自替换已有默认播放器。文件路径以 `%F` 传递，已有实例接收后恢复窗口并播放目标。卸载通过 pacman 标准钩子清理入口/缓存，保留用户数据与音频。
-- 关于页的“更新说明”可复制 `yay -Syu` / `paru -Syu`，并打开 AUR/Release 页面；只给出完整更新指引，不执行命令、不提权、不访问更新网络。首次 AUR 同步前包页面可能尚不存在。
-- 本机旧测试包的 `test-profile` 不自动迁移到安装版；请先保留原目录。安装版使用系统 XDG 数据目录，禁止通过覆盖用户数据库来自动合并。
+从 [alpha.3 Release](https://github.com/Leovikii/Resona/releases/tag/v0.3.0-alpha.3) 下载原生包与 SHA256SUMS：
 
+```bash
+sha256sum --ignore-missing -c SHA256SUMS
+sudo pacman -U ./resona-preview-bin-0.3.0alpha3-1-x86_64.pkg.tar.zst
+# 卸载，保留用户数据与音频
+sudo pacman -R resona-preview-bin
+```
+
+- 不再分发 AUR 配方。安装包名保留 `resona-preview-bin` / `resona-bin`，系统依赖由 Pacman 检查；不会执行 `pacman -Sy`、自动全系统升级或绕过依赖/签名检查。
+- 关于页和启动静默检查使用现有 Release、SemVer 与签名清单；用户触发下载后 Tauri 验签，展示包变更，再由图形 Polkit 代理授权 Pacman 安装。只有系统官方包且当前进程版本匹配时可安装，开发版/解压运行需先手动安装。
+- 同包名升级；预览与正式包之间切换需手动安装。旧 alpha 用户首次手动安装 alpha.3，用户列表和偏好保留。旧测试包的 test-profile 不自动合并。
+- 系统 `LocalFileSigLevel` 继续生效；`.tauri.sig` 不能替代 OpenPGP。定制系统若强制本地包 OpenPGP 签名，需要按系统政策处理，应用不会关闭该要求。
+- 预览最多保留 30 分钟，安装前重查包、内容与事务。安装期间不允许退出或新文件任务；有扫描/转换时先完成或明确取消。下载可以取消，Pacman 安装不可强杀。失败保留诊断，不删系统锁；成功复核数据库后提示重启。
+- 包声明 `polkit`，桌面需运行图形授权代理；无代理、授权取消、锁或依赖冲突均在当前弹窗报告。此 Windows 主机不能验证 KDE 授权会话。
+- 桌面入口、图标、MP3/WAV/FLAC 打开方式保持；不更改系统默认播放器。标准卸载钩子清理桌面缓存。
 
 ## 环境与运行
 
 构建依赖（使用系统工具链时）：
 
 ```bash
-sudo pacman -S --needed base-devel rust nodejs npm webkit2gtk-4.1 libayatana-appindicator alsa-lib openssl gtk-layer-shell
+sudo pacman -S --needed base-devel rust nodejs npm webkit2gtk-4.1 libayatana-appindicator alsa-lib openssl gtk-layer-shell polkit desktop-file-utils
 ```
 
 播放复用 Rodio / CPAL 的 ALSA 后端；PipeWire 桌面需安装 `pipewire-alsa`。压缩使用系统 `ffmpeg` 包。文件选择需有当前桌面适用的 portal 后端，例如 KDE 的 `xdg-desktop-portal-kde`。
@@ -82,7 +90,7 @@ alpha.1 曾提供 `src-tauri/target/test-build/Resona-0.3.0-alpha.1-arch-wayland
 | 桌面悬浮歌词 | KDE Wayland layer-shell overlay 置顶透明窗口，字号固定高度、两行歌词、拖动/左右调整宽度、锁定穿透及原生 GTK 解锁按钮；关闭后释放 WebView |
 | KDE 媒体面板 / MPRIS | 曲目信息、封面、位置、播放/暂停/停止、前后曲、定位、音量、循环/随机、激活与退出；复用同一播放引擎 |
 | Windows 任务栏控件与 Mica | Linux 不提供 |
-| 安装、文件关联与更新 | 已实现 Arch/AUR 打包与 MP3/WAV/FLAC 打开方式；实际分发状态见 STATUS。应用只给包管理器更新说明，不查询 Release 或安装 Windows 更新 |
+| 安装、文件关联与更新 | GitHub 原生包、桌面打开方式、Tauri 下载验签与 Polkit/Pacman 安装；实际交付与实机边界见 STATUS |
 
 桌面歌词必须使用支持 layer-shell 的 Wayland compositor；当前验证 KDE Plasma。置顶由 overlay 协议保证，不抢键盘焦点；系统锁屏仍由 compositor 管理。几何为当前输出内的逻辑坐标，暂不支持拖动跨输出或热拔插恢复。
 
@@ -123,6 +131,6 @@ python3 scripts/test-linux-desktop.py
 
 脚本生成静音 FLAC、封面和 LRC，使用临时 XDG 数据/缓存目录启动 Release，读取既有桌面字体配置，通过 StatusNotifier/D-Bus 验证实际歌词前端 ready 与销毁重建，以及 MPRIS 元数据、控制和退出；不修改用户音频或既有应用数据。
 
-CI 使用固定摘要的官方 Arch `base-devel` 容器，执行构建、测试、Clippy 和真实 FFmpeg 转换。CI 容器没有物理音频设备或 Wayland compositor，不能据此声称桌面实机验收通过。
+CI 使用固定摘要的官方 Arch `base-devel` 容器，执行构建、测试、Clippy 和真实 FFmpeg 转换。CI 还验证真实 Pacman 首次安装、alpha.2→alpha.3 升级、重装、包身份、文件关联和卸载。CI 容器没有图形 Polkit 代理、物理音频设备或 Wayland compositor，不能据此声称桌面实机验收通过。
 
 本轮实测和剩余门禁见 [0.3.0 计划](plans/0.3.0.md)，长期决定见 [ADR 0028](decisions/0028-arch-linux-wayland-baseline.md) 和 [ADR 0029](decisions/0029-wayland-lyrics-and-mpris.md)。

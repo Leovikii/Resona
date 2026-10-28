@@ -1,6 +1,6 @@
 [package]
 name = "resona"
-version = "0.3.0-alpha.2"
+version = "0.3.0-alpha.3"
 description = "A local desktop audio player"
 authors = ["Viki"]
 edition = "2021"
@@ -41,6 +41,7 @@ tauri-plugin-log = "=2.9.0"
 tauri-plugin-updater = "=2.10.1"
 thiserror = "2"
 sha2 = "0.11.0"
+tempfile = "=3.27.0"
 ureq = { version = "3.3.0", features = ["win-system-proxy"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

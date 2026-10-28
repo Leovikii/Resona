@@ -49,7 +49,7 @@ Resona/
 │  │     ├─ window_controls.rs     # GTK 原生标题栏按钮命中区域
 │  │     ├─ window_geometry.rs     # 内容区逻辑尺寸 / Wayland 几何适配
 │  │     ├─ file_commit.rs         # 不覆盖原子提交
-│  │     ├─ distribution.rs        # updater 平台支持
+│  │     ├─ distribution/          # updater 平台能力与 Arch 事务安装 adapter
 │  │     ├─ compression_tools.rs   # 默认测试/开发工具路径
 │  │     ├─ window_material.rs
 │  │     └─ desktop_lyrics/           # Win32 / Wayland layer-shell
@@ -57,8 +57,8 @@ Resona/
 │  ├─ icons/                       # 应用、任务栏与文件关联图标
 │  ├─ resources/                   # 运行时占位资源
 │  └─ tauri.conf.json
-├─ packaging/arch/                 # Linux 桌面入口与音频打开方式
-├─ scripts/                        # 构建、发布、Arch 配方与测试工具
+├─ packaging/arch/                 # 内部 PKGBUILD、桌面入口与音频打开方式
+├─ scripts/                        # 构建、发布、Arch 打包与测试工具
 ├─ tests/                          # 前端与发布规则测试
 ├─ assets/                         # 品牌 SVG、图标规范与直接引用正式资源的预览页
 ├─ docs/                           # 当前规范、ADR 和活动计划

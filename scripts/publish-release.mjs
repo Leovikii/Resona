@@ -1,20 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-only
-import { copyFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { renameSync as fsRename, copyFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildIdentity, readProjectVersion } from "./release-channel.mjs";
+import { archVersion } from "./package-arch.mjs";
 
 const repository = "Leovikii/Resona";
-export function updateManifest(version, identity, installer, signature) {
+export function updateManifest(version, identity, installer, signature, archPackage, archSignature) {
   if (installer !== `Resona_${version}_windows_x86_64-setup.exe` || !signature.trim()) throw new Error("Invalid signed installer");
+  const expected = `${version.includes('-') ? 'resona-preview-bin' : 'resona-bin'}-${archVersion(version)}-1-x86_64.pkg.tar.zst`;
+  if (archPackage !== expected || !archSignature.trim()) throw new Error("Invalid signed Arch package");
   return {
     schema: 1, version, tag: identity.tag, channel: version.includes("-") ? "preview" : "stable",
     build: { runNumber: identity.runNumber, runAttempt: identity.runAttempt, sha: identity.sha },
     notes: `Resona ${version}`,
     pub_date: new Date().toISOString(),
-    platforms: { "windows-x86_64": { signature: signature.trim(), url: `https://github.com/${repository}/releases/download/${identity.tag}/${installer}` } },
+    platforms: { "windows-x86_64": { signature: signature.trim(), url: `https://github.com/${repository}/releases/download/${identity.tag}/${installer}` }, "linux-x86_64": { signature: archSignature.trim(), url: `https://github.com/${repository}/releases/download/${identity.tag}/${archPackage}` } },
   };
 }
 
@@ -26,19 +29,14 @@ export function collectArtifacts(input, output, version, identity) {
     if (JSON.stringify(actual) !== JSON.stringify({ version, ...identity })) throw new Error("Platform build identity mismatch");
   }
   const installer = `Resona_${version}_windows_x86_64-setup.exe`;
-  const payload = `Resona_${version}_arch_x86_64.tar.gz`;
   const packages = readdirSync(linux).filter((name) => name.endsWith(".pkg.tar.zst"));
   if (packages.length !== 1) throw new Error("Exactly one Arch package is required");
-  const payloadHash = createHash("sha256").update(readFileSync(resolve(linux, payload))).digest("hex");
-  const recipe = readFileSync(resolve(linux, "PKGBUILD"), "utf8");
-  const srcinfo = readFileSync(resolve(linux, ".SRCINFO"), "utf8");
-  if (!recipe.includes(`sha256sums=('${payloadHash}')`) || !srcinfo.includes(payloadHash) || !recipe.includes(`/${identity.tag}/${payload}`)) throw new Error("Arch recipe does not match payload");
+  const expectedPackage = (version.includes('-') ? 'resona-preview-bin-' : 'resona-bin-') + version.replace(/-(alpha|beta|rc)\./, '$1') + '-1-x86_64.pkg.tar.zst';
+  if (packages[0] !== expectedPackage) throw new Error('Unexpected Arch package name');
   mkdirSync(output, { recursive: true });
   for (const name of [installer, `${installer}.sig`]) copyFileSync(resolve(windows, name), resolve(output, name));
-  for (const name of [payload, packages[0], "PKGBUILD", "build.json", "arch-packages.txt"]) copyFileSync(resolve(linux, name), resolve(output, name));
-  // GitHub renames dotfiles (for example .SRCINFO to default.SRCINFO) on upload.
-  copyFileSync(resolve(linux, ".SRCINFO"), resolve(output, "SRCINFO"));
-  return { installer, manifest: updateManifest(version, identity, installer, readFileSync(resolve(output, `${installer}.sig`), "utf8")) };
+  for (const name of [packages[0]]) copyFileSync(resolve(linux, name), resolve(output, name));
+  return { installer, archPackage: packages[0], manifest: updateManifest(version, identity, installer, readFileSync(resolve(output, installer + '.sig'), 'utf8'), packages[0], 'pending') };
 }
 
 export function verifyDraftAssets(uploaded, expected) {
@@ -88,13 +86,18 @@ function publish() {
   const output = resolve(base, "release-assets");
   const scratch = resolve(base, "release-verification");
   mkdirSync(scratch, { recursive: true });
-  const { installer, manifest } = collectArtifacts(resolve(base, "artifacts"), output, version, identity);
+  const { installer, archPackage, manifest } = collectArtifacts(resolve(base, "artifacts"), output, version, identity);
   const notes = resolve("docs/releases", `${version}.md`);
   manifest.notes = readFileSync(notes, "utf8").trim();
   if (!manifest.notes) throw new Error(`Release notes are empty: ${notes}`);
   const publicKey = process.env.RESONA_UPDATER_PUBLIC_KEY;
   if (!publicKey) throw new Error("RESONA_UPDATER_PUBLIC_KEY is required");
   verifyFile(resolve(output, installer), readFileSync(resolve(output, `${installer}.sig`), "utf8"), publicKey, scratch);
+  execFileSync(process.execPath, ["node_modules/@tauri-apps/cli/tauri.js", "signer", "sign", resolve(output, archPackage)], { stdio: "pipe" });
+  const archSignature = readFileSync(resolve(output, archPackage + '.sig'), 'utf8');
+  fsRename(resolve(output, archPackage + '.sig'), resolve(output, archPackage + '.tauri.sig'));
+  verifyFile(resolve(output, archPackage), archSignature, publicKey, scratch);
+  manifest.platforms['linux-x86_64'].signature = archSignature.trim();
   const manifestPath = resolve(output, "latest.json");
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   execFileSync(process.execPath, ["node_modules/@tauri-apps/cli/tauri.js", "signer", "sign", manifestPath], { stdio: "pipe" });

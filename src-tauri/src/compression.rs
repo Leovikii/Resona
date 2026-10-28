@@ -134,6 +134,7 @@ impl CompressionFailure {
 }
 
 pub struct CompressionService {
+    file_task_gate: Mutex<()>,
     ffmpeg: PathBuf,
     next_task_id: AtomicU64,
     next_scan_id: AtomicU64,
@@ -155,6 +156,7 @@ impl Default for CompressionService {
     fn default() -> Self {
         let ffmpeg = resolve_ffmpeg_binary();
         Self {
+            file_task_gate: Mutex::new(()),
             ffmpeg,
             next_task_id: AtomicU64::new(1),
             next_scan_id: AtomicU64::new(1),
@@ -169,6 +171,18 @@ impl Default for CompressionService {
 }
 
 impl CompressionService {
+    pub fn system_install_guard(&self) -> Result<MutexGuard<'_, ()>, CompressionFailure> {
+        let guard = self.file_task_gate.try_lock().map_err(|_| {
+            CompressionFailure::new("compression_busy", "A file task or installation is running")
+        })?;
+        if self.has_active_work() {
+            return Err(CompressionFailure::new(
+                "compression_busy",
+                "Finish or cancel file tasks before installing",
+            ));
+        }
+        Ok(guard)
+    }
     pub fn with_binaries(ffmpeg: PathBuf, _ffprobe: PathBuf) -> Self {
         Self {
             ffmpeg,
@@ -238,6 +252,9 @@ impl CompressionService {
         self: &Arc<Self>,
         paths: Vec<PathBuf>,
     ) -> Result<CompressionScanSnapshot, CompressionFailure> {
+        let _install_guard = self.file_task_gate.try_lock().map_err(|_| {
+            CompressionFailure::new("compression_busy", "A system installation is running")
+        })?;
         if paths.is_empty() {
             return Err(CompressionFailure::new(
                 "empty_compression_scan",
@@ -268,6 +285,9 @@ impl CompressionService {
         self: &Arc<Self>,
         paths: Vec<PathBuf>,
     ) -> Result<CompressionScanSnapshot, CompressionFailure> {
+        let _install_guard = self.file_task_gate.try_lock().map_err(|_| {
+            CompressionFailure::new("compression_busy", "A system installation is running")
+        })?;
         if paths.is_empty() {
             return Err(CompressionFailure::new(
                 "empty_compression_scan",
@@ -468,6 +488,9 @@ impl CompressionService {
         delete_source: bool,
         deletion_confirmed: bool,
     ) -> Result<CompressionSnapshot, CompressionFailure> {
+        let _install_guard = self.file_task_gate.try_lock().map_err(|_| {
+            CompressionFailure::new("compression_busy", "A system installation is running")
+        })?;
         if delete_source && !deletion_confirmed {
             return Err(CompressionFailure::new(
                 "source_deletion_confirmation_required",
@@ -1498,6 +1521,37 @@ mod tests {
             .status = "completed".to_owned();
         service.scan_snapshot.lock().expect("scan snapshot").status = "scanning".to_owned();
         assert!(service.has_active_work());
+    }
+
+    #[test]
+    fn system_install_excludes_file_tasks_and_rejects_active_work() {
+        let service = Arc::new(CompressionService::default());
+        let guard = service.system_install_guard().unwrap();
+        assert!(service.system_install_guard().is_err());
+        assert_eq!(
+            service
+                .add_scan_inputs(vec![PathBuf::from("test.wav")])
+                .unwrap_err()
+                .code,
+            "compression_busy"
+        );
+        assert_eq!(
+            service
+                .start(
+                    vec![PathBuf::from("test.wav")],
+                    CompressionPreset::Fast,
+                    false,
+                    false
+                )
+                .unwrap_err()
+                .code,
+            "compression_busy"
+        );
+        drop(guard);
+        service.snapshot.lock().unwrap().status = "running".into();
+        assert!(service.system_install_guard().is_err());
+        service.snapshot.lock().unwrap().status = "idle".into();
+        assert!(service.system_install_guard().is_ok());
     }
 
     #[test]

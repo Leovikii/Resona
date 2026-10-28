@@ -1,4 +1,3 @@
-import PackageManagerUpdateDialog from "./PackageManagerUpdateDialog";
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode, WheelEvent } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -1567,7 +1566,6 @@ function SettingsView({ applicationLifetime, applicationUpdate, busy, desktopLyr
     }
     setDesktopLyrics({ fontSize: value });
   }, [desktopLyrics, lyricsPreferences.fontSize, setDesktopLyrics]);
-  const [packageUpdateOpened, setPackageUpdateOpened] = useState(false);
   const updateButtonLabel = !applicationUpdate.snapshot.supported
     ? t("settings.versionManual", { version: applicationUpdate.snapshot.currentVersion })
     : applicationUpdate.available
@@ -1592,10 +1590,7 @@ function SettingsView({ applicationLifetime, applicationUpdate, busy, desktopLyr
       <section className="settings-section settings-about-section">
         <Text className="settings-section-title" fw={650}>{t("settings.about")}</Text>
         <SettingRow label={t("settings.version")}>
-          {!applicationUpdate.snapshot.supported ? <Stack align="flex-end" gap={6}>
-            <Text size="xs">{updateButtonLabel}</Text>
-            <Button onClick={() => setPackageUpdateOpened(true)} size="xs" variant="light">{t("settings.packageUpdateHelp")}</Button>
-          </Stack> : <Button
+          <Button
             leftSection={applicationUpdate.available ? <Download size={15} /> : <RefreshCw size={15} />}
             loading={applicationUpdate.status === "checking"}
             onClick={() => void handleUpdateAction()}
@@ -1603,12 +1598,11 @@ function SettingsView({ applicationLifetime, applicationUpdate, busy, desktopLyr
             variant={applicationUpdate.available ? "filled" : "light"}
           >
             {updateButtonLabel}
-          </Button>}
+          </Button>
         </SettingRow>
         {applicationUpdate.snapshot.currentBuild && <SettingRow label={t("settings.build")}>
           <Text size="xs" style={{ overflowWrap: "anywhere" }}>{applicationUpdate.snapshot.currentBuild}</Text>
         </SettingRow>}
-        <PackageManagerUpdateDialog opened={packageUpdateOpened} onClose={() => setPackageUpdateOpened(false)} prerelease={applicationUpdate.snapshot.currentIsPrerelease} />
         {applicationUpdate.snapshot.supported && <SettingRow label={t("settings.prereleaseUpdates")}>
           <Switch
             aria-label={t("settings.prereleaseUpdates")}

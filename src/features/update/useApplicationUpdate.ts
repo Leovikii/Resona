@@ -17,6 +17,9 @@ const previewUpdateAvailable =
   import.meta.env.DEV
   && !isTauriRuntime()
   && new URLSearchParams(window.location.search).get("update") === "available";
+const previewPhase = previewUpdateAvailable
+  ? new URLSearchParams(window.location.search).get("updateStage") ?? ""
+  : "";
 
 const previewUpdateRelease: ApplicationUpdateRelease = {
   tag: "v0.1.0",
@@ -41,14 +44,20 @@ export function useApplicationUpdate() {
   const operationRef = useRef<ApplicationUpdateStatus>("idle");
   const [snapshot, setSnapshot] = useState<ApplicationUpdateSnapshot>(() => ({
     ...defaultApplicationUpdateSnapshot,
-    supported: !isTauriRuntime() && new URLSearchParams(window.location.search).get("platform") !== "linux",
+    supported: !isTauriRuntime(),
+    distribution: new URLSearchParams(window.location.search).get("platform") === "linux" ? "pacman" : "nsis",
     updaterConfigured: previewUpdateAvailable,
+    stage: { phase: previewPhase, changes: previewPhase === "prepared"
+      ? Array.from({ length: 20 }, (_, i) => `package-${i + 1} 1.0.0-1`)
+      : [] },
   }));
   const [available, setAvailable] = useState<ApplicationUpdateRelease | null>(
     previewUpdateAvailable ? previewUpdateRelease : null,
   );
   const [checked, setChecked] = useState(previewUpdateAvailable);
-  const [status, setStatus] = useState<ApplicationUpdateStatus>("idle");
+  const [status, setStatus] = useState<ApplicationUpdateStatus>(
+    ["downloading", "verifying", "preparing", "installing"].includes(previewPhase) ? "installing" : "idle",
+  );
   const [progress, setProgress] = useState<ApplicationUpdateProgress>({
     downloadedBytes: 0,
     totalBytes: null,
@@ -114,6 +123,9 @@ export function useApplicationUpdate() {
             currentVersion: snapshot.currentVersion,
             update: previewUpdateAvailable ? previewUpdateRelease : null,
           };
+      if (isTauriRuntime()) {
+        setSnapshot(await invokeTauri<ApplicationUpdateSnapshot>("get_application_update_state"));
+      }
       setAvailable(result.update);
       setChecked(true);
       return result.update;
@@ -123,7 +135,8 @@ export function useApplicationUpdate() {
       return null;
     } finally {
       operationRef.current = "idle";
-      setStatus("idle");
+      setStatus(["downloading", "verifying", "preparing", "installing"].includes(previewPhase)
+        ? "installing" : "idle");
     }
   }, [snapshot.currentVersion, snapshot.supported]);
 
@@ -135,10 +148,22 @@ export function useApplicationUpdate() {
     setError(null);
     try {
       if (isTauriRuntime()) {
-        await invokeTauri<void>("install_application_update", { tag: available.tag });
+        await invokeTauri<void>("install_application_update", { tag: available.tag, confirm: snapshot.stage.phase === "prepared" });
+        setSnapshot(await invokeTauri<ApplicationUpdateSnapshot>("get_application_update_state"));
+      } else if (snapshot.distribution === "pacman") {
+        setSnapshot({ ...snapshot, stage: snapshot.stage.phase === "prepared"
+          ? { phase: "complete", changes: [] }
+          : { phase: "prepared", changes: ["resona-preview-bin 0.3.0alpha3-1"] } });
       }
       return true;
     } catch (nextError) {
+      if (isTauriRuntime()) {
+        try {
+          setSnapshot(await invokeTauri<ApplicationUpdateSnapshot>("get_application_update_state"));
+        } catch {
+          // Preserve the installation error when refreshing its state also fails.
+        }
+      }
       const failure = normalizeFailure(nextError);
       if (failure.code !== "update_cancelled") setError(failure);
       return false;
@@ -146,7 +171,18 @@ export function useApplicationUpdate() {
       operationRef.current = "idle";
       setStatus("idle");
     }
-  }, [available]);
+  }, [available, snapshot]);
+
+  useEffect(() => {
+    if (!isTauriRuntime() || status !== "installing") return;
+    let disposed = false;
+    const timer = window.setInterval(() => {
+      void invokeTauri<ApplicationUpdateSnapshot>("get_application_update_state").then(next => {
+        if (!disposed && operationRef.current === "installing") setSnapshot(next);
+      }).catch(cause => { if (!disposed) setError(normalizeFailure(cause)); });
+    }, 200);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [status]);
 
   const cancel = useCallback(async () => {
     if (operationRef.current !== "installing") return;

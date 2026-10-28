@@ -155,11 +155,14 @@ pub async fn check_application_update(
 #[tauri::command]
 pub async fn install_application_update(
     tag: String,
+    confirm: Option<bool>,
     app: AppHandle,
     service: State<'_, ManagedApplicationUpdateService>,
 ) -> Result<(), ApplicationUpdateFailure> {
     log::info!("application update installation started");
-    let result = Arc::clone(service.inner()).install(app, tag).await;
+    let result = Arc::clone(service.inner())
+        .install(app, tag, confirm.unwrap_or(false))
+        .await;
     match &result {
         Ok(()) => log::info!("application update installer launched"),
         Err(error) => log::warn!(

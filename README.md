@@ -26,21 +26,16 @@ Download the `.exe` NSIS installer from [GitHub Releases](https://github.com/Leo
 
 ### Arch Linux x86_64 · Wayland
 
-The recommended package is AUR `resona-preview-bin` for previews; stable releases will use `resona-bin`. The first AUR sync is pending. Once available, install with either helper:
+Download the [alpha.3 Arch package](https://github.com/Leovikii/Resona/releases/tag/v0.3.0-alpha.3) and its `SHA256SUMS` from the same release. Verify the package hash before installing:
 
 ```bash
-yay -S resona-preview-bin
-# or
-paru -S resona-preview-bin
+sha256sum --ignore-missing -c SHA256SUMS
+sudo pacman -U ./resona-preview-bin-0.3.0alpha3-1-x86_64.pkg.tar.zst
 ```
 
-The current preview package will be available after main Actions publishes it. While AUR is pending, download the `.pkg.tar.zst` package from [GitHub Releases](https://github.com/Leovikii/Resona/releases) and install it:
+The package registers MP3/WAV/FLAC opening. Future in-app updates download and verify the package, show the transaction, and request Polkit authorization for Pacman. Restart after installation. Remove with `sudo pacman -R resona-preview-bin`; user data and audio remain. Older alpha users must install alpha.3 manually. Switching between preview and stable package names also requires manual installation.
 
-```bash
-sudo pacman -U ./resona-preview-bin-0.3.0alpha1-1-x86_64.pkg.tar.zst
-```
-
-The package registers MP3/WAV/FLAC opening in your desktop. Updates use `yay -Syu` / `paru -Syu`; manual package installs require downloading and installing the next package. Linux provides package-manager guidance in the app and uses system FFmpeg for compression. KDE Plasma is the tested desktop; other distributions, X11 and ARM are outside the current scope. See the [Linux guide](docs/LINUX.md).
+Pacman keeps your system signature policy; `.tauri.sig` is a Tauri signature, not OpenPGP. A graphical Polkit agent is required. Linux uses system FFmpeg for compression. KDE Plasma is the tested desktop; other distributions, X11 and ARM are outside the current scope. See the [Linux guide](docs/LINUX.md).
 
 ## Development
 

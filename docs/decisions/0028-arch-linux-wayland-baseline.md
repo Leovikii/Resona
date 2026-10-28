@@ -6,6 +6,8 @@
 - 授权：所有者要求开始下一版本并兼容本机 Linux，当前只要求 Arch Linux 与 Wayland。
 - 补充 ADR 0001、0005、0012、0022、0024 的平台范围；Windows 的既有约束继续有效。
 
+- alpha.3 修订：Linux 安装与更新条款由 [ADR 0032](0032-arch-in-app-update.md) 取代，移除 AUR，启用应用内下载验签与 Polkit/Pacman 安装；以下保留历史决定。
+
 ## 决定
 
 - 以 `0.3.0-alpha.1` 建立 Arch 系 x86_64 / Wayland 本机开发预览，继续使用 Tauri、Rodio / CPAL / Symphonia。Linux 音频经 ALSA 与 `pipewire-alsa` 接入 PipeWire，不增加播放引擎或隐式 DSP。
