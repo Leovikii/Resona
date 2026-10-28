@@ -1,5 +1,5 @@
 # CI stages the already compiled application in stage/usr.
-pkgname=resona-preview-bin
+pkgname=resona
 pkgver=0.3.0alpha4
 pkgrel=1
 pkgdesc='Local audio player with desktop lyrics (Arch Wayland, precompiled)'
@@ -8,8 +8,6 @@ url='https://github.com/Leovikii/Resona'
 license=('GPL-3.0-only')
 depends=('desktop-file-utils' 'hicolor-icon-theme' 'glibc' 'gcc-libs' 'alsa-lib' 'gtk3' 'webkit2gtk-4.1' 'libsoup3' 'gtk-layer-shell' 'libayatana-appindicator' 'dbus' 'openssl' 'polkit')
 optdepends=('ffmpeg: WAV to FLAC conversion' 'pipewire-alsa: ALSA output via PipeWire' 'xdg-desktop-portal-kde: KDE file chooser')
-provides=('resona')
-conflicts=('resona' 'resona-bin')
 options=('!strip' '!debug')
 package() {
   cp -a "$startdir/stage/usr" "$pkgdir/"

@@ -69,6 +69,20 @@ test("Arch package revisions and preview mapping sort before final releases", { 
   assert.throws(() => archVersion("0.3.0-weird.1"));
 });
 
+test("preview and stable releases share one Arch package identity", () => {
+  for (const v of ["0.3.0-alpha.4", "0.3.0-beta.1", "0.3.0-rc.1", "0.3.0"]) {
+    const recipe = archRecipe({ version: v });
+    assert.match(recipe, /^pkgname=resona$/m);
+    assert.doesNotMatch(recipe, /^provides=|^conflicts=|^replaces=/m);
+    const pkg = `resona-${archVersion(v)}-1-x86_64.pkg.tar.zst`;
+    const id = buildIdentity(v, 42, 1, "a".repeat(40));
+    const installer = `Resona_${v}_windows_x86_64-setup.exe`;
+    const manifest = updateManifest(v, id, installer, "signature", pkg, "signature");
+    assert.equal(manifest.channel, v.includes("-") ? "preview" : "stable");
+    assert.ok(manifest.platforms["linux-x86_64"].url.endsWith(pkg));
+  }
+});
+
 test("makepkg can parse the generated recipe without evaluating remote input", { skip: process.platform !== "linux" || process.getuid?.() === 0 }, () => {
   const probe = spawnSync("makepkg", ["--version"]);
   if (probe.error?.code === "ENOENT") return;
@@ -78,7 +92,7 @@ test("makepkg can parse the generated recipe without evaluating remote input", {
     writeFileSync(join(dir, "PKGBUILD"), archRecipe({ version, identity, asset: "Resona.tar.gz", checksum: "b".repeat(64) }));
     const result = spawnSync("makepkg", ["--printsrcinfo"], { cwd: dir, encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
-    for (const field of ["pkgbase = resona-preview-bin", "pkgver = 0.3.0alpha1", "pkgrel = 1", "depends = gtk-layer-shell", "depends = polkit"]) assert.ok(result.stdout.includes(field), field);
+    for (const field of ["pkgbase = resona", "pkgver = 0.3.0alpha1", "pkgrel = 1", "depends = gtk-layer-shell", "depends = polkit"]) assert.ok(result.stdout.includes(field), field);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -92,7 +106,7 @@ test("publishing requires both identities and an exact Arch package", () => {
     const installer = 'Resona_' + version + '_windows_x86_64-setup.exe';
     writeFileSync(join(windows, installer), 'binary'); writeFileSync(join(windows, installer + '.sig'), 'signature');
     assert.throws(() => collectArtifacts(input, output, version, identity), /Exactly one Arch/);
-    const pkg = 'resona-preview-bin-0.3.0alpha1-1-x86_64.pkg.tar.zst';
+    const pkg = 'resona-0.3.0alpha1-1-x86_64.pkg.tar.zst';
     writeFileSync(join(linux, pkg), 'package');
     const manifest = collectArtifacts(input, output, version, identity).manifest;
     assert.deepEqual(Object.keys(manifest.platforms), ['windows-x86_64', 'linux-x86_64']);

@@ -7,6 +7,8 @@
 
 - alpha.3 修订：Linux 安装与更新条款由 [ADR 0032](0032-arch-in-app-update.md) 取代，移除 AUR，启用应用内下载验签与 Polkit/Pacman 安装；以下保留历史决定。
 
+- alpha.4 修订：[ADR 0035](0035-unified-arch-package.md) 统一包名为 `resona`，不实现旧包名兼容；所有者明确授权本次删除 alpha.4 Release/tag 后同版本重发。以下分包条款保留为历史。
+
 ## 决定
 
 - 所有版本统一使用 `v<version>` 与 `Resona <version>`；预发行使用 GitHub pre-release，每个应用版本仅一个 Release。已有版本 tag 时同版本合并不发包，下一次交付递增 SemVer。

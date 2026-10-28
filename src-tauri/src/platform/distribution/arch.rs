@@ -105,12 +105,10 @@ fn installed() -> Result<(String, String)> {
         ));
     }
     let package = query(&["-Qoq", "--", "/usr/bin/resona"])?;
-    if !["resona-preview-bin", "resona-bin"].contains(&package.as_str())
-        || !Path::new("/usr/bin/pkexec").is_file()
-    {
+    if package != "resona" || !Path::new("/usr/bin/pkexec").is_file() {
         return Err(error(
             "update_package_unmanaged",
-            "Resona package or Polkit is unavailable",
+            "Install the official resona package manually and ensure Polkit is available",
         ));
     }
     let installed = query(&["-Q", "--", &package])?;
@@ -170,17 +168,6 @@ fn transaction(file: &Path, package: &str, version: &str) -> Result<(String, Vec
 }
 pub fn prepare(version: &str, bytes: &[u8]) -> Result<PreparedUpdate> {
     let (package, installed) = installed()?;
-    let expected_package = if version.contains('-') {
-        "resona-preview-bin"
-    } else {
-        "resona-bin"
-    };
-    if package != expected_package {
-        return Err(error(
-            "update_package_unmanaged",
-            "Install the selected release package manually to switch channels",
-        ));
-    }
     let directory = tempfile::Builder::new()
         .prefix("resona-update-")
         .tempdir()
@@ -313,11 +300,7 @@ mod tests {
     fn packaged_update_metadata() {
         let file = std::env::var("RESONA_TEST_PACKAGE").expect("select a locally built package");
         let version = package_version(env!("CARGO_PKG_VERSION"));
-        let package = if env!("CARGO_PKG_VERSION").contains('-') {
-            "resona-preview-bin"
-        } else {
-            "resona-bin"
-        };
+        let package = "resona";
         assert_eq!(
             query(&["-Qp", "--", &file]).unwrap(),
             format!("{package} {version}")
@@ -329,19 +312,19 @@ mod tests {
     }
     #[test]
     fn transaction_requires_the_exact_resona_package_and_architecture() {
-        let line = "resona-preview-bin\t0.3.0alpha3-1\tx86_64\t/tmp/resona.pkg.tar.zst";
+        let line = "resona\t0.3.0alpha3-1\tx86_64\t/tmp/resona.pkg.tar.zst";
         assert_eq!(
-            parse_transaction(line, "resona-preview-bin", "0.3.0alpha3-1").unwrap(),
-            vec!["resona-preview-bin 0.3.0alpha3-1"]
+            parse_transaction(line, "resona", "0.3.0alpha3-1").unwrap(),
+            vec!["resona 0.3.0alpha3-1"]
         );
         for bad in [
             line.replace("alpha3", "alpha4"),
             line.replace("x86_64", "aarch64"),
-            line.replace("resona-preview-bin", "other"),
+            line.replace("resona", "other"),
             format!("{line}\n{line}"),
             "prompt".into(),
         ] {
-            assert!(parse_transaction(&bad, "resona-preview-bin", "0.3.0alpha3-1").is_err());
+            assert!(parse_transaction(&bad, "resona", "0.3.0alpha3-1").is_err());
         }
         assert_eq!(package_version("0.3.0-rc.2"), "0.3.0rc2-1");
     }

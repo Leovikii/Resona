@@ -16,7 +16,8 @@
 - 原生窗口用例的尺寸/模式记忆、并发 resize、最大化恢复、压缩重建、两个窗口的最大化/最小化请求和 CloseRequested 均到达并通过；主窗口 maximize/squash、压缩 maximize 动画已捕获。**压缩窗口 squash 动画未捕获，整项严格用例仍失败**，未降低门禁。测试已修正聚焦插入 resize/configure 往返及仅等待首帧造成的竞态。
 - 最新本机测试程序为忽略目录 `src-tauri/target/test-build/Resona-0.3.0-alpha.4-titlebar-v2-arch-wayland-x86_64/` 与同名 `.tar.gz`；原始 alpha.4 测试目录保留，含隔离启动器、低音量 WAV/LRC 样本、许可证及 SHA256SUMS。无需构建工具；依赖本机系统库。详细结果和人工清单见 [Linux 实机交接](plans/0.3.0-alpha.4-linux-validation.md)。
 - 所有者最新要求：**PR 指向 main 时运行双平台 CI，`PR validation` 通过且跟上 main 才允许合并；main 更新只执行 CD**。远程规则已恢复 GitHub Actions 来源的必需检查，并保留 PR 合并、禁止强推和删除。PR CI 不接触签名密钥，同一 PR 取消过时 CI；main 发布串行，保留签名和双平台产物门禁。依赖缓存继续使用，详见 [ADR 0034](decisions/0034-main-only-ci-and-dependency-cache.md)。
-- [PR #20](https://github.com/Leovikii/Resona/pull/20) 已按此前授权正常合并到 `536a69a`，dev 已快进同步。该提交的 [alpha.4 交付运行](https://github.com/Leovikii/Resona/actions/runs/40676775949) 已开始，仍执行旧版完整双平台门禁；新的 PR CI/main CD 规则由后续 PR 验证后生效。
+- [PR #21](https://github.com/Leovikii/Resona/pull/21) 已通过双平台 CI 合并到 `ac8e2b8`，dev 已同步；原 alpha.4 曾完成双平台签名发布。所有者现授权将 Arch 包统一为 `resona`，不加旧包名兼容代码，更新文档并删除 alpha.4 Release/tag 后由 main CD 重发同版本；PR CI 与签名门禁保持。已有同版本测试安装需手动重装。见 [ADR 0035](decisions/0035-unified-arch-package.md)。
+- 统一包名修订的本机 Node 64 项、Rust 125 项（12 条件忽略）、fmt/Clippy/actionlint 通过；生产代码仅接受 `resona`，不增加旧包兼容。隔离 Arch CI 增加同包名预览→正式包事务验证，图形授权与实际运行中的跨版本更新仍按开放边界记录。
 - 正式前端验收页：`/alpha4-preview.html?production=1`，iframe 加载真实 App；普通 `/alpha4-preview.html` 仍是已批准的独立设计稿。
 
 ## alpha.3 历史交付

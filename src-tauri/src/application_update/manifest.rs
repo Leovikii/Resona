@@ -135,12 +135,7 @@ fn validate_manifest(
     let expected_name = match platform {
         "windows-x86_64" => format!("Resona_{version}_windows_x86_64-setup.exe"),
         "linux-x86_64" => format!(
-            "{}-{}-1-x86_64.pkg.tar.zst",
-            if version.pre.is_empty() {
-                "resona-bin"
-            } else {
-                "resona-preview-bin"
-            },
+            "resona-{}-1-x86_64.pkg.tar.zst",
             version
                 .to_string()
                 .replace("-alpha.", "alpha")
@@ -289,10 +284,30 @@ mod tests {
     }
 
     #[test]
+    fn linux_preview_and_stable_assets_share_package_name() {
+        for raw in ["0.3.0-alpha.4", "0.3.0-beta.1", "0.3.0-rc.1", "0.3.0"] {
+            let version = Version::parse(raw).unwrap();
+            let tag = format!("v{raw}");
+            let package_version = raw
+                .replace("-alpha.", "alpha")
+                .replace("-beta.", "beta")
+                .replace("-rc.", "rc");
+            let json = serde_json::json!({"schema":1,"version":version,"tag":tag,"channel":if version.pre.is_empty() { "stable" } else { "preview" },"build":build(42,1),"platforms":{"linux-x86_64":{"url":format!("https://github.com/Leovikii/Resona/releases/download/{tag}/resona-{package_version}-1-x86_64.pkg.tar.zst"),"signature":"package-signature"}}});
+            assert!(validate_manifest(
+                &serde_json::to_vec(&json).unwrap(),
+                &tag,
+                &version,
+                "linux-x86_64"
+            )
+            .is_ok());
+        }
+    }
+
+    #[test]
     fn linux_assets_cannot_select_windows_or_unrelated_packages() {
         let version = Version::parse("0.3.0-alpha.3").unwrap();
         let tag = "v0.3.0-alpha.3";
-        let mut json = serde_json::json!({"schema":1,"version":version,"tag":tag,"channel":"preview","build":build(42,1),"platforms":{"linux-x86_64":{"url":format!("https://github.com/Leovikii/Resona/releases/download/{tag}/resona-preview-bin-0.3.0alpha3-1-x86_64.pkg.tar.zst"),"signature":"package-signature"}}});
+        let mut json = serde_json::json!({"schema":1,"version":version,"tag":tag,"channel":"preview","build":build(42,1),"platforms":{"linux-x86_64":{"url":format!("https://github.com/Leovikii/Resona/releases/download/{tag}/resona-0.3.0alpha3-1-x86_64.pkg.tar.zst"),"signature":"package-signature"}}});
         assert!(validate_manifest(
             &serde_json::to_vec(&json).unwrap(),
             tag,
@@ -309,7 +324,7 @@ mod tests {
         .is_err());
         for name in [
             "other-0.3.0alpha3-1-x86_64.pkg.tar.zst",
-            "resona-preview-bin-0.3.0alpha4-1-x86_64.pkg.tar.zst",
+            "resona-0.3.0alpha4-1-x86_64.pkg.tar.zst",
             "Resona_0.3.0-alpha.3_windows_x86_64-setup.exe",
         ] {
             json["platforms"]["linux-x86_64"]["url"] =

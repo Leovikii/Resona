@@ -10,7 +10,7 @@ import { archVersion } from "./package-arch.mjs";
 const repository = "Leovikii/Resona";
 export function updateManifest(version, identity, installer, signature, archPackage, archSignature) {
   if (installer !== `Resona_${version}_windows_x86_64-setup.exe` || !signature.trim()) throw new Error("Invalid signed installer");
-  const expected = `${version.includes('-') ? 'resona-preview-bin' : 'resona-bin'}-${archVersion(version)}-1-x86_64.pkg.tar.zst`;
+  const expected = `resona-${archVersion(version)}-1-x86_64.pkg.tar.zst`;
   if (archPackage !== expected || !archSignature.trim()) throw new Error("Invalid signed Arch package");
   return {
     schema: 1, version, tag: identity.tag, channel: version.includes("-") ? "preview" : "stable",
@@ -31,7 +31,7 @@ export function collectArtifacts(input, output, version, identity) {
   const installer = `Resona_${version}_windows_x86_64-setup.exe`;
   const packages = readdirSync(linux).filter((name) => name.endsWith(".pkg.tar.zst"));
   if (packages.length !== 1) throw new Error("Exactly one Arch package is required");
-  const expectedPackage = (version.includes('-') ? 'resona-preview-bin-' : 'resona-bin-') + version.replace(/-(alpha|beta|rc)\./, '$1') + '-1-x86_64.pkg.tar.zst';
+  const expectedPackage = `resona-${archVersion(version)}-1-x86_64.pkg.tar.zst`;
   if (packages[0] !== expectedPackage) throw new Error('Unexpected Arch package name');
   mkdirSync(output, { recursive: true });
   for (const name of [installer, `${installer}.sig`]) copyFileSync(resolve(windows, name), resolve(output, name));

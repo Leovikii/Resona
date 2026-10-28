@@ -12,7 +12,7 @@ assert.match(fs.readFileSync("/etc/os-release", "utf8"), /^ID=arch$/m);
 const run = (cmd, args, options = {}) => execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], ...options });
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "resona-package-"));
 const { version } = readProjectVersion();
-const name = version.includes("-") ? "resona-preview-bin" : "resona-bin";
+const name = "resona";
 let installed = false;
 try {
   run("useradd", ["--create-home", "resona-builder"]);
@@ -37,7 +37,20 @@ try {
     for (const mime of ["audio/mpeg", "audio/vnd.wave", "audio/flac"]) assert.ok(fs.readFileSync("/usr/share/applications/mimeinfo.cache", "utf8").includes(`${mime}=io.github.vki.resona.desktop;`));
     if (v === version) {
       run("pacman", ["-U", "--noconfirm", "--", packagePath]);
-      console.log("Arch install, upgrade, reinstall and desktop registration passed");
+      if (version.includes("-")) {
+        const stable = version.split("-")[0];
+        const stableOut = path.join(root, "stable");
+        packageArch(process.cwd(), stableOut, process.env.RESONA_PACKAGE_BINARY, buildIdentity(stable, 1, 1, "a".repeat(40)), stable);
+        run("chown", ["-R", "resona-builder:resona-builder", stableOut]);
+        run("runuser", ["-u", "resona-builder", "--", "makepkg", "--nodeps", "--noconfirm"], { cwd: path.join(stableOut, "package") });
+        const stableFile = fs.readdirSync(path.join(stableOut, "package")).find(f => f.endsWith(".pkg.tar.zst"));
+        assert.ok(stableFile);
+        run("pacman", ["-U", "--noconfirm", "--", path.join(stableOut, "package", stableFile)]);
+        assert.equal(run("pacman", ["-Q", name]).trim(), `${name} ${archVersion(stable)}-1`);
+        assert.equal(run("pacman", ["-Qoq", "/usr/bin/resona"]).trim(), name);
+        assert.equal(JSON.parse(fs.readFileSync("/usr/lib/Resona/build.json", "utf8")).version, stable);
+      }
+      console.log("Arch install, upgrade, reinstall, preview-to-stable and desktop registration passed");
     }
   }
 } finally {
