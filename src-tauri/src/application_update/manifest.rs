@@ -91,15 +91,17 @@ pub fn verified_asset(
     public_key: &str,
     tag: &str,
     version: &Version,
+    platform: &str,
 ) -> Result<PlatformAsset, ApplicationUpdateFailure> {
     verify_signature(bytes, signature, public_key)?;
-    validate_manifest(bytes, tag, version)
+    validate_manifest(bytes, tag, version, platform)
 }
 
 fn validate_manifest(
     bytes: &[u8],
     tag: &str,
     version: &Version,
+    platform: &str,
 ) -> Result<PlatformAsset, ApplicationUpdateFailure> {
     let manifest: Manifest = serde_json::from_slice(bytes).map_err(invalid)?;
     if !manifest.build.valid() {
@@ -116,24 +118,39 @@ fn validate_manifest(
             } else {
                 "preview"
             }
-        || manifest.platforms.len() != 1
+        || manifest.platforms.is_empty()
+        || manifest.platforms.len() > 2
     {
         return Err(invalid("manifest identity does not match selected release"));
     }
     let asset = manifest
         .platforms
-        .get("windows-x86_64")
-        .ok_or_else(|| invalid("missing Windows NSIS asset"))?;
+        .get(platform)
+        .ok_or_else(|| invalid("missing platform asset"))?;
     let prefix = format!("https://github.com/Leovikii/Resona/releases/download/{tag}/");
     let name = asset
         .url
         .strip_prefix(&prefix)
         .ok_or_else(|| invalid("installer URL is outside selected release"))?;
-    if name.contains('/')
-        || !name.ends_with("_windows_x86_64-setup.exe")
-        || asset.signature.trim().is_empty()
-    {
-        return Err(invalid("invalid NSIS asset or signature"));
+    let expected_name = match platform {
+        "windows-x86_64" => format!("Resona_{version}_windows_x86_64-setup.exe"),
+        "linux-x86_64" => format!(
+            "{}-{}-1-x86_64.pkg.tar.zst",
+            if version.pre.is_empty() {
+                "resona-bin"
+            } else {
+                "resona-preview-bin"
+            },
+            version
+                .to_string()
+                .replace("-alpha.", "alpha")
+                .replace("-beta.", "beta")
+                .replace("-rc.", "rc")
+        ),
+        _ => return Err(invalid("unsupported platform")),
+    };
+    if name != expected_name || asset.signature.trim().is_empty() {
+        return Err(invalid("invalid platform asset or signature"));
     }
     Ok(asset.clone())
 }
@@ -199,32 +216,111 @@ mod tests {
         let public_key = include_str!("../../../tests/fixtures/update/public-key.txt");
         let version = Version::parse("0.3.0-alpha.1").unwrap();
         let tag = "v0.3.0-alpha.1";
-        verified_asset(bytes, signature, public_key, tag, &version)
-            .expect("the fixture must retain its exact signed bytes after checkout");
+        verified_asset(
+            bytes,
+            signature,
+            public_key,
+            tag,
+            &version,
+            "windows-x86_64",
+        )
+        .expect("the fixture must retain its exact signed bytes after checkout");
         let crlf = String::from_utf8(bytes.to_vec())
             .unwrap()
             .replace('\n', "\r\n");
-        assert!(verified_asset(crlf.as_bytes(), signature, public_key, tag, &version).is_err());
+        assert!(verified_asset(
+            crlf.as_bytes(),
+            signature,
+            public_key,
+            tag,
+            &version,
+            "windows-x86_64"
+        )
+        .is_err());
         let mut changed = bytes.to_vec();
         changed.push(b' ');
-        assert!(verified_asset(&changed, signature, public_key, tag, &version).is_err());
-        assert!(verified_asset(bytes, "", public_key, tag, &version).is_err());
-        assert!(verified_asset(bytes, signature, public_key, "other-tag", &version).is_err());
+        assert!(verified_asset(
+            &changed,
+            signature,
+            public_key,
+            tag,
+            &version,
+            "windows-x86_64"
+        )
+        .is_err());
+        assert!(verified_asset(bytes, "", public_key, tag, &version, "windows-x86_64").is_err());
+        assert!(verified_asset(
+            bytes,
+            signature,
+            public_key,
+            "other-tag",
+            &version,
+            "windows-x86_64"
+        )
+        .is_err());
     }
 
     #[test]
     fn manifest_is_bound_to_version_tag_and_installer() {
         let tag = "v0.3.0-alpha.1";
         let version = Version::parse("0.3.0-alpha.1").unwrap();
-        let mut json = serde_json::json!({"schema": 1, "version": version, "tag": tag, "channel": "preview", "build": build(42,1), "platforms": {"windows-x86_64": {"url": format!("https://github.com/Leovikii/Resona/releases/download/{tag}/Resona_windows_x86_64-setup.exe"), "signature":"installer-signature"}}});
+        let mut json = serde_json::json!({"schema": 1, "version": version, "tag": tag, "channel": "preview", "build": build(42,1), "platforms": {"windows-x86_64": {"url": format!("https://github.com/Leovikii/Resona/releases/download/{tag}/Resona_{version}_windows_x86_64-setup.exe"), "signature":"installer-signature"}}});
         let bytes = serde_json::to_vec(&json).unwrap();
-        assert!(validate_manifest(&bytes, tag, &version).is_ok());
-        assert!(validate_manifest(&bytes, "other-tag", &version).is_err());
-        assert!(verified_asset(&bytes, "", "", tag, &version).is_err());
+        assert!(validate_manifest(&bytes, tag, &version, "windows-x86_64").is_ok());
+        assert!(validate_manifest(&bytes, "other-tag", &version, "windows-x86_64").is_err());
+        assert!(verified_asset(&bytes, "", "", tag, &version, "windows-x86_64").is_err());
         json["build"]["runNumber"] = 0.into();
-        assert!(validate_manifest(&serde_json::to_vec(&json).unwrap(), tag, &version).is_err());
+        assert!(validate_manifest(
+            &serde_json::to_vec(&json).unwrap(),
+            tag,
+            &version,
+            "windows-x86_64"
+        )
+        .is_err());
         json["build"] = serde_json::to_value(build(42, 1)).unwrap();
         json["platforms"]["windows-x86_64"]["url"] = "https://example.com/setup.exe".into();
-        assert!(validate_manifest(&serde_json::to_vec(&json).unwrap(), tag, &version).is_err());
+        assert!(validate_manifest(
+            &serde_json::to_vec(&json).unwrap(),
+            tag,
+            &version,
+            "windows-x86_64"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn linux_assets_cannot_select_windows_or_unrelated_packages() {
+        let version = Version::parse("0.3.0-alpha.3").unwrap();
+        let tag = "v0.3.0-alpha.3";
+        let mut json = serde_json::json!({"schema":1,"version":version,"tag":tag,"channel":"preview","build":build(42,1),"platforms":{"linux-x86_64":{"url":format!("https://github.com/Leovikii/Resona/releases/download/{tag}/resona-preview-bin-0.3.0alpha3-1-x86_64.pkg.tar.zst"),"signature":"package-signature"}}});
+        assert!(validate_manifest(
+            &serde_json::to_vec(&json).unwrap(),
+            tag,
+            &version,
+            "linux-x86_64"
+        )
+        .is_ok());
+        assert!(validate_manifest(
+            &serde_json::to_vec(&json).unwrap(),
+            tag,
+            &version,
+            "windows-x86_64"
+        )
+        .is_err());
+        for name in [
+            "other-0.3.0alpha3-1-x86_64.pkg.tar.zst",
+            "resona-preview-bin-0.3.0alpha4-1-x86_64.pkg.tar.zst",
+            "Resona_0.3.0-alpha.3_windows_x86_64-setup.exe",
+        ] {
+            json["platforms"]["linux-x86_64"]["url"] =
+                format!("https://github.com/Leovikii/Resona/releases/download/{tag}/{name}").into();
+            assert!(validate_manifest(
+                &serde_json::to_vec(&json).unwrap(),
+                tag,
+                &version,
+                "linux-x86_64"
+            )
+            .is_err());
+        }
     }
 }

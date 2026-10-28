@@ -291,6 +291,7 @@ pub fn run() {
                         .window_closed();
                 } else if label == "main" {
                     api.prevent_close();
+                    if app_handle.state::<Arc<ApplicationUpdateService>>().is_busy() { return; }
                     app_handle
                         .state::<Arc<main_window::MainWindowService>>()
                         .capture(app_handle);
@@ -463,6 +464,10 @@ pub(crate) fn request_application_exit(app: &tauri::AppHandle) {
 }
 
 pub(crate) fn perform_application_exit(app: &tauri::AppHandle) {
+    if app.state::<Arc<ApplicationUpdateService>>().is_busy() {
+        log::warn!("exit deferred while updating");
+        return;
+    }
     let lifetime = app.state::<Arc<ApplicationLifetimeService>>();
     if !lifetime.begin_exit() {
         return;

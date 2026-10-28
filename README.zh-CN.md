@@ -26,21 +26,16 @@
 
 ### Arch Linux x86_64 · Wayland
 
-推荐使用 AUR 预编译包：预览版为 `resona-preview-bin`，未来正式版为 `resona-bin`。首次 AUR 同步尚未完成，上线后可任选一种方式安装：
+从 [alpha.3 发布页](https://github.com/Leovikii/Resona/releases/tag/v0.3.0-alpha.3) 下载原生包和同一版本的 `SHA256SUMS`，先核对包的哈希，再安装：
 
 ```bash
-yay -S resona-preview-bin
-# 或
-paru -S resona-preview-bin
+sha256sum --ignore-missing -c SHA256SUMS
+sudo pacman -U ./resona-preview-bin-0.3.0alpha3-1-x86_64.pkg.tar.zst
 ```
 
-当前预览包将在 main Actions 发布后提供。AUR 未上线时，可从 [GitHub Releases](https://github.com/Leovikii/Resona/releases) 下载 `.pkg.tar.zst` 原生包安装：
+安装会注册 MP3/WAV/FLAC 的桌面“打开方式”。后续在应用内检查更新、下载验签并确认安装预览，经 Polkit 授权后由 Pacman 安装，完成后重新启动。卸载使用 `sudo pacman -R resona-preview-bin`，保留用户数据与音频。旧 alpha 用户首次需手动安装 alpha.3；预览包与正式包之间切换也需手动安装。
 
-```bash
-sudo pacman -U ./resona-preview-bin-0.3.0alpha1-1-x86_64.pkg.tar.zst
-```
-
-安装包会注册 MP3/WAV/FLAC 的桌面“打开方式”。AUR 更新使用 `yay -Syu` / `paru -Syu`；手动安装原生包的用户需下载新包后重新安装。Linux 应用内提供包管理器更新指引，压缩使用系统 FFmpeg。当前实测桌面为 KDE Plasma，其他发行版、X11 和 ARM 暂不支持，详见 [Linux 指南](docs/LINUX.md)。
+应用遵守系统签名策略，`.tauri.sig` 是 Tauri 签名，不是 OpenPGP 签名；需要图形 Polkit 授权代理。压缩继续使用系统 FFmpeg。当前桌面范围为 KDE Plasma，其他发行版、X11 和 ARM 暂不支持，详见 [Linux 指南](docs/LINUX.md)。
 
 ## 开发
 

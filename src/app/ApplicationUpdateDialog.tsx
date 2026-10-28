@@ -25,6 +25,10 @@ export default function ApplicationUpdateDialog({ applicationUpdate, onClose, op
 }) {
   const { t } = useTranslation();
   const release = applicationUpdate.available;
+  const phase = applicationUpdate.snapshot.stage.phase;
+  const pacman = applicationUpdate.snapshot.distribution === "pacman";
+  const prepared = pacman && phase === "prepared";
+  const complete = pacman && phase === "complete";
   const active = applicationUpdate.status === "installing"
     || applicationUpdate.status === "cancelling";
   const openExternal = useCallback(async (url: string) => {
@@ -52,6 +56,8 @@ export default function ApplicationUpdateDialog({ applicationUpdate, onClose, op
     <Modal
       centered
       closeOnClickOutside={!active}
+      closeOnEscape={!active}
+      withCloseButton={!active}
       onClose={onClose}
       opened={opened && release !== null}
       size="lg"
@@ -101,11 +107,19 @@ export default function ApplicationUpdateDialog({ applicationUpdate, onClose, op
               })}
             </Text>
           )}
+          {prepared && <ScrollArea.Autosize mah={120} type="auto">
+            <Stack gap={4}>
+              {applicationUpdate.snapshot.stage.changes.map(change => <Text key={change} size="xs">{change}</Text>)}
+            </Stack>
+          </ScrollArea.Autosize>}
+          {complete && <Text role="status" size="sm">{t("settings.updateRestart")}</Text>}
           {active && (
             <Stack gap={6}>
-              <Progress animated value={progressValue} />
+              <Progress aria-label={t("settings.updateProgressLabel")} animated value={progressValue} />
               <Text c="dimmed" size="xs">
-                {applicationUpdate.progress.totalBytes
+                {pacman && phase && phase !== "downloading"
+                  ? t(`settings.updateStages.${phase}`)
+                  : applicationUpdate.progress.totalBytes
                   ? t("settings.updateProgress", {
                       downloaded: formatBytes(applicationUpdate.progress.downloadedBytes),
                       total: formatBytes(applicationUpdate.progress.totalBytes),
@@ -123,7 +137,7 @@ export default function ApplicationUpdateDialog({ applicationUpdate, onClose, op
               {t("settings.releasePage")}
             </Button>
             <Group gap="xs">
-              {active ? (
+              {active && (!pacman || phase === "downloading" || !phase) ? (
                 <Button
                   disabled={applicationUpdate.status === "cancelling"}
                   onClick={() => void applicationUpdate.cancel()}
@@ -135,15 +149,15 @@ export default function ApplicationUpdateDialog({ applicationUpdate, onClose, op
                     : t("common.cancel")}
                 </Button>
               ) : (
-                <Button onClick={onClose} size="xs" variant="default">{t("common.later")}</Button>
+                <Button disabled={active} onClick={onClose} size="xs" variant="default">{t("common.later")}</Button>
               )}
               <Button
-                disabled={active || !applicationUpdate.snapshot.updaterConfigured}
+                disabled={active || complete || !applicationUpdate.snapshot.updaterConfigured}
                 leftSection={<Download size={15} />}
                 onClick={() => void applicationUpdate.install()}
                 size="xs"
               >
-                {t("settings.downloadAndInstall")}
+                {t(prepared ? "settings.installUpdate" : "settings.downloadAndInstall")}
               </Button>
             </Group>
           </Group>

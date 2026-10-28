@@ -83,7 +83,7 @@ SQLite schema v7 只保存用户播放列表、列表项目（含可空导入根
 
 普通窗口尺寸统一以逻辑内容区宽高保存，主窗口宽/窄模式各自记忆正常尺寸，切换期间过滤尚未到达目标的中间几何。Linux 通过 GTK 内容区 allocation 读取尺寸，避免 Tao 的装饰/阴影缓存反复累加；Windows 位置继续使用物理坐标。Arch Wayland 仅恢复尺寸、布局和主窗口最大化状态，全局位置归 compositor 管理。桌面歌词使用 layer-shell overlay 置顶、空输入区域穿透与原生 GTK 解锁按钮，KDE 媒体控制使用 MPRIS；托盘无宿主或创建失败时拒绝隐藏主窗口。具体能力边界见 [ADR 0028](decisions/0028-arch-linux-wayland-baseline.md) 和 [ADR 0029](decisions/0029-wayland-lyrics-and-mpris.md)。
 
-更新检查由 `ApplicationUpdateService` 单飞协调，设置连接与总超时。Windows 应用首帧后每进程静默检查一次；只有发现更新才加载 Markdown 弹窗。仅接受更高 SemVer，tag 统一为 `v<version>`，使用 Tauri 默认版本比较器；完整清单用 Minisign 验证身份，安装请求绑定检查时的 tag、版本、URL 和签名，再由 Tauri updater 下载验签安装。Linux distribution capability 禁用更新发现/安装，UI 只提供包管理器更新说明与命令复制，启动不调用更新检查。外链只允许 HTTP(S) 并经 Rust opener。
+更新检查由 `ApplicationUpdateService` 单飞协调，设置连接与总超时。支持的平台在应用首帧后每进程静默检查一次；只有发现更新才加载 Markdown 弹窗。仅接受更高 SemVer，tag 统一为 `v<version>`，使用 Tauri 默认版本比较器；完整清单用 Minisign 验证身份，安装请求绑定检查时的 tag、版本、URL 和签名，再由 Tauri updater 下载验签安装。Linux 复用相同检查/签名与 Tauri download 验签，通过 distribution/arch adapter 准备受限临时包和 Pacman 只读事务，用户确认后以固定 pkexec/Pacman 参数安装；安装前复核，完成后查数据库并提示重启。安装操作与转换/扫描互斥，生命周期拒绝活动安装期间退出。只支持同包名升级，系统签名策略不变，详见 ADR 0032。外链只允许 HTTP(S) 并经 Rust opener。
 
 ## 故障隔离
 

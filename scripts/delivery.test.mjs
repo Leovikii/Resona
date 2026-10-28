@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -50,46 +49,30 @@ test("makepkg can parse the generated recipe without evaluating remote input", {
     writeFileSync(join(dir, "PKGBUILD"), archRecipe({ version, identity, asset: "Resona.tar.gz", checksum: "b".repeat(64) }));
     const result = spawnSync("makepkg", ["--printsrcinfo"], { cwd: dir, encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
-    for (const field of ["pkgbase = resona-preview-bin", "pkgver = 0.3.0alpha1", "pkgrel = 1", "depends = gtk-layer-shell", `sha256sums = ${"b".repeat(64)}`]) assert.ok(result.stdout.includes(field), field);
+    for (const field of ["pkgbase = resona-preview-bin", "pkgver = 0.3.0alpha1", "pkgrel = 1", "depends = gtk-layer-shell", "depends = polkit"]) assert.ok(result.stdout.includes(field), field);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("publishing requires both platform identities and the exact checksummed payload", () => {
-  const dir = mkdtempSync(join(tmpdir(), "resona-delivery-"));
-  const input = join(dir, "artifacts");
-  const windows = join(input, "windows-delivery");
-  const linux = join(input, "arch-delivery");
-  const output = join(dir, "output");
+test("publishing requires both identities and an exact Arch package", () => {
+  const dir = mkdtempSync(join(tmpdir(), 'resona-delivery-'));
+  const input = join(dir, 'artifacts');
+  const windows = join(input, 'windows-delivery'), linux = join(input, 'arch-delivery');
+  const output = join(dir, 'output');
   try {
-    mkdirSync(windows, { recursive: true });
-    mkdirSync(linux, { recursive: true });
-    const metadata = JSON.stringify({ version, ...identity });
-    writeFileSync(join(windows, "build.json"), metadata);
-    assert.throws(() => collectArtifacts(input, output, version, identity));
-    writeFileSync(join(linux, "build.json"), metadata);
-    const installer = `Resona_${version}_windows_x86_64-setup.exe`;
-    const payload = `Resona_${version}_arch_x86_64.tar.gz`;
-    writeFileSync(join(windows, installer), "binary");
-    writeFileSync(join(windows, `${installer}.sig`), "signature");
-    writeFileSync(join(linux, payload), "payload");
-    const checksum = createHash("sha256").update("payload").digest("hex");
-    writeFileSync(join(linux, "PKGBUILD"), archRecipe({ version, identity, asset: payload, checksum }));
-    writeFileSync(join(linux, ".SRCINFO"), `sha256sums = ${checksum}`);
-    writeFileSync(join(linux, "arch-packages.txt"), "arch packages");
+    for (const folder of [windows, linux]) { mkdirSync(folder, {recursive:true}); writeFileSync(join(folder, 'build.json'), JSON.stringify({version,...identity})); }
+    const installer = 'Resona_' + version + '_windows_x86_64-setup.exe';
+    writeFileSync(join(windows, installer), 'binary'); writeFileSync(join(windows, installer + '.sig'), 'signature');
     assert.throws(() => collectArtifacts(input, output, version, identity), /Exactly one Arch/);
-    writeFileSync(join(linux, "resona-preview-bin.pkg.tar.zst"), "package");
-    assert.equal(collectArtifacts(input, output, version, identity).manifest.version, version);
-    assert.equal(readFileSync(join(output, installer), "utf8"), "binary");
-    assert.equal(readFileSync(join(output, "SRCINFO"), "utf8"), readFileSync(join(linux, ".SRCINFO"), "utf8"));
-    assert.throws(() => readFileSync(join(output, ".SRCINFO")), { code: "ENOENT" });
-    writeFileSync(join(linux, payload), "tampered");
-    assert.throws(() => collectArtifacts(input, output, version, identity), /does not match/);
-    writeFileSync(join(linux, "build.json"), JSON.stringify({ version, ...buildIdentity(version, 43, 1, "a".repeat(40)) }));
+    const pkg = 'resona-preview-bin-0.3.0alpha1-1-x86_64.pkg.tar.zst';
+    writeFileSync(join(linux, pkg), 'package');
+    const manifest = collectArtifacts(input, output, version, identity).manifest;
+    assert.deepEqual(Object.keys(manifest.platforms), ['windows-x86_64', 'linux-x86_64']);
+    assert.ok(manifest.platforms['linux-x86_64'].url.endsWith(pkg));
+    assert.throws(() => updateManifest(version, identity, installer, 'signature', 'other.pkg.tar.zst', 'signature'), /Invalid signed Arch/);
+    assert.throws(() => updateManifest(version, identity, installer, 'signature', pkg, ''), /Invalid signed Arch/);
+    writeFileSync(join(linux, 'build.json'), JSON.stringify({ version, ...buildIdentity(version,43,1,'a'.repeat(40)) }));
     assert.throws(() => collectArtifacts(input, output, version, identity), /identity mismatch/);
-    const manifest = updateManifest(version, identity, installer, "signature");
-    assert.deepEqual(Object.keys(manifest.platforms), ["windows-x86_64"]);
-    assert.equal(manifest.build.runNumber, 42);
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(dir,{recursive:true,force:true}); }
 });
 
 test("release verification rejects GitHub-renamed, missing, extra or duplicate assets and non-drafts", () => {
@@ -118,70 +101,6 @@ test("desktop registration advertises the actual MP3, WAV and FLAC MIME types", 
     assert.ok(mimeTypes.includes(result.stdout.trim()), result.stdout);
   }
 });
-
-test("AUR sync is idempotent, rejects downgrades and verifies the public payload before pushing", { skip: process.platform !== "linux" }, () => {
-  const probe = spawnSync("vercmp", ["1", "1"]);
-  if (probe.error?.code === "ENOENT") return;
-  assert.ifError(probe.error);
-  const dir = mkdtempSync(join(tmpdir(), "resona-aur-sync-"));
-  const bin = join(dir, "bin");
-  const incoming = join(dir, "incoming");
-  const old = join(dir, "old");
-  const log = join(dir, "git.log");
-  const payload = join(dir, "payload");
-  const checksum = createHash("sha256").update("payload").digest("hex");
-  const srcinfo = (revision) => `pkgbase = resona-preview-bin\n\tpkgver = 0.3.0alpha1\n\tpkgrel = ${revision}\n\tsource = https://github.com/Leovikii/Resona/releases/download/${identity.tag}/Resona.tar.gz\n\tsha256sums = ${checksum}\n`;
-  try {
-    for (const path of [bin, incoming, old]) mkdirSync(path, { recursive: true });
-    writeFileSync(payload, "payload");
-    writeFileSync(join(incoming, "PKGBUILD"), "recipe\n");
-    writeFileSync(join(incoming, ".SRCINFO"), srcinfo("42.1"));
-    writeFileSync(join(old, "PKGBUILD"), "recipe\n");
-    writeFileSync(join(bin, "git"), `#!/bin/sh
-set -eu
-if [ "$1" = clone ]; then
-  mkdir -p "$3"
-  cp "$AUR_TEST_OLD/PKGBUILD" "$AUR_TEST_OLD/.SRCINFO" "$3/"
-else
-  printf '%s\\n' "$*" >> "$AUR_TEST_GIT_LOG"
-fi
-`, { mode: 0o755 });
-    writeFileSync(join(bin, "curl"), `#!/bin/sh
-set -eu
-previous=''
-for argument do
-  if [ "$previous" = -o ]; then cp "$AUR_TEST_PAYLOAD" "$argument"; exit 0; fi
-  previous=$argument
-done
-exit 1
-`, { mode: 0o755 });
-    const run = () => {
-      writeFileSync(log, "");
-      return spawnSync("bash", [fileURLToPath(new URL("./sync-aur.sh", import.meta.url)), incoming], {
-        encoding: "utf8",
-        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, RESONA_AUR_SSH_KEY: "disposable-test-value", RESONA_AUR_KNOWN_HOSTS: "test-host", RESONA_RELEASE_TAG: identity.tag, AUR_TEST_OLD: old, AUR_TEST_PAYLOAD: payload, AUR_TEST_GIT_LOG: log },
-      });
-    };
-    writeFileSync(join(old, ".SRCINFO"), srcinfo("41.9"));
-    assert.equal(run().status, 0);
-    assert.match(readFileSync(log, "utf8"), /push origin HEAD:master/);
-    writeFileSync(join(old, ".SRCINFO"), srcinfo("43.1"));
-    const downgrade = run();
-    assert.notEqual(downgrade.status, 0);
-    assert.match(downgrade.stderr, /Refusing AUR downgrade/);
-    assert.equal(readFileSync(log, "utf8"), "");
-    writeFileSync(join(old, ".SRCINFO"), srcinfo("42.1"));
-    assert.equal(run().status, 0);
-    assert.equal(readFileSync(log, "utf8"), "");
-    writeFileSync(join(old, "PKGBUILD"), "different recipe\n");
-    assert.notEqual(run().status, 0);
-    assert.equal(readFileSync(log, "utf8"), "");
-    writeFileSync(payload, "tampered");
-    assert.notEqual(run().status, 0);
-    assert.equal(readFileSync(log, "utf8"), "");
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-});
-
 
 test("publication uses one version tag and minimal notes, retries drafts and preserves published releases", () => {
   const dir = mkdtempSync(join(tmpdir(), "resona-publish-"));

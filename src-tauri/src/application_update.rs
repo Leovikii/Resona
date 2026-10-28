@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures_util::future::{AbortHandle, Abortable};
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::UpdaterExt;
 
 mod manifest;
@@ -32,6 +33,22 @@ pub struct ApplicationUpdateSnapshot {
     pub current_is_prerelease: bool,
     pub receive_prerelease_updates: bool,
     pub updater_configured: bool,
+    pub distribution: &'static str,
+    pub stage: UpdateStage,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateStage {
+    pub phase: String,
+    pub changes: Vec<String>,
+}
+
+struct UpdateGuard<'a>(&'a AtomicBool);
+impl Drop for UpdateGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -68,7 +85,7 @@ pub struct ApplicationUpdateFailure {
 }
 
 impl ApplicationUpdateFailure {
-    fn new(code: &str, message: impl Into<String>) -> Self {
+    pub(crate) fn new(code: &str, message: impl Into<String>) -> Self {
         Self {
             code: code.to_owned(),
             message: message.into(),
@@ -117,9 +134,12 @@ struct VerifiedRelease {
 pub struct ApplicationUpdateService {
     path: PathBuf,
     state: Mutex<StoredApplicationUpdate>,
-    check_active: Mutex<bool>,
     install_cancel: Mutex<Option<AbortHandle>>,
     selected: Mutex<Option<VerifiedRelease>>,
+    stage: Mutex<UpdateStage>,
+    operation_active: AtomicBool,
+    cancel_requested: AtomicBool,
+    prepared: Mutex<Option<(String, bool, crate::platform::distribution::PreparedUpdate)>>,
 }
 
 impl ApplicationUpdateService {
@@ -148,15 +168,24 @@ impl ApplicationUpdateService {
         Self {
             path,
             state: Mutex::new(state),
-            check_active: Mutex::new(false),
             install_cancel: Mutex::new(None),
             selected: Mutex::new(None),
+            stage: Mutex::new(UpdateStage::default()),
+            operation_active: AtomicBool::new(false),
+            cancel_requested: AtomicBool::new(false),
+            prepared: Mutex::new(None),
         }
     }
 
     pub fn snapshot(&self) -> Result<ApplicationUpdateSnapshot, ApplicationUpdateFailure> {
         let current = current_version()?;
         Ok(ApplicationUpdateSnapshot {
+            distribution: if cfg!(target_os = "linux") {
+                "pacman"
+            } else {
+                "nsis"
+            },
+            stage: self.stage.lock().map_err(updater_failure)?.clone(),
             supported: crate::platform::distribution::supports_updater(),
             current_version: current.to_string(),
             current_build: BuildIdentity::current().map(|build| build.id()),
@@ -171,6 +200,10 @@ impl ApplicationUpdateService {
         &self,
         enabled: bool,
     ) -> Result<ApplicationUpdateSnapshot, ApplicationUpdateFailure> {
+        let _guard = self.begin_operation("update_install_busy")?;
+        self.prepared.lock().map_err(updater_failure)?.take();
+        self.selected.lock().map_err(updater_failure)?.take();
+        *self.stage.lock().map_err(updater_failure)? = UpdateStage::default();
         let previous = {
             let mut state = self.lock_state()?;
             let previous = state.receive_prerelease_updates;
@@ -187,16 +220,9 @@ impl ApplicationUpdateService {
     pub async fn check(
         self: &Arc<Self>,
     ) -> Result<ApplicationUpdateCheckResult, ApplicationUpdateFailure> {
-        {
-            let mut active = self.lock_check_active()?;
-            if *active {
-                return Err(ApplicationUpdateFailure::new(
-                    "update_check_busy",
-                    "an application update check is already running",
-                ));
-            }
-            *active = true;
-        }
+        let _guard = self.begin_operation("update_check_busy")?;
+        self.prepared.lock().map_err(updater_failure)?.take();
+        *self.stage.lock().map_err(updater_failure)? = UpdateStage::default();
         let service = Arc::clone(self);
         let result = tauri::async_runtime::spawn_blocking(move || service.discover_update())
             .await
@@ -206,7 +232,6 @@ impl ApplicationUpdateService {
                     format!("update check task failed: {error}"),
                 )
             });
-        *self.lock_check_active()? = false;
         result?
     }
 
@@ -214,6 +239,51 @@ impl ApplicationUpdateService {
         self: &Arc<Self>,
         app: AppHandle,
         expected_tag: String,
+        confirm: bool,
+    ) -> Result<(), ApplicationUpdateFailure> {
+        let _guard = self.begin_operation("update_install_busy")?;
+        self.cancel_requested.store(false, Ordering::Release);
+        let result = self.install_inner(app, expected_tag, confirm).await;
+        if result.is_err() {
+            *self.stage.lock().map_err(updater_failure)? = UpdateStage::default();
+            self.prepared.lock().map_err(updater_failure)?.take();
+        }
+        result
+    }
+
+    fn begin_operation(&self, code: &str) -> Result<UpdateGuard<'_>, ApplicationUpdateFailure> {
+        self.operation_active
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| {
+                ApplicationUpdateFailure::new(code, "Another update operation is running")
+            })?;
+        Ok(UpdateGuard(&self.operation_active))
+    }
+
+    pub fn is_busy(&self) -> bool {
+        self.operation_active.load(Ordering::Acquire)
+            && self
+                .stage
+                .lock()
+                .map(|stage| {
+                    matches!(
+                        stage.phase.as_str(),
+                        "downloading" | "verifying" | "preparing" | "installing"
+                    )
+                })
+                .unwrap_or(true)
+    }
+
+    fn phase(&self, phase: &str) -> Result<(), ApplicationUpdateFailure> {
+        self.stage.lock().map_err(updater_failure)?.phase = phase.to_owned();
+        Ok(())
+    }
+
+    async fn install_inner(
+        self: &Arc<Self>,
+        app: AppHandle,
+        expected_tag: String,
+        confirm: bool,
     ) -> Result<(), ApplicationUpdateFailure> {
         if !crate::platform::distribution::supports_updater()
             || UPDATER_PUBLIC_KEY.trim().is_empty()
@@ -244,6 +314,41 @@ impl ApplicationUpdateService {
                 "selected version is not an allowed update",
             ));
         }
+        if confirm {
+            let (tag, preview, plan) = self
+                .prepared
+                .lock()
+                .map_err(updater_failure)?
+                .take()
+                .ok_or_else(|| {
+                    ApplicationUpdateFailure::new(
+                        "update_selection_expired",
+                        "Download the update again",
+                    )
+                })?;
+            if tag != expected_tag || preview != enabled {
+                return Err(ApplicationUpdateFailure::new(
+                    "update_selection_expired",
+                    "Update preference changed",
+                ));
+            }
+            self.phase("installing")?;
+            let compression = Arc::clone(
+                app.state::<Arc<crate::compression::CompressionService>>()
+                    .inner(),
+            );
+            tauri::async_runtime::spawn_blocking(move || {
+                let _guard = compression
+                    .system_install_guard()
+                    .map_err(|e| ApplicationUpdateFailure::new(&e.code, e.message))?;
+                plan.install()
+            })
+            .await
+            .map_err(updater_failure)??;
+            self.phase("complete")?;
+            return Ok(());
+        }
+        self.phase("downloading")?;
         let endpoint: tauri::Url = selected.manifest_url.parse().map_err(|error| {
             ApplicationUpdateFailure::new(
                 "update_manifest_url_invalid",
@@ -255,7 +360,11 @@ impl ApplicationUpdateService {
             .endpoints(vec![endpoint])
             .map_err(updater_failure)?
             .pubkey(UPDATER_PUBLIC_KEY)
-            .timeout(Duration::from_secs(15))
+            .timeout(Duration::from_secs(if cfg!(target_os = "linux") {
+                600
+            } else {
+                15
+            }))
             .build()
             .map_err(updater_failure)?;
         let update = updater
@@ -284,6 +393,12 @@ impl ApplicationUpdateService {
         let (abort_handle, abort_registration) = AbortHandle::new_pair();
         {
             let mut active = self.lock_install_cancel()?;
+            if self.cancel_requested.load(Ordering::Acquire) {
+                return Err(ApplicationUpdateFailure::new(
+                    "update_cancelled",
+                    "Download cancelled",
+                ));
+            }
             if active.is_some() {
                 return Err(ApplicationUpdateFailure::new(
                     "update_install_busy",
@@ -295,6 +410,7 @@ impl ApplicationUpdateService {
 
         let mut downloaded_bytes = 0_u64;
         let progress_app = app.clone();
+        let finish_service = Arc::clone(self);
         let download = update.download(
             move |chunk_size, total_bytes| {
                 downloaded_bytes = downloaded_bytes.saturating_add(chunk_size as u64);
@@ -309,7 +425,11 @@ impl ApplicationUpdateService {
                     eprintln!("application update progress event failed: {error}");
                 }
             },
-            || {},
+            move || {
+                if let Err(error) = finish_service.phase("verifying") {
+                    log::warn!("{}", error.message);
+                }
+            },
         );
         let bytes = Abortable::new(download, abort_registration)
             .await
@@ -321,10 +441,36 @@ impl ApplicationUpdateService {
             });
         self.lock_install_cancel()?.take();
         let bytes = bytes?.map_err(updater_failure)?;
-        update.install(bytes).map_err(updater_failure)
+        if cfg!(target_os = "linux") {
+            self.phase("preparing")?;
+            let version = selected.version.to_string();
+            let plan = tauri::async_runtime::spawn_blocking(move || {
+                crate::platform::distribution::prepare(&version, &bytes)
+            })
+            .await
+            .map_err(updater_failure)??;
+            let changes = plan.changes();
+            *self.prepared.lock().map_err(updater_failure)? = Some((expected_tag, enabled, plan));
+            *self.stage.lock().map_err(updater_failure)? = UpdateStage {
+                phase: "prepared".into(),
+                changes,
+            };
+            Ok(())
+        } else {
+            self.phase("installing")?;
+            update.install(bytes).map_err(updater_failure)?;
+            self.phase("")
+        }
     }
 
     pub fn cancel_install(&self) -> Result<(), ApplicationUpdateFailure> {
+        if self.stage.lock().map_err(updater_failure)?.phase != "downloading" {
+            return Err(ApplicationUpdateFailure::new(
+                "update_cannot_cancel",
+                "This installation stage cannot be cancelled",
+            ));
+        }
+        self.cancel_requested.store(true, Ordering::Release);
         if let Some(cancel) = self.lock_install_cancel()?.take() {
             cancel.abort();
         }
@@ -367,6 +513,7 @@ impl ApplicationUpdateService {
                     UPDATER_PUBLIC_KEY,
                     &selected.release.tag_name,
                     &selected.version,
+                    crate::platform::distribution::platform_key(),
                 )?;
                 if !selected
                     .release
@@ -431,17 +578,6 @@ impl ApplicationUpdateService {
             )
         })
     }
-
-    fn lock_check_active(
-        &self,
-    ) -> Result<std::sync::MutexGuard<'_, bool>, ApplicationUpdateFailure> {
-        self.check_active.lock().map_err(|_| {
-            ApplicationUpdateFailure::new(
-                "update_check_state_poisoned",
-                "application update check state is unavailable",
-            )
-        })
-    }
 }
 
 fn current_version() -> Result<Version, ApplicationUpdateFailure> {
@@ -495,6 +631,9 @@ fn fetch_github_releases() -> Result<Vec<GithubRelease>, ApplicationUpdateFailur
                 )
             })?;
         let page_is_full = page_releases.len() == 100;
+        if page == 10 && page_is_full {
+            return Err(updater_failure("GitHub pagination limit exceeded"));
+        }
         releases.append(&mut page_releases);
         if !page_is_full {
             break;
@@ -568,10 +707,12 @@ fn release_snapshot(selected: &SelectedRelease) -> ApplicationUpdateRelease {
         .assets
         .iter()
         .find(|asset| {
-            asset.name.ends_with("_windows_x86_64-setup.exe")
-                || asset.name.ends_with("_windows_x64-setup.exe")
-                || asset.name.ends_with("_windows_arm64-setup.exe")
-                || asset.name.ends_with("_windows_x86-setup.exe")
+            (cfg!(target_os = "linux") && asset.name.ends_with(".pkg.tar.zst"))
+                || (!cfg!(target_os = "linux")
+                    && (asset.name.ends_with("_windows_x86_64-setup.exe")
+                        || asset.name.ends_with("_windows_x64-setup.exe")
+                        || asset.name.ends_with("_windows_arm64-setup.exe")
+                        || asset.name.ends_with("_windows_x86-setup.exe")))
         })
         .map(|asset| asset.size);
     ApplicationUpdateRelease {
@@ -597,6 +738,26 @@ fn updater_failure(error: impl std::fmt::Display) -> ApplicationUpdateFailure {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn update_operations_exclude_preference_changes_and_release_the_guard() {
+        let service = ApplicationUpdateService::load(Path::new("/nonexistent-resona-test"));
+        let guard = service.begin_operation("busy").unwrap();
+        assert!(!service.is_busy());
+        service.phase("installing").unwrap();
+        assert!(service.is_busy());
+        assert!(service.begin_operation("busy").is_err());
+        assert_eq!(
+            service
+                .set_receive_prerelease_updates(true)
+                .unwrap_err()
+                .code,
+            "update_install_busy"
+        );
+        drop(guard);
+        assert!(!service.is_busy());
+        assert!(service.begin_operation("busy").is_ok());
+    }
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]

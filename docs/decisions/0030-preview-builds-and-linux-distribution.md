@@ -5,6 +5,8 @@
 - 授权：所有者要求先提供当前版本的预览构建方案、保持版本号，并明确 Linux 只构建 Arch/AUR `-bin`，内置更新改为包管理器引导，不提供 AppImage 或 Linux 自更新。
 - 关联：拟补充 [ADR 0024](0024-windows-tray-distribution-and-update.md)、[ADR 0028](0028-arch-linux-wayland-baseline.md)；补充并取代上述 ADR 中仅 Windows/版本变化发布与 Linux 手动预览的分发规则。
 
+- alpha.3 修订：Linux 安装与更新条款由 [ADR 0032](0032-arch-in-app-update.md) 取代，移除 AUR，启用应用内下载验签与 Polkit/Pacman 安装；以下保留历史决定。
+
 ## 背景
 
 当前 `0.3.0-alpha.1` 只提供本机 Arch / Wayland 测试包。Linux 更新 capability 关闭；main 发布只生成 Windows NSIS，版本 tag 是 `v<version>`，无法重复交付同一应用版本的不同预览构建。

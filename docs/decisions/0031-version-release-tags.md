@@ -5,6 +5,8 @@
 - 授权：所有者要求恢复普通版本 tag 和单个 pre-release，删除两条构建编号预览 Release，保持应用版本不变，发布说明与提交使用极简英文。
 - 替代：[ADR 0030](0030-preview-builds-and-linux-distribution.md) 中同版本重复发布、构建编号 tag、同版本更新比较及构建编号 pkgrel；保留其 Arch/AUR 分发、Linux 包管理器更新和双平台完整交付规则。
 
+- alpha.3 修订：Linux 安装与更新条款由 [ADR 0032](0032-arch-in-app-update.md) 取代，移除 AUR，启用应用内下载验签与 Polkit/Pacman 安装；以下保留历史决定。
+
 ## 决定
 
 - 所有版本统一使用 `v<version>` 与 `Resona <version>`；预发行使用 GitHub pre-release，每个应用版本仅一个 Release。已有版本 tag 时同版本合并不发包，下一次交付递增 SemVer。

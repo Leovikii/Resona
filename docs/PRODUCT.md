@@ -57,4 +57,4 @@ FFmpeg 不进入安装包；Windows 按需下载固定版本，Arch Linux 使用
 - DSP、均衡器、响度归一化、Exclusive/bit-perfect 声明或第二播放引擎
 - 移动端与 Web 版
 
-Linux 当前仅支持 Arch 系 x86_64 / Wayland 的本机构建预览；提供 layer-shell 置顶歌词和 KDE MPRIS，暂不提供正式安装包、文件关联安装或自动更新。
+Linux 当前支持 Arch 系 x86_64 / KDE Wayland 预览；提供 layer-shell 歌词、MPRIS、GitHub 原生包和文件关联。应用内下载验签、显示安装预览，经 Polkit 授权交给 Pacman 安装；成功后用户重启。Windows 保持当前 NSIS 与界面设计。规则见 ADR 0032。
