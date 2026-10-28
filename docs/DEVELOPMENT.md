@@ -33,7 +33,7 @@ cargo test --manifest-path src-tauri/Cargo.toml pinned_ffmpeg_test_tools_preserv
 
 固定 FFmpeg 版本、URL、归档/二进制哈希和许可证必须同步审查。测试工具只写入忽略的 `src-tauri/binaries/`；运行时依赖写入 Local AppData 并由 `FfmpegDependencyService` 验证。
 
-预览分发由 `.github/workflows/main-merge-delivery.yml` 的 main push 完成：合并后验证双平台，再构建 Windows NSIS 和 Arch 包，统一验签、draft 上传并公开。**dev push、PR 创建/更新不触发 CI**；不为日常提交手动补跑整套 Actions。合并前运行受影响的本机检查，Linux 可由维护者在审阅阶段或实机环境单独验证，必须准确记录未测项目。npm/Cargo 依赖缓存规则见 [ADR 0034](decisions/0034-main-only-ci-and-dependency-cache.md)。本机产物只测试，留在忽略的 target，不提交/上传。每个版本只发布 `v<version>` 的一个 Release，已有 tag 时同版本合并跳过；发布说明维护在 `docs/releases/<version>.md`，使用极简英文 Markdown。Linux 原生包与双平台签名规则见 [ADR 0032](decisions/0032-arch-in-app-update.md)，不再同步 AUR。`scripts/test-arch-package.mjs` 仅允许在 disposable Actions 容器 root 环境运行，覆盖真实 Pacman 安装/升级/重装/卸载。
+指向 main 的 PR 创建、更新及重开运行 Windows/Arch CI，固定汇总检查 `PR validation` 必须成功且跟上最新 main 才能合并。dev push 不单独运行 CI，已有 PR 的分支更新会触发 PR CI；同一 PR 的新运行取消旧运行。`.github/workflows/main-merge-delivery.yml` 的 main push 只执行 CD：构建 Windows NSIS 和 Arch 包、校验包及同 SHA 产物身份，统一验签、draft 上传并公开，不重复整套 CI。PR CI 无签名密钥，签名和发布仅在 main 的 release Environment；不跳过 CI 合并。合并前运行受影响的本机检查，Linux 可由维护者在实机单独验证，准确记录未测项目。缓存与保护规则见 [ADR 0034](decisions/0034-main-only-ci-and-dependency-cache.md)。本机产物只测试，留在忽略的 target，不提交/上传。每个版本只发布 `v<version>` 的一个 Release，已有 tag 时同版本合并跳过；发布说明维护在 `docs/releases/<version>.md`，使用极简英文 Markdown。Linux 原生包与双平台签名规则见 [ADR 0032](decisions/0032-arch-in-app-update.md)，不再同步 AUR。`scripts/test-arch-package.mjs` 仅允许在 disposable Actions 容器 root 环境运行，覆盖真实 Pacman 安装/升级/重装/卸载。
 
 Linux 本机构建使用 `npm run build:linux`，开发与运行使用 `npm run dev:linux` / `npm run start:linux`；不将裸 `cargo build` 的开发服务器模式产物交付测试。KDE 桌面歌词使用系统 `gtk-layer-shell`，MPRIS 使用会话总线；原生自动回归可运行 `python3 scripts/test-linux-desktop.py`（需要 Release、gio/desktop-file-utils，必须先关闭其他实例；也可设置 `RESONA_TEST_BINARY` / `RESONA_TEST_DESKTOP` 检查解包后的真实安装布局）。Linux 的同目录输出采用不覆盖硬链接提交，失败保留源文件。
 
@@ -76,7 +76,7 @@ UI 固定格式控件要有稳定尺寸，文本不得溢出或遮挡。压缩�
 
 ### 双平台精简执行
 
-- main 更新后的 Windows job 执行完整 `npm test`（自动发现 `scripts/*.test.mjs`），共享前端纯逻辑不在 Linux job 重复。Linux 的 `npm run test:linux` 保留 POSIX 路径、桌面打包和交付规则；Rust 测试、Clippy 与编译两端各跑，因为平台 adapter 和条件编译不同。发布门禁仍要求两端成功，不再自动运行 PR 门禁。
+- PR CI 的 Windows job 执行完整 `npm test`（自动发现 `scripts/*.test.mjs`），共享前端纯逻辑不在 Linux job 重复。Linux 的 `npm run test:linux` 保留 POSIX 路径、桌面打包和交付规则；Rust 测试、Clippy 与编译两端各跑，因为平台 adapter 和条件编译不同。`PR validation` 要求两端成功；main 只执行 CD，双平台构建与验签成功才公开。
 - Linux 两项 FFmpeg 忽略测试合并为一次 `cargo test --manifest-path src-tauri/Cargo.toml --locked ffmpeg -- --ignored --test-threads=1`。不删文件安全、迁移、取消或真实转换矩阵。窗口切换压力检查用两次完整往返，保留尺寸记忆、并发 resize、最大化恢复和重建断言。
 - 共享 UI 用一组代表性组合覆盖四个规定视口、浅/深色、solid/Mica 预览、压缩窗口和歌词常用/64px 字号，不做所有排列的笛卡尔积。检查溢出、控件可达、键盘焦点、歌词移入/移出及高于 hover 阈值的设置。共享布局不按操作系统重复截图；两端原生 Release 仍分别核查字体、透明背景、主题、窗口按钮/动画和锁定穿透。
 - 原生回归并入现有生命周期测试：Linux 同一用例覆盖 helper 显隐/点击、输入区域和重建；Windows 普通测试直接向自有 HWND 发送 hover/leave/重显消息，断言绘制状态与 alpha。实际鼠标命中、跨进程穿透、DPI 与 Windows Mica 保留短实机清单。浏览器预览不能宣布原生视觉通过。

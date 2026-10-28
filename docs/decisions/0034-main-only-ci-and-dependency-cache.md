@@ -1,18 +1,19 @@
-# ADR 0034：仅 main 更新触发 CI 与依赖缓存
+# ADR 0034：PR CI、main CD 与依赖缓存
 
-- 状态：Accepted；所有者于 2026-10-28 明确要求减少 Actions 时间和额度消耗。
-- 替代 ADR 0030 的 PR validation 自动门禁；签名、双平台交付与每版本单一 tag 规则保留。
+- 状态：Accepted；所有者于 2026-10-28 修订此前“仅 main CI”的要求，改为 PR 验证通过后合并、main 仅执行 CD。
+- 修订 ADR 0030 的触发与缓存策略；每版本单一 tag、签名和双平台完整交付规则保留。
 
 ## 决定
 
-1. 工作流只监听 `push` 到 `main`，用于 PR 合并后的验证和交付。`dev` 推送、PR 创建/更新均不触发 CI；不为每次修订新增检查工作流或绕过规则的临时分支。
-2. 合并前由开发者运行受影响的本机检查，Linux 原生验证可以在审阅阶段由维护者手工运行，或交给实际平台验收。不能把未执行的检查记为通过。本轮已启动 CI 的失败跟踪是临时安排，不是继续自动验证 dev 的授权。
-3. main 同 SHA 的 Windows/Arch 验证成功后才能签名构建；两端产物完成后统一验签发布。失败阻止发布，不能降低安全或文件完整性检查来节省时间。主分支更新串行排队，不中断正在交付的版本。
-4. `setup-node` 按 `package-lock.json` 缓存 npm 下载，仍执行 `npm ci`，不缓存 `node_modules`。Rust 使用固定 SHA 的 `Swatinem/rust-cache` 缓存 Cargo 下载和依赖编译产物；不缓存项目自身产物、签名密钥、发布目录或用户数据。
-5. Rust 缓存按 job、工具链、Cargo 清单/锁文件和编译环境隔离；Windows 加入 runner 镜像版本，Arch 加入安装后完整 Pacman 包版本摘要，避免滚动系统库变更复用旧原生产物。缓存缺失时正常完整构建；命中不跳过测试、Clippy、验签或包安装回归。
+1. 指向 `main` 的 PR 创建、更新及重开触发 Windows/Arch CI，检出 GitHub 的 PR 合并引用，验证与 main 合并后的代码。普通 dev push 不单独触发；已有 PR 的 dev 更新通过 PR synchronize 触发。同一 PR 的新运行取消过时 CI。
+2. 两端执行既有测试、Clippy、构建与 Arch 真实包安装回归，不访问 release Environment 或签名密钥。固定名称 `PR validation` 以 `always()` 汇总两端结果，只有两端均 success 才通过；失败、取消和跳过均不能放行。
+3. main 活动保护规则要求 GitHub Actions 的 `PR validation` 成功并跟上最新 main；保留必须通过 PR 合并、禁止强推与删除。不得跳过 CI 合并，也不伪造检查状态。合并前仍运行受影响的本机检查，实机和硬件未测项准确记录。
+4. `push main` 只执行 CD：检查版本/tag，构建该 main SHA 的 Windows NSIS 与 Arch 包，验证包安装和产物身份，统一验签、草稿上传并公开。发布依赖已受保护的 PR CI，不在 main 重复整套 CI；签名仅在 release Environment。双平台构建、身份、验签或包校验失败阻止发布。主分支交付串行排队，不取消正在发布的版本。
+5. `setup-node` 按 `package-lock.json` 缓存 npm 下载，仍执行 `npm ci`，不缓存 `node_modules`。Rust 使用固定 SHA 的 `Swatinem/rust-cache` 缓存 Cargo 下载和依赖编译产物；不缓存项目自身产物、签名密钥、发布目录或用户数据。
+6. Rust 缓存按 job、工具链、Cargo 清单/锁文件和编译环境隔离；Windows 加入 runner 镜像版本，Arch 加入安装后完整 Pacman 包版本摘要。缓存缺失时正常完整构建；命中不跳过测试、Clippy、验签或包安装回归。
 
-## 运维边界
+## 运维与迁移
 
-- 所有者在本机验收后已授权本轮合并 main 并发布。新触发规则从 main 更新起适用；首次缓存可能没有加速收益，实际命中和耗时以 Actions 为准。
-- 所有者于 2026-10-28 授权更新旧保护规则；已从 main 活动规则集中仅移除不会触发的 `PR validation` 必需状态，保留必须通过 PR 合并、禁止强推与删除。合并使用普通权限，双平台验证与签名发布门禁继续在 main 运行。
-- main 直接推送同样会触发，合并权限由仓库分支保护负责；不通过读取提交标题猜测是否为 PR 合并。
+- PR #20 合并时按先前授权移除了不会触发的旧检查；本次恢复与新 PR CI 对应的必需 `PR validation`，不添加合并后才出现的 CD 状态作为合并前条件。
+- 已开始的 alpha.4 main 运行继续完成原有双平台门禁与发布；新规则通过后续 PR 验证后生效。已有公开 tag 的同版本合并跳过发包，不覆盖已发布版本。
+- 不通过手动 tag、本机上传或虚假成功检查绕过发布流程。仓库规则与工作流的检查名称必须同步维护。

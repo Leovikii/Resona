@@ -1,6 +1,9 @@
-name: Main CI and delivery
+name: PR CI and main delivery
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
@@ -17,19 +20,20 @@ defaults:
     shell: bash
 
 concurrency:
-  group: main-delivery
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('pr-ci-{0}', github.event.pull_request.number) || 'main-delivery' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
   queue: max
 
 jobs:
   windows-validation:
     name: Windows validation
+    if: github.event_name == 'pull_request'
     runs-on: windows-latest
     timeout-minutes: 30
     permissions:
       contents: read
     steps:
-      - name: Check out the main commit
+      - name: Check out the PR merge commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
         with:
           fetch-depth: 0
@@ -81,11 +85,12 @@ jobs:
 
       - name: Validate release version
         env:
-          BASE_SHA: ${{ github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: node scripts/release-channel.mjs --base "$BASE_SHA"
 
   linux-validation:
     name: Arch Linux validation
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     container:
       image: archlinux:base-devel@sha256:3cbf69d2d5958d6a294f3722c5668e6187c4df8e00fa27f72352f0bf83e495e1
@@ -96,7 +101,7 @@ jobs:
       - name: Install Arch build dependencies
         run: pacman -Syu --noconfirm --needed git rust nodejs npm webkit2gtk-4.1 libayatana-appindicator alsa-lib openssl ffmpeg gtk-layer-shell polkit desktop-file-utils
 
-      - name: Check out the main commit
+      - name: Check out the PR merge commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
         with:
           persist-credentials: false
@@ -125,6 +130,19 @@ jobs:
           cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
           npm run build:linux -- --debug
           RESONA_PACKAGE_BINARY=src-tauri/target/debug/resona node scripts/test-arch-package.mjs
+
+  validation:
+    name: PR validation
+    if: always() && github.event_name == 'pull_request'
+    needs: [windows-validation, linux-validation]
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Require both platform validations
+        env:
+          WINDOWS_RESULT: ${{ needs.windows-validation.result }}
+          LINUX_RESULT: ${{ needs.linux-validation.result }}
+        run: test "$WINDOWS_RESULT" = success && test "$LINUX_RESULT" = success
 
   verify:
     name: Prepare delivery
@@ -157,7 +175,7 @@ jobs:
 
   windows-build:
     name: Build signed Windows installer
-    needs: [verify, windows-validation, linux-validation]
+    needs: [verify]
     if: needs.verify.outputs.release == 'true'
     runs-on: windows-latest
     timeout-minutes: 45
@@ -196,7 +214,7 @@ jobs:
 
   arch-build:
     name: Build Arch package
-    needs: [verify, windows-validation, linux-validation]
+    needs: [verify]
     if: needs.verify.outputs.release == 'true'
     runs-on: ubuntu-latest
     container:
