@@ -54,7 +54,7 @@ pub fn show_menu<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
         let window_copy = window.clone();
-        return window
+        window
             .run_on_main_thread(move || {
                 if let Ok(native) = window_copy.gtk_window() {
                     MENU_EVENTS.with(|events| {
@@ -69,7 +69,7 @@ pub fn show_menu<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
                     });
                 }
             })
-            .map_err(|error| error.to_string());
+            .map_err(|error| error.to_string())
     }
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {

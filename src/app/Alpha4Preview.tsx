@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Isolated design review: synthetic data, no Tauri commands or persisted preferences.
+// Browser review only. Production mode loads the real App with the browser demo bridge.
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
@@ -24,6 +24,7 @@ const presets = [
   { value: "wide-min", label: "宽屏最小 · 760 × 520", width: 760, height: 520 },
   { value: "compact", label: "窄屏 · 420 × 720", width: 420, height: 720 },
   { value: "compact-min", label: "窄屏最小 · 360 × 600", width: 360, height: 600 },
+  { value: "compression", label: "压缩 · 720 × 500", width: 720, height: 500 },
 ];
 const theme = createTheme({
   primaryColor: "violet", primaryShade: { light: 7, dark: 5 }, autoContrast: true,
@@ -66,24 +67,25 @@ function Review() {
     theme: colorScheme, material, content });
   const production = params.get("production") === "1";
   if (production) query.set("material", material === "kde" ? "kde_blur" : material);
+  if (preset === "compression") query.set("window", "audio-compression");
   const canvasUrl = `${production ? "/index.html" : "/alpha4-preview.html"}?${query}`;
   return <MantineProvider theme={theme} forceColorScheme={colorScheme}>
     <main className="a4-review">
       <header className="a4-review-heading">
-        <div><span className="a4-eyebrow">RESONA / 0.3.0-alpha.4</span><h1>标题栏与布局提案</h1>
-          <p>移除重复品牌行，让音乐列表更靠上。</p></div>
+        <div><span className="a4-eyebrow">RESONA / 0.3.0-alpha.4</span><h1>{production ? "正式前端验收" : "标题栏与布局提案"}</h1>
+          <p>{production ? "加载实际应用组件；主题和语言请在应用设置中切换。" : "移除重复品牌行，让音乐列表更靠上。"}</p></div>
         <a href={canvasUrl} target="_blank" rel="noreferrer">打开独立窗口 ↗</a>
       </header>
       <div className="a4-review-controls">
-        <NativeSelect label="窗口尺寸" data={presets.map(({ value, label }) => ({ value, label }))}
+        <NativeSelect label="窗口尺寸" data={presets.filter(({ value }) => production || value !== "compression").map(({ value, label }) => ({ value, label }))}
           value={preset} onChange={(event) => setPreset(event.currentTarget.value)} />
-        <div><label>主题</label><SegmentedControl aria-label="主题" value={colorScheme}
+        {!production && <div><label>主题</label><SegmentedControl aria-label="主题" value={colorScheme}
           onChange={(value) => setColorScheme(value as "dark" | "light")}
-          data={[{ label: "深色", value: "dark" }, { label: "浅色", value: "light" }]} /></div>
+          data={[{ label: "深色", value: "dark" }, { label: "浅色", value: "light" }]} /></div>}
         <div><label>材质示意</label><SegmentedControl aria-label="材质示意" value={material} onChange={setMaterial}
           data={[{ label: "Mica", value: "mica" }, { label: "KDE 模糊", value: "kde" }, { label: "实色", value: "solid" }]} /></div>
-        <div><label>内容</label><SegmentedControl aria-label="内容" value={content} onChange={setContent}
-          data={[{ label: "示例列表", value: "tracks" }, { label: "空列表", value: "empty" }]} /></div>
+        {!production && <div><label>内容</label><SegmentedControl aria-label="内容" value={content} onChange={setContent}
+          data={[{ label: "示例列表", value: "tracks" }, { label: "空列表", value: "empty" }]} /></div>}
       </div>
       <div className="a4-review-stage" ref={host}>
         <div className="a4-scaled-canvas" style={{ width: dimensions.width * scale, height: dimensions.height * scale }}>

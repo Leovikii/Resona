@@ -2,7 +2,7 @@
 
 `0.3.0-alpha.1` 开始支持 Arch Linux 系 x86_64 的原生 Wayland 会话。本机验证环境为 CachyOS、KDE Plasma、PipeWire；其他发行版、X11 和 ARM 不在范围内；交付状态见 [STATUS](STATUS.md)。
 
-当前版本为 [0.3.0-alpha.3](plans/0.3.0-alpha.3.md)，安装与更新规则见 [ADR 0032](decisions/0032-arch-in-app-update.md)。alpha.2 的主题、应用身份、歌词与窗口设计沿用；历史实机结论不替代本版更新授权验收。
+当前开发版本为 [0.3.0-alpha.4](plans/0.3.0-alpha.4.md)，尚未发布；公开安装包仍为 alpha.3。安装与更新规则见 [ADR 0032](decisions/0032-arch-in-app-update.md)。alpha.4 改用无边框标题栏与 KDE 模糊外壳，历史 GTK 装饰实机结论不能代替新版验收；完整步骤、已知 CI 结果和性能记录见 [alpha.4 Linux 实机交接](plans/0.3.0-alpha.4-linux-validation.md)。
 
 ## 安装、打开方式与更新
 
@@ -68,7 +68,7 @@ alpha.1 曾提供 `src-tauri/target/test-build/Resona-0.3.0-alpha.1-arch-wayland
 
 ## 普通窗口尺寸
 
-与 Windows 使用相同的逻辑内容区尺寸，标题栏、边框和阴影不计入：
+与 Windows 使用相同的逻辑客户端尺寸；alpha.4 的 48px 自绘标题栏包含在客户端内，compositor 的边框和阴影不计入：
 
 | 窗口模式 | 默认尺寸 | 最小尺寸 |
 | --- | --- | --- |
@@ -85,7 +85,7 @@ alpha.1 曾提供 `src-tauri/target/test-build/Resona-0.3.0-alpha.1-arch-wayland
 | MP3 / WAV / FLAC、CUE、输出设备、列表、封面、普通同步歌词 | 复用现有 Rust 服务与 React 界面 |
 | WAV → FLAC | 检查 `/usr/bin/ffmpeg`、`/usr/bin/ffprobe` 的真实版本；缺失时提示 pacman 安装并提供“重新检查”，不执行提权或下载 Windows 二进制 |
 | 文件安全 | 临时文件在目标目录内；校验后以硬链接原子发布新文件，再移除临时文件；已有目标不会被 POSIX rename 覆盖。文件系统不支持硬链接时明确失败并保留源文件 |
-| 主窗口与压缩窗口 | 实色背景、GTK 原生装饰与完整按钮命中区；保存尺寸与布局，主窗口保存最大化状态；位置由 compositor 管理，不查询或恢复全局坐标 |
+| 主窗口与压缩窗口 | 共享无边框标题栏，KDE 原生背景效果探测、外壳区域模糊与实色回退；实机待验收。保存尺寸与布局，主窗口保存最大化状态；位置由 compositor 管理，不查询或恢复全局坐标 |
 | 系统托盘 | 需要 StatusNotifier host；启动时经 Arch 自带的 `busctl` 有界检查一次。宿主或托盘创建失败不阻止播放，并拒绝隐藏主窗口；不持续轮询宿主 |
 | 桌面悬浮歌词 | KDE Wayland layer-shell overlay 置顶透明窗口，字号固定高度、两行歌词、拖动/左右调整宽度、锁定穿透及原生 GTK 解锁按钮；关闭后释放 WebView |
 | KDE 媒体面板 / MPRIS | 曲目信息、封面、位置、播放/暂停/停止、前后曲、定位、音量、循环/随机、激活与退出；复用同一播放引擎 |
@@ -121,7 +121,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked --features tauri/custom
   native_window_controls_and_geometry -- --ignored --nocapture --test-threads=1
 ```
 
-标题栏测试在主窗口/压缩窗口刚显示时检查事件层不覆盖按钮，一秒内具备完整输入区域，再检查按钮的 GDK 输入窗口与控件尺寸一致（至少 48×48 逻辑像素），通过原生 GTK 按钮信号验证最大化和关闭，并在布局切换期间触发 UI resize 回调。窗口回归还检查实际 GTK 内容区、4 次宽窄切换（两次完整往返）、两套自定义尺寸、重新加载和压缩窗口重建，避免只验证窗口 API 返回值。测试要求 `qdbus6` 及已启用的 maximize/squash 特效，同时验证 portal light→dark→light 与手动覆盖、GTK 应用 ID，并通过 KWin activeEffects 观察两类动画启动；最小化还检查 Wayland `xdg_toplevel.set_minimized()`，不依赖 Wayland 未提供的最小化状态确认；真实启动后立即点击、按钮边缘点击和标题栏拖动仍需人工验收。
+alpha.4 窗口测试在主窗口/压缩窗口刚显示时确认无 GTK 装饰、客户端在一秒内映射，再通过 Tauri 原生窗口 API 检查最大化、最小化和 CloseRequested；并发 resize、实际 GTK 内容区尺寸、宽窄切换、自定义尺寸记忆、重新加载和压缩窗口重建继续覆盖。测试要求 `qdbus6` 及已启用的 maximize/squash 特效，通过 KWin activeEffects 观察动画；最小化还需检查 Wayland `xdg_toplevel.set_minimized()`，不依赖协议未提供的最小化状态确认。该用例不能证明 WebView 自绘按钮真实命中、KWin 模糊、窗口菜单或 portal 主题已通过；这些在本版交接中单独验收。
 
 原生 Release 集成回归（先关闭所有 Resona 实例，脚本拒绝复用正在运行的应用）：
 
@@ -131,6 +131,6 @@ python3 scripts/test-linux-desktop.py
 
 脚本生成静音 FLAC、封面和 LRC，使用临时 XDG 数据/缓存目录启动 Release，读取既有桌面字体配置，通过 StatusNotifier/D-Bus 验证实际歌词前端 ready 与销毁重建，以及 MPRIS 元数据、控制和退出；不修改用户音频或既有应用数据。
 
-CI 使用固定摘要的官方 Arch `base-devel` 容器，执行构建、测试、Clippy 和真实 FFmpeg 转换。CI 还验证真实 Pacman 首次安装、alpha.2→alpha.3 升级、重装、包身份、文件关联和卸载。CI 容器没有图形 Polkit 代理、物理音频设备或 Wayland compositor，不能据此声称桌面实机验收通过。
+CI 只在 main 更新后运行，使用固定摘要的官方 Arch `base-devel` 容器，执行构建、测试、Clippy 和真实 FFmpeg 转换，并验证真实 Pacman 首次安装、旧包升级、重装、包身份、文件关联和卸载。dev 和 PR 更新不触发自动 CI。容器没有图形 Polkit 代理、物理音频设备或 Wayland compositor，不能据此声称桌面实机验收通过。
 
 本轮实测和剩余门禁见 [0.3.0 计划](plans/0.3.0.md)，长期决定见 [ADR 0028](decisions/0028-arch-linux-wayland-baseline.md) 和 [ADR 0029](decisions/0029-wayland-lyrics-and-mpris.md)。
