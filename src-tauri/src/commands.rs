@@ -271,7 +271,29 @@ pub async fn scan_audio_compression_inputs(
     paths: Vec<String>,
     service: State<'_, ManagedCompressionService>,
 ) -> Result<CompressionScanSnapshot, CompressionFailure> {
-    Arc::clone(service.inner()).add_scan_inputs(paths.into_iter().map(PathBuf::from).collect())
+    let service = Arc::clone(service.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let paths = paths
+            .into_iter()
+            .map(|value| {
+                crate::platform::file_access::resolve_location(&value).map_err(|error| {
+                    use crate::playback::PlaybackErrorCode;
+                    let code = match error.code {
+                        PlaybackErrorCode::InvalidLocation => "invalid_location",
+                        PlaybackErrorCode::UnsupportedLocation => "unsupported_location",
+                        PlaybackErrorCode::NetworkLocationUnavailable => {
+                            "network_location_unavailable"
+                        }
+                        _ => "compression_input_unavailable",
+                    };
+                    CompressionFailure::new(code, error.message)
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        service.add_scan_inputs(paths)
+    })
+    .await
+    .map_err(|error| CompressionFailure::new("compression_scan_failed", error.to_string()))?
 }
 
 #[tauri::command]

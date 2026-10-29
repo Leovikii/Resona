@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent, ReactNode } from "react";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { onFileDragDropEvent } from "../shared/bridge/fileDrop";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   ActionIcon,
@@ -172,7 +172,7 @@ export default function AudioCompressionApp() {
     if (!isTauriRuntime()) return;
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void getCurrentWebview().onDragDropEvent((event) => {
+    void onFileDragDropEvent((event) => {
       if (event.payload.type === "leave") {
         setDragActive(false);
         return;

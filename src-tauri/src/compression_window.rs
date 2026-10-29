@@ -61,6 +61,7 @@ pub fn show<R: Runtime>(app: &AppHandle<R>) -> Result<(), CompressionFailure> {
         .or_else(|error| app.get_webview_window(LABEL).ok_or(error))
         .map_err(|error| window_error("create_failed", error))?;
     crate::platform::window_controls::apply(&window);
+    crate::platform::file_drop::install(&window);
     restore_geometry(app, &window);
     Ok(())
 }

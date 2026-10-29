@@ -154,6 +154,7 @@ pub fn run() {
             app.manage(Arc::new(database));
             if let Some(window) = app.get_webview_window("main") {
                 platform::window_controls::apply(&window);
+                platform::file_drop::install(&window);
             }
             let main_window = Arc::new(main_window::MainWindowService::load(&data_dir));
             if let Err(error) = main_window.restore(app.handle()) {

@@ -25,6 +25,9 @@ pub enum RejectedPathReason {
     LinkedPath,
     EmptyFolder,
     Duplicate,
+    InvalidLocation,
+    UnsupportedLocation,
+    NetworkLocationUnavailable,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -116,6 +119,24 @@ pub fn resolve_audio_paths(paths: Vec<PathBuf>) -> ResolvedAudioPaths {
     let mut seen = HashSet::new();
 
     for path in paths {
+        let path = match crate::platform::file_access::resolve_path(path.clone()) {
+            Ok(path) => path,
+            Err(error) => {
+                use crate::playback::PlaybackErrorCode;
+                let reason = match error.code {
+                    PlaybackErrorCode::InvalidLocation => RejectedPathReason::InvalidLocation,
+                    PlaybackErrorCode::UnsupportedLocation => {
+                        RejectedPathReason::UnsupportedLocation
+                    }
+                    PlaybackErrorCode::NetworkLocationUnavailable => {
+                        RejectedPathReason::NetworkLocationUnavailable
+                    }
+                    _ => RejectedPathReason::Unreadable,
+                };
+                rejected.push(rejected_path(path, reason));
+                continue;
+            }
+        };
         match fs::symlink_metadata(&path) {
             Ok(metadata) if is_link_like(&metadata) => {
                 rejected.push(rejected_path(path, RejectedPathReason::LinkedPath));
@@ -333,6 +354,23 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
+
+    #[test]
+    fn file_uri_import_preserves_literal_percent_hash_and_unicode() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("中文 # %20.flac");
+        fs::write(&path, []).unwrap();
+        let uri = tauri::Url::from_file_path(&path).unwrap();
+        let result = resolve_audio_paths(vec![PathBuf::from(uri.as_str()), path.clone()]);
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(result.items[0].source.path, path);
+        assert_eq!(result.rejected[0].reason, RejectedPathReason::Duplicate);
+        let result = resolve_audio_paths(vec![PathBuf::from("https://example.com/a.flac")]);
+        assert_eq!(
+            result.rejected[0].reason,
+            RejectedPathReason::UnsupportedLocation
+        );
+    }
 
     #[test]
     fn selected_file_survives_empty_unreadable_and_partial_directory_results() {

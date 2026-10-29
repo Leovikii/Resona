@@ -1990,6 +1990,21 @@ mod tests {
             let context =
                 crate::filesystem::audio_file_context(&path).expect("keep selected network file");
             assert_eq!(context.sources[context.selected_index].path, path);
+            let imported = crate::filesystem::resolve_audio_paths(vec![
+                PathBuf::from(&location),
+                path.clone(),
+            ]);
+            assert_eq!(
+                imported.items.len(),
+                1,
+                "URI and mapped path refer to one item"
+            );
+            assert_eq!(imported.items[0].source.path, path);
+            assert_eq!(imported.rejected.len(), 1);
+            assert_eq!(
+                imported.rejected[0].reason,
+                crate::filesystem::RejectedPathReason::Duplicate
+            );
             crate::metadata::MetadataService::default().load(&path);
             crate::lyrics::LyricsService::default().snapshot(
                 &PlaybackSnapshot {

@@ -50,6 +50,7 @@ Resona/
 │  │     ├─ window_geometry.rs     # 内容区逻辑尺寸 / Wayland 几何适配
 │  │     ├─ file_access.rs         # URI 解析与 Linux KIO-FUSE 映射/目录能力
 │  │     ├─ file_dialog.rs         # Linux XDG portal / Windows 原生选择
+│  │     ├─ file_drop.rs           # 原生拖放 URI 保真与跨平台逻辑坐标事件
 │  │     ├─ file_commit.rs         # 不覆盖原子提交
 │  │     ├─ distribution/          # updater 平台能力与 Arch 事务安装 adapter
 │  │     ├─ compression_tools.rs   # 默认测试/开发工具路径

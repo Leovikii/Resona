@@ -3,6 +3,13 @@
 use crate::playback::{PlaybackErrorCode, PlaybackFailure};
 use std::path::PathBuf;
 
+pub fn resolve_path(path: PathBuf) -> Result<PathBuf, PlaybackFailure> {
+    match path.to_str() {
+        Some(value) => resolve_location(value),
+        None => refresh_mapped_path(path),
+    }
+}
+
 pub fn resolve_location(value: &str) -> Result<PathBuf, PlaybackFailure> {
     if !value.contains("://") {
         return refresh_mapped_path(PathBuf::from(value));

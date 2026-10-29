@@ -1,8 +1,7 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode, WheelEvent } from "react";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { onFileDragDropEvent } from "../shared/bridge/fileDrop";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   ActionIcon,
   Badge,
@@ -334,10 +333,8 @@ export default function App() {
     if (!isTauriRuntime()) return;
     let disposed = false;
     let unlistenDrop: (() => void) | undefined;
-    let unlistenScale: (() => void) | undefined;
     let edgeScrollFrame: number | null = null;
     let dragPointer: { x: number; y: number } | null = null;
-    let scaleFactor = window.devicePixelRatio || 1;
     const stopEdgeScroll = () => {
       dragPointer = null;
       if (edgeScrollFrame !== null) {
@@ -367,29 +364,15 @@ export default function App() {
       };
       edgeScrollFrame = window.requestAnimationFrame(tick);
     };
-    const currentWindow = getCurrentWindow();
-    void currentWindow.scaleFactor().then((factor) => {
-      scaleFactor = factor;
-    }).catch((error) => {
-      console.warn("Unable to read the window scale factor for file drop targeting", error);
-    });
-    void currentWindow.onScaleChanged(({ payload }) => {
-      scaleFactor = payload.scaleFactor;
-    }).then((stop) => {
-      if (disposed) stop();
-      else unlistenScale = stop;
-    }).catch((error) => {
-      console.error("Unable to listen for window scale changes", error);
-    });
-    void getCurrentWebview().onDragDropEvent((event) => {
+    void onFileDragDropEvent((event) => {
       if (event.payload.type === "leave") {
         stopEdgeScroll();
         setDropTarget(null);
         setExternalDragActive(false);
         return;
       }
-      const clientX = event.payload.position.x / scaleFactor;
-      const clientY = event.payload.position.y / scaleFactor;
+      const clientX = event.payload.position.x;
+      const clientY = event.payload.position.y;
       const target = dropTargetAtPosition(clientX, clientY);
       if (event.payload.type === "enter" || event.payload.type === "over") {
         dragPointer = { x: clientX, y: clientY };
@@ -437,7 +420,6 @@ export default function App() {
       disposed = true;
       stopEdgeScroll();
       unlistenDrop?.();
-      unlistenScale?.();
     };
   }, []);
 
