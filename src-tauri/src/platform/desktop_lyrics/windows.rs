@@ -255,14 +255,17 @@ impl DesktopLyricsWindowService {
     }
 
     pub fn persist_geometry(&self, app: &AppHandle) {
-        let state = self.lock_state();
-        let Some(resources) = state.resources.as_ref() else {
+        let window = {
+            let state = self.lock_state();
+            let Some(resources) = state.resources.as_ref() else {
+                return;
+            };
+            resources.lyrics_window.clone()
+        };
+        let Ok(position) = window.outer_position() else {
             return;
         };
-        let Ok(position) = resources.lyrics_window.outer_position() else {
-            return;
-        };
-        let Ok(size) = resources.lyrics_window.outer_size() else {
+        let Ok(size) = window.outer_size() else {
             return;
         };
         let geometry = WindowGeometry {
@@ -283,19 +286,38 @@ impl DesktopLyricsWindowService {
     }
 
     pub fn lock(&self) -> Result<DesktopLyricsWindowSnapshot, DesktopLyricsWindowFailure> {
+        let (window, helper, generation) = {
+            let state = self.lock_state();
+            state.lifecycle.ensure_lockable()?;
+            if state.lifecycle.locked {
+                return Ok(state.lifecycle.snapshot());
+            }
+            let resources = state.resources.as_ref().ok_or_else(|| {
+                DesktopLyricsWindowFailure::new(
+                    "desktop_lyrics_unavailable",
+                    "desktop lyrics windows are not initialized",
+                )
+            })?;
+            (
+                resources.lyrics_window.clone(),
+                resources.native_helper.hwnd,
+                resources.generation,
+            )
+        };
+        // Geometry queries wait for the event thread, whose DPI callback takes this mutex.
+        position_helper(&window, helper)?;
         let mut state = self.lock_state();
         state.lifecycle.ensure_lockable()?;
-        if state.lifecycle.locked {
-            return Ok(state.lifecycle.snapshot());
-        }
-        let resources = state.resources.as_ref().ok_or_else(|| {
-            DesktopLyricsWindowFailure::new(
-                "desktop_lyrics_unavailable",
-                "desktop lyrics windows are not initialized",
-            )
-        })?;
-
-        position_helper(resources)?;
+        let resources = state
+            .resources
+            .as_ref()
+            .filter(|resources| resource_generation_matches(resources.generation, Some(generation)))
+            .ok_or_else(|| {
+                DesktopLyricsWindowFailure::new(
+                    "desktop_lyrics_unavailable",
+                    "desktop lyrics window changed while locking",
+                )
+            })?;
         resources.native_helper.show()?;
         if let Err(error) = resources.lyrics_window.set_ignore_cursor_events(true) {
             resources.native_helper.hide();
@@ -313,23 +335,27 @@ impl DesktopLyricsWindowService {
     }
 
     pub fn start_dragging(&self) -> Result<(), DesktopLyricsWindowFailure> {
-        let state = self.lock_state();
-        if !state.lifecycle.visible || state.lifecycle.locked {
-            return Err(DesktopLyricsWindowFailure::new(
-                "desktop_lyrics_drag_unavailable",
-                "desktop lyrics cannot be dragged in the current state",
-            ));
-        }
-        state
-            .resources
-            .as_ref()
-            .ok_or_else(|| {
-                DesktopLyricsWindowFailure::new(
-                    "desktop_lyrics_unavailable",
-                    "desktop lyrics window is not initialized",
-                )
-            })?
-            .lyrics_window
+        let window = {
+            let state = self.lock_state();
+            if !state.lifecycle.visible || state.lifecycle.locked {
+                return Err(DesktopLyricsWindowFailure::new(
+                    "desktop_lyrics_drag_unavailable",
+                    "desktop lyrics cannot be dragged in the current state",
+                ));
+            }
+            state
+                .resources
+                .as_ref()
+                .ok_or_else(|| {
+                    DesktopLyricsWindowFailure::new(
+                        "desktop_lyrics_unavailable",
+                        "desktop lyrics window is not initialized",
+                    )
+                })?
+                .lyrics_window
+                .clone()
+        };
+        window
             .start_dragging()
             .map_err(|error| window_failure("desktop_lyrics_drag_failed", error))
     }
@@ -338,7 +364,7 @@ impl DesktopLyricsWindowService {
         &self,
         font_size: u32,
     ) -> Result<DesktopLyricsWindowSnapshot, DesktopLyricsWindowFailure> {
-        let (window, locked) = {
+        let window = {
             let mut state = self.lock_state();
             let window = state
                 .resources
@@ -351,15 +377,9 @@ impl DesktopLyricsWindowService {
                     )
                 })?;
             state.font_size = font_size.clamp(16, 64);
-            (window, state.lifecycle.locked)
+            window
         };
         resize_height(&window, font_size.clamp(16, 64))?;
-        if locked {
-            let state = self.lock_state();
-            if let Some(resources) = state.resources.as_ref() {
-                position_helper(resources)?;
-            }
-        }
         self.ensure_topmost()?;
         Ok(self.snapshot())
     }
@@ -674,21 +694,17 @@ fn squared_center_distance(saved: &WindowGeometry, area: &tauri::PhysicalRect<i3
     dx * dx + dy * dy
 }
 
-fn position_helper(resources: &WindowResources) -> Result<(), DesktopLyricsWindowFailure> {
-    let position = resources
-        .lyrics_window
+fn position_helper(window: &WebviewWindow, helper: HWND) -> Result<(), DesktopLyricsWindowFailure> {
+    let position = window
         .outer_position()
         .map_err(|error| window_failure("desktop_lyrics_position_failed", error))?;
-    let size = resources
-        .lyrics_window
+    let size = window
         .outer_size()
         .map_err(|error| window_failure("desktop_lyrics_size_failed", error))?;
-    let scale = resources
-        .lyrics_window
+    let scale = window
         .scale_factor()
         .map_err(|error| window_failure("desktop_lyrics_scale_failed", error))?;
-    let helper = helper_bounds(position, size, scale);
-    resources.native_helper.set_bounds(helper)
+    set_helper_bounds(helper, helper_bounds(position, size, scale))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1018,10 +1034,6 @@ impl NativeUnlockHelper {
             commands,
             worker: Mutex::new(Some(worker)),
         })
-    }
-
-    fn set_bounds(&self, bounds: HelperBounds) -> Result<(), DesktopLyricsWindowFailure> {
-        set_helper_bounds(self.hwnd, bounds)
     }
 
     fn show(&self) -> Result<(), DesktopLyricsWindowFailure> {

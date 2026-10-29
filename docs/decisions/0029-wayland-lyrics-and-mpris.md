@@ -11,7 +11,7 @@
 - 使用 `gtk-layer-shell 0.8.2` 绑定系统 `gtk-layer-shell`，在隐藏窗口尚未 realized 时初始化 `zwlr_layer_shell_v1`。请求 `overlay` 层、`KeyboardMode::None` 和 exclusive zone `-1`，由 compositor 保持在普通窗口之上，包括全屏窗口；不预留工作区，不抢键盘，不循环调整 Z-order。锁屏和系统安全界面遵循 compositor 边界。
 - `supported` 由实际协议探测决定，`layerShell` 标记手势路径；无 layer-shell 时返回明确失败，不用普通浮窗替代置顶保障。本轮支持范围为 KDE Wayland，其他 compositor 未验收。
 - GTK 对象只在事件线程保存和操作；命令主线程派发采用有限等待，内部状态锁不跨窗口创建、显示、关闭和尺寸调用。普通窗口继续不查询全局坐标。
-- 歌词在当前主窗口所在输出中使用逻辑尺寸、锚点与边距定位。拖动和左右调整宽度通过 surface-local 指针坐标更新边距/宽度，不调用 xdg-toplevel 的移动接口。保存独立的 Wayland 几何，恢复时约束到当前输出；跨输出拖动和热拔插恢复暂未实现。
+- 歌词使用输出内逻辑尺寸、锚点与边距定位，不调用 xdg-toplevel 移动接口。独立保存屏内几何及显示器厂商/型号与布局原点，优先精确匹配，其次匹配唯一同型号输出；原屏缺失则回退到已映射的主窗口/可用输出并约束。隐藏主窗口不能作为选屏依据，GTK 3 Wayland 的 primary monitor API 也不可视为 KDE 主屏权威。拖动指针进入另一输出时同步重绑定歌词和原生 helper，重算屏内坐标；协议 remap 会结束当前拖动，松手后可继续调整。运行中的热拔插恢复仍未实现。
 - 锁定时设置 GTK 空输入区域实现穿透，先显示独立原生 GTK 解锁按钮再提交锁定。该 helper 不含 WebView，也使用 overlay 层和无键盘交互；解锁先恢复歌词输入再隐藏 helper。主窗口仍保留解锁入口。不使用全局输入 hook、输入注入、位置轮询或跨进程事件转发。
 - Linux 使用 `mpris-server 0.9.0` / 现有 `zbus 5` 注册 `org.mpris.MediaPlayer2.io.github.vki.resona`，Windows 保留 souvlaki。未选择 souvlaki 0.8.3 的 Linux 后端，因为其固定 track ID、定位信号签名及消息处理节奏不满足本轮定位与状态同步要求。
 - MPRIS 工作线程消费既有 500 ms 原生投影；回调仅排队命令，由线程调用权威播放 actor。提供标题、艺术家、专辑、封面、时长、位置、可用操作、音量、循环与随机状态，以及播放/暂停/停止、前后曲、相对定位、带 track ID 校验的绝对定位、Raise 和 Quit。Play/Pause 幂等，负数或过期绝对定位忽略；不声明网络 URI 打开能力。

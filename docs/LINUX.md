@@ -2,7 +2,7 @@
 
 `0.3.0-alpha.1` 开始支持 Arch Linux 系 x86_64 的原生 Wayland 会话。本机验证环境为 CachyOS、KDE Plasma、PipeWire；其他发行版、X11 和 ARM 不在范围内；交付状态见 [STATUS](STATUS.md)。
 
-当前开发版本为 [0.3.0-beta.1](plans/0.3.0-beta.1.md)；[Linux 已有验证、自动化交接与保留项](plans/0.3.0-beta.1-linux-validation.md)、[Windows 自动结果与人工清单](plans/0.3.0-beta.1-windows-validation.md)。所有者已授权测试通过后合并发布，原生人工项尚待确认。当前公开版为 alpha.4，交付事实见 [main Actions](https://github.com/Leovikii/Resona/actions/workflows/main-merge-delivery.yml)。Linux 自动化由 Linux 平台 AI agent 和测试脚本执行，Arch CI 补足容器检查；当前 Windows 主机缺少 KDE/Wayland 不构成人工接管自动化的理由。确需视觉或物理操作的项目仍人工验收，不用鼠标模拟替代。历史压缩最小化动画未捕获不计通过，后续只人工观察；规则见 [开发规范](DEVELOPMENT.md#双平台精简执行)。
+当前开发版本为 [0.3.0-beta.2](plans/0.3.0-beta.2.md)；[Linux 已有验证、自动化交接与保留项](plans/0.3.0-beta.1-linux-validation.md)、[Windows 自动结果与人工清单](plans/0.3.0-beta.1-windows-validation.md)。所有者已授权测试通过后合并发布，原生人工项尚待确认。当前公开版为 alpha.4，交付事实见 [main Actions](https://github.com/Leovikii/Resona/actions/workflows/main-merge-delivery.yml)。Linux 自动化由 Linux 平台 AI agent 和测试脚本执行，Arch CI 补足容器检查；当前 Windows 主机缺少 KDE/Wayland 不构成人工接管自动化的理由。确需视觉或物理操作的项目仍人工验收，不用鼠标模拟替代。历史压缩最小化动画未捕获不计通过，后续只人工观察；规则见 [开发规范](DEVELOPMENT.md#双平台精简执行)。
 
 ## 安装、打开方式与更新
 
@@ -20,7 +20,7 @@ sudo pacman -R resona
 - 预览到正式版沿用同一个 `resona` 包名，严格按更高 SemVer 升级。没有旧包名兼容或自动迁移：测试环境若装有 `resona-preview-bin` / `resona-bin`，先执行 `sudo pacman -R <实际旧包名>`，再安装新包；用户数据和音频保留。旧测试包的 test-profile 不自动合并。
 - 本次按所有者授权删除旧 alpha.4 Release/tag 后同版本重发；已安装 alpha.4 的程序不会收到同版本自动升级，需手动重装。[ADR 0035](decisions/0035-unified-arch-package.md)。
 - 系统 `LocalFileSigLevel` 继续生效；`.tauri.sig` 不能替代 OpenPGP。定制系统若强制本地包 OpenPGP 签名，需要按系统政策处理，应用不会关闭该要求。
-- 预览最多保留 30 分钟，安装前重查包、内容与事务。安装期间不允许退出或新文件任务；有扫描/转换时先完成或明确取消。下载可以取消，Pacman 安装不可强杀。失败保留诊断，不删系统锁；成功复核数据库后提示重启。
+- 预览最多保留 30 分钟，安装前重查包、内容与事务。安装期间不允许退出或新文件任务；有扫描/转换时先完成或明确取消。下载可以取消，Pacman 安装不可强杀。失败保留诊断，不删系统锁；成功复核数据库后保存状态并自动重启。
 - 包声明 `polkit`，桌面需运行图形授权代理；无代理、授权取消、锁或依赖冲突均在当前弹窗报告。本轮尚未执行真实图形授权与安装升级。
 - 桌面入口、图标、MP3/WAV/FLAC 打开方式保持；不更改系统默认播放器。标准卸载钩子清理桌面缓存。
 
@@ -107,7 +107,7 @@ alpha.1 曾提供 `src-tauri/target/test-build/Resona-0.3.0-alpha.1-arch-wayland
 | Windows 任务栏控件与 Mica | Linux 不提供 |
 | 安装、文件关联与更新 | GitHub 原生包、桌面打开方式、Tauri 下载验签与 Polkit/Pacman 安装；实际交付与实机边界见 STATUS |
 
-桌面歌词必须使用支持 layer-shell 的 Wayland compositor；当前验证 KDE Plasma。置顶由 overlay 协议保证，不抢键盘焦点；系统锁屏仍由 compositor 管理。几何为当前输出内的逻辑坐标，暂不支持拖动跨输出或热拔插恢复。
+桌面歌词必须使用支持 layer-shell 的 Wayland compositor；当前验证 KDE Plasma。置顶由 overlay 协议保证，不抢键盘焦点；系统锁屏仍由 compositor 管理。几何为输出内逻辑坐标并记忆显示器；指针跨屏时同步重绑定歌词和 helper。换屏会结束本次拖动，松手后可继续调整；暂不支持运行中的热拔插恢复。
 
 本机原生验证使用经 Arch 签名验证的 gtk-layer-shell 0.10.1，未修改系统；上述测试包自带私有库。直接运行裸 Release 时需安装系统包 `sudo pacman -S --needed gtk-layer-shell`。
 

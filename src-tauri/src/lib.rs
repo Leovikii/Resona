@@ -488,6 +488,20 @@ pub(crate) fn perform_application_exit(app: &tauri::AppHandle) {
     if !lifetime.begin_exit() {
         return;
     }
+    save_before_exit(app);
+    app.exit(0);
+}
+
+pub(crate) fn restart_after_update(app: &tauri::AppHandle) {
+    if !app.state::<Arc<ApplicationLifetimeService>>().begin_exit() {
+        return;
+    }
+    save_before_exit(app);
+    // Tauri emits Exit before relaunching, releasing the single-instance D-Bus name.
+    app.request_restart();
+}
+
+fn save_before_exit(app: &tauri::AppHandle) {
     log::info!("application exit started");
     app.state::<Arc<main_window::MainWindowService>>()
         .capture(app);
@@ -496,7 +510,6 @@ pub(crate) fn perform_application_exit(app: &tauri::AppHandle) {
         .persist_geometry(app);
     app.state::<Arc<CompressionService>>().shutdown();
     persist_playback_session(app);
-    app.exit(0);
 }
 
 fn restore_playback_preferences(engine: &Arc<RodioPlaybackEngine>, database: &PersistenceService) {
@@ -636,6 +649,79 @@ fn dispatch_external_media(app: tauri::AppHandle, arguments: Vec<String>, cwd: s
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires a live Wayland session; spawns and restarts an isolated Tauri process"]
+    fn native_update_restart_releases_single_instance() {
+        const VARIABLE: &str = "RESONA_TEST_RESTART_DIRECTORY";
+        if let Some(directory) = std::env::var_os(VARIABLE) {
+            let directory = std::path::PathBuf::from(directory);
+            let marker = directory.join("restart");
+            let second = marker.exists();
+            let duplicate_marker = marker.clone();
+            let id = std::env::var("RESONA_TEST_RESTART_ID").unwrap();
+            tauri::Builder::default()
+                .any_thread()
+                .plugin(
+                    tauri_plugin_single_instance::Builder::new()
+                        .dbus_id(id)
+                        .callback(move |_, _, _| {
+                            std::fs::write(&duplicate_marker, "duplicate").unwrap();
+                        })
+                        .build(),
+                )
+                .setup(move |app| {
+                    std::fs::write(&marker, if second { "restarted" } else { "starting" }).unwrap();
+                    let handle = app.handle().clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        if second {
+                            handle.exit(0);
+                        } else {
+                            handle.request_restart();
+                        }
+                    });
+                    Ok(())
+                })
+                .build(tauri::generate_context!())
+                .unwrap()
+                .run(|_, _| {});
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "tests::native_update_restart_releases_single_instance",
+                "--exact",
+                "--ignored",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(VARIABLE, directory.path())
+            .env(
+                "RESONA_TEST_RESTART_ID",
+                format!("io.github.vki.resona.RestartTest{}", std::process::id()),
+            )
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let started = std::time::Instant::now();
+        loop {
+            if std::fs::read_to_string(directory.path().join("restart"))
+                .ok()
+                .as_deref()
+                == Some("restarted")
+            {
+                break;
+            }
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(20),
+                "relaunch failed or was captured by the old single instance"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+
     use super::migrate_legacy_data_directory;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
