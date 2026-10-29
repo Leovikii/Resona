@@ -78,6 +78,9 @@ export const CompactTopNavigation = memo(function CompactTopNavigation({
         <ScrollArea
           className="compact-playlist-scroll"
           data-drag-scroll-axis="horizontal"
+          data-playlist-drop-axis="horizontal"
+          data-drop-kind="playlist-gap"
+          data-position={playlists.length}
           onWheel={handlePlaylistWheel}
           offsetScrollbars="x"
           scrollbars="x"
@@ -200,7 +203,10 @@ export const CompactTopNavigation = memo(function CompactTopNavigation({
           </Tabs>
         </ScrollArea>
         <Tooltip label={t("library.create")}>
-          <ActionIcon aria-label={t("library.create")} onClick={onCreatePlaylist} size={36} variant="subtle">
+          <ActionIcon aria-label={t("library.create")} className="compact-create-drop"
+            data-drop-kind="playlist-gap" data-position={playlists.length}
+            data-drop-active={externalDragActive && dropPlaylistPosition === playlists.length || undefined}
+            disabled={moveDisabled} onClick={onCreatePlaylist} size={44} variant="subtle">
             <Plus size={16} />
           </ActionIcon>
         </Tooltip>

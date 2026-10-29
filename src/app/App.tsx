@@ -93,6 +93,7 @@ import type { PlaybackFailure, PlaybackSnapshot } from "../shared/model/playback
 import type { LyricsSnapshot } from "../shared/model/lyrics";
 import type { TrackDetails } from "../shared/model/metadata";
 import { fileNameFromPath, formatBytes, formatDuration } from "../shared/utils/format";
+import { playlistDropPosition } from "../shared/ui/playlistDropPosition";
 import { listInsertionPositionAtY, usePointerReorder } from "../shared/ui/usePointerReorder";
 import { scrollViewportAtPointer, type ScrollAxis } from "../shared/ui/edgeAutoScroll";
 import {
@@ -600,6 +601,14 @@ export default function App() {
       ) : sidebar}
 
       <section className="main-region" data-importing={fileImport.showStatus || undefined} data-player-expanded={playerExpanded || undefined}>
+        {externalDragActive && !fileImport.busy && <div className="file-drop-status" role="status" aria-live="polite">
+          {dropTarget?.kind === "playlist-gap" ? t("library.dropCreate")
+            : dropTarget ? t("library.dropAppend", { name:
+              dropTarget.kind === "default" || dropTarget.kind === "default-track-gap"
+                ? t("library.default")
+                : library.playlists.find((playlist) => playlist.id === dropTarget.playlistId)?.name ?? "",
+            }) : t("library.dropChoose")}
+        </div>}
         {fileImport.showStatus && <div className="file-import-status" role="status" aria-live="polite">
           <Loader size="xs" /><Text size="sm">{t("library.importing")}</Text>
         </div>}
@@ -955,11 +964,6 @@ function Sidebar({
       <nav className="sidebar-primary" aria-label={t("app.name")}>
         <div className="playlist-nav-heading">
           <Text c="dimmed" fw={650} size="xs">{t("nav.playlists")}</Text>
-          <Tooltip label={t("library.create")}>
-            <ActionIcon aria-label={t("library.create")} onClick={onCreate} size="sm" variant="subtle">
-              <Plus size={15} />
-            </ActionIcon>
-          </Tooltip>
         </div>
         <PlaylistNavItem
           active={selection.kind === "default"}
@@ -989,7 +993,12 @@ function Sidebar({
         />
         <ScrollArea
           className="playlist-nav-scroll"
+          styles={{ content: { minHeight: "100%", display: "flex", flexDirection: "column" } }}
           data-drag-scroll-axis="vertical"
+          data-playlist-drop-axis="vertical"
+          data-drop-kind="playlist-gap"
+          data-position={playlists.length}
+          data-drop-active={externalDragActive && dropTarget?.kind === "playlist-gap" && dropTarget.position === playlists.length || undefined}
           scrollHideDelay={700}
           type="scroll"
           viewportRef={playlistViewportRef}
@@ -1067,7 +1076,21 @@ function Sidebar({
               </div>
             ))}
           </div>
+          <div className="playlist-drop-blank" aria-hidden="true">
+            <span>{externalDragActive && dropTarget?.kind === "playlist-gap" && dropTarget.position === playlists.length
+              ? t("library.dropCreate") : null}</span>
+          </div>
         </ScrollArea>
+        <Button
+          className="playlist-create-drop"
+          data-drop-kind="playlist-gap"
+          data-position={playlists.length}
+          data-drop-active={externalDragActive && dropTarget?.kind === "playlist-gap" && dropTarget.position === playlists.length || undefined}
+          disabled={moveDisabled}
+          leftSection={<Plus size={16} />}
+          onClick={onCreate}
+          variant="subtle"
+        >{t("library.create")}</Button>
       </nav>
       <nav className="sidebar-nav-bottom">
         <NavButton
@@ -1125,7 +1148,10 @@ function PlaylistNavItem({ active, contextMenuItems, dragging, dropActive, label
 }) {
   const { t } = useTranslation();
   return (
-    <div className="playlist-nav-item-wrap">
+    <div className="playlist-nav-item-wrap"
+      data-drop-kind={playlistId === undefined ? "default" : "playlist"}
+      data-playlist-id={playlistId}
+    >
       <AppContextMenu items={contextMenuItems}>
         <UnstyledButton
         aria-current={active ? "page" : undefined}
@@ -2582,6 +2608,21 @@ function localizeFailure(
 
 function dropTargetAtPosition(clientX: number, clientY: number): DropTarget | null {
   const hit = document.elementFromPoint(clientX, clientY);
+  const navigation = hit?.closest<HTMLElement>("[data-playlist-drop-axis]");
+  if (navigation) {
+    const horizontal = navigation.dataset.playlistDropAxis === "horizontal";
+    const bounds = navigation.getBoundingClientRect();
+    const gaps = Array.from(navigation.querySelectorAll<HTMLElement>('[data-drop-kind="playlist-gap"]'))
+      .map((gap) => {
+        const rect = gap.getBoundingClientRect();
+        return { center: horizontal ? (rect.left + rect.right) / 2 : (rect.top + rect.bottom) / 2,
+          position: Number(gap.dataset.position) };
+      })
+      .filter((gap) => gap.center >= (horizontal ? bounds.left : bounds.top)
+        && gap.center <= (horizontal ? bounds.right : bounds.bottom));
+    const position = playlistDropPosition(horizontal ? clientX : clientY, gaps);
+    if (position !== null) return { kind: "playlist-gap", position };
+  }
   const element = hit?.closest<HTMLElement>("[data-drop-kind]");
   const trackList = hit?.closest<HTMLElement>(".track-scroll[data-drop-kind]");
   if (trackList) {
