@@ -63,6 +63,12 @@ use platform::playback_projection::NativePlaybackProjection;
 use playback::{PlaybackEngine, PlaybackMode, RestoredPlaybackSession, RodioPlaybackEngine};
 
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    if std::env::args_os().nth(1).as_deref()
+        == Some(std::ffi::OsStr::new("--resona-list-directory"))
+    {
+        std::process::exit(platform::file_access::run_directory_worker());
+    }
     platform::initialize_process();
     let playback_engine = Arc::new(RodioPlaybackEngine::new());
     let media_import_service = Arc::new(MediaImportService::new(Arc::clone(&playback_engine)));

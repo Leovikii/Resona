@@ -3561,6 +3561,7 @@ version = "0.3.0-beta.1"
 dependencies = [
  "ashpd",
  "base64 0.22.1",
+ "cc",
  "encoding_rs",
  "fastrand",
  "futures-util",
@@ -3574,6 +3575,7 @@ dependencies = [
  "lrc",
  "minisign-verify",
  "mpris-server",
+ "pkg-config",
  "raw-window-handle",
  "rcue",
  "rodio",

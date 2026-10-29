@@ -29,13 +29,13 @@ sudo pacman -R resona
 构建依赖（使用系统工具链时）：
 
 ```bash
-sudo pacman -S --needed base-devel rust nodejs npm webkit2gtk-4.1 libayatana-appindicator alsa-lib openssl gtk-layer-shell polkit desktop-file-utils
+sudo pacman -S --needed base-devel rust nodejs npm webkit2gtk-4.1 libayatana-appindicator alsa-lib openssl gtk-layer-shell polkit desktop-file-utils qt6-base kio
 ```
 
 播放复用 Rodio / CPAL 的 ALSA 后端；PipeWire 桌面需安装 `pipewire-alsa`。压缩使用系统 `ffmpeg` 包。文件选择需有当前桌面适用的 portal 后端，例如 KDE 的 `xdg-desktop-portal-kde`。
 
 ```bash
-sudo pacman -S --needed pipewire-alsa ffmpeg xdg-desktop-portal xdg-desktop-portal-kde kio-fuse
+sudo pacman -S --needed pipewire-alsa ffmpeg xdg-desktop-portal xdg-desktop-portal-kde kio-fuse kio-extras
 npm ci
 npm run dev:linux
 ```
@@ -57,11 +57,15 @@ GDK_BACKEND=wayland ./src-tauri/target/release/resona /path/to/track.flac
 
 Linux 通过标准 XDG FileChooser 调用当前桌面 backend，KDE 下共享网络位置；它是 KDE 原生选择对话框，并非 Dolphin 主窗口。应用直接使用已锁定的 ashpd API，以保留远端 URI、错误和 Wayland 父窗口；Windows 继续使用系统原生后端。缺失 portal 服务会明确报错，不自动切换到不共享网络位置的 GTK/zenity 界面。
 
-KIO-FUSE 的 NFS 父目录枚举在本机可能破坏原可读文件映射。beta.1 先通过官方 D-Bus 刷新父目录/文件映射，并跳过该挂载的目录发现：请直接单选/多选音频或 WAV，暂不递归导入 KIO-FUSE 文件夹，也不自动发现同目录 CUE/外置封面。内嵌封面及本地、内核挂载目录沿用既有行为。临时物理路径可能在会话结束或断线后失效，需重新选择；不自动挂载或修改系统配置。
+本机 NFS 的 KIO 列举会把“.”报告成普通文件，KIO-FUSE 用它更新目录节点后会破坏原可读文件映射。beta.1 保留官方 D-Bus 文件映射，网络目录改用 KIO ListJob 列举并排除“.”和“..”；递归文件夹、同目录音频、自动 CUE、伴随歌词与外置封面共用此边界。普通本地/内核挂载目录继续使用标准库，不自动挂载或修改桌面配置。
+
+KIO 工作模式编译在同一程序中，按请求启动自身的独立进程，在 QtCore 事件循环中列目录，跳过 GTK、单实例与窗口初始化；原生任务 15 秒、父进程 20 秒兜底，目录条目最多 100000、响应最多 16 MiB。依赖系统 Qt6Core、KF6KIOCore/KF6CoreAddons；Arch 包声明 `qt6-base`、`kio>=6.23`、`kio-extras` 与 `kio-fuse`，没有单独的 sidecar 或运行时下载。
+
+这些期限约束目录工作进程，不保证任意 FUSE stat/read 可立即中断。临时物理路径仍可能在桌面会话结束后失效，用户列表需重新选择；本次不增加永久网络源数据库模型。
 
 ### alpha.4 本机测试程序
 
-本轮程序与同名压缩包保存在忽略目录 `src-tauri/target/test-build/Resona-0.3.0-alpha.4-titlebar-v2-arch-wayland-x86_64/`；执行其中 `start-resona.sh` 即可。数据隔离、依赖和人工清单见 [本机记录](plans/0.3.0-alpha.4-linux-validation.md#可直接运行的本机程序)。alpha.4 使用本机已安装的 gtk-layer-shell，不附带私有库；历史 alpha.1 包规则保留如下。
+本轮 beta.1 程序与同名压缩包保存在忽略目录 `src-tauri/target/test-build/Resona-0.3.0-beta.1-arch-wayland-x86_64/`；执行其中 `start-resona.sh` 即可。更新保留原 test-profile，压缩包不含测试数据。依赖、验证与人工清单见 [本机记录](plans/0.3.0-beta.1-linux-validation.md)。使用本机已安装的 gtk-layer-shell 和 Qt/KIO，不附带私有库；历史 alpha.1 包规则保留如下。
 
 ### alpha.1 历史本机测试包
 

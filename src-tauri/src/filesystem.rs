@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -28,7 +28,6 @@ pub enum RejectedPathReason {
     InvalidLocation,
     UnsupportedLocation,
     NetworkLocationUnavailable,
-    NetworkFolderUnavailable,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -65,13 +64,6 @@ pub fn audio_file_context(path: &Path) -> Result<AudioFileContext, PlaybackFailu
     let parent = path.parent().ok_or_else(|| {
         PlaybackFailure::task_failed(format!("Audio file has no parent: {}", path.display()))
     })?;
-    if !crate::platform::file_access::supports_directory_discovery(path) {
-        return Ok(AudioFileContext {
-            sources: vec![MediaSource::file(path.to_owned())],
-            selected_index: 0,
-            warning: Some(DirectoryWarning::DirectoryUnreadable),
-        });
-    }
     context_from_directory(path, audio_files_in_directory(parent))
 }
 
@@ -79,6 +71,12 @@ fn context_from_directory(
     path: &Path,
     scanned: Result<Vec<PathBuf>, PlaybackFailure>,
 ) -> Result<AudioFileContext, PlaybackFailure> {
+    let mut cues = Vec::new();
+    let scanned = scanned.map(|paths| {
+        let (audio, other) = paths.into_iter().partition(|path| is_supported_audio(path));
+        cues = other;
+        audio
+    });
     let (mut paths, warning) = match scanned {
         Ok(paths) if paths.is_empty() => (paths, Some(DirectoryWarning::EmptyDirectory)),
         Ok(paths) if !paths.iter().any(|candidate| candidate == path) => {
@@ -96,7 +94,7 @@ fn context_from_directory(
     }
     let sources = paths
         .iter()
-        .flat_map(|path| expand_same_name_cue(path))
+        .flat_map(|path| expand_same_name_cue(path, &cues))
         .collect::<Vec<_>>();
     let selected_index = sources
         .iter()
@@ -118,6 +116,7 @@ pub fn resolve_audio_paths(paths: Vec<PathBuf>) -> ResolvedAudioPaths {
     let mut resolved = Vec::new();
     let mut rejected = Vec::new();
     let mut seen = HashSet::new();
+    let mut cues: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
 
     for path in paths {
         let path = match crate::platform::file_access::resolve_path(path.clone()) {
@@ -145,7 +144,18 @@ pub fn resolve_audio_paths(paths: Vec<PathBuf>) -> ResolvedAudioPaths {
             Ok(metadata) if metadata.is_file() => {
                 if is_supported_audio(&path) {
                     let path = normalize_audio_path(path);
-                    for source in expand_same_name_cue(&path) {
+                    let parent = path.parent().unwrap_or(Path::new(""));
+                    let siblings = cues.entry(parent.to_owned()).or_insert_with(|| {
+                        crate::platform::file_access::read_directory(parent)
+                            .map(|entries| {
+                                entries
+                                    .filter_map(Result::ok)
+                                    .filter(|path| is_cue(path))
+                                    .collect()
+                            })
+                            .unwrap_or_default()
+                    });
+                    for source in expand_same_name_cue(&path, siblings) {
                         push_unique(
                             ResolvedAudioItem {
                                 source,
@@ -163,12 +173,17 @@ pub fn resolve_audio_paths(paths: Vec<PathBuf>) -> ResolvedAudioPaths {
             Ok(metadata) if metadata.is_dir() => {
                 let root = normalize_audio_path(path.clone());
                 let rejected_before = rejected.len();
-                let audio = audio_files_in_tree(&root, &mut rejected);
+                let audio = audio_files_in_tree(&root, &mut rejected, &mut cues);
                 if audio.is_empty() && rejected.len() == rejected_before {
                     rejected.push(rejected_path(path, RejectedPathReason::EmptyFolder));
                 } else {
                     for path in audio {
-                        for source in expand_same_name_cue(&path) {
+                        let siblings = path
+                            .parent()
+                            .and_then(|parent| cues.get(parent))
+                            .map(Vec::as_slice)
+                            .unwrap_or_default();
+                        for source in expand_same_name_cue(&path, siblings) {
                             push_unique(
                                 ResolvedAudioItem {
                                     source,
@@ -212,7 +227,11 @@ fn push_unique(
     }
 }
 
-fn audio_files_in_tree(root: &Path, rejected: &mut Vec<RejectedPath>) -> Vec<PathBuf> {
+fn audio_files_in_tree(
+    root: &Path,
+    rejected: &mut Vec<RejectedPath>,
+    cues: &mut HashMap<PathBuf, Vec<PathBuf>>,
+) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     let mut pending = vec![root.to_path_buf()];
 
@@ -238,14 +257,7 @@ fn audio_files_in_tree(root: &Path, rejected: &mut Vec<RejectedPath>) -> Vec<Pat
             continue;
         }
 
-        if !crate::platform::file_access::supports_directory_discovery(&path) {
-            rejected.push(rejected_path(
-                path,
-                RejectedPathReason::NetworkFolderUnavailable,
-            ));
-            continue;
-        }
-        let entries = match fs::read_dir(&path) {
+        let entries = match crate::platform::file_access::read_directory(&path) {
             Ok(entries) => entries,
             Err(_) => {
                 rejected.push(rejected_path(path, RejectedPathReason::Unreadable));
@@ -255,12 +267,20 @@ fn audio_files_in_tree(root: &Path, rejected: &mut Vec<RejectedPath>) -> Vec<Pat
         let mut children = Vec::new();
         for entry in entries {
             match entry {
-                Ok(entry) => children.push(entry.path()),
+                Ok(entry) => children.push(entry),
                 Err(_) => {
                     rejected.push(rejected_path(path.clone(), RejectedPathReason::Unreadable))
                 }
             }
         }
+        cues.insert(
+            path.clone(),
+            children
+                .iter()
+                .filter(|path| is_cue(path))
+                .cloned()
+                .collect(),
+        );
         children.sort_by(|left, right| compare_paths(left, right));
         pending.extend(children.into_iter().rev());
     }
@@ -270,21 +290,26 @@ fn audio_files_in_tree(root: &Path, rejected: &mut Vec<RejectedPath>) -> Vec<Pat
 
 fn audio_files_in_directory(path: &Path) -> Result<Vec<PathBuf>, PlaybackFailure> {
     let mut paths = Vec::new();
-    for entry in fs::read_dir(path)
+    for entry in crate::platform::file_access::read_directory(path)
         .map_err(|error| PlaybackFailure::task_failed(format!("Cannot read folder: {error}")))?
     {
         let entry = entry
             .map_err(|error| PlaybackFailure::task_failed(format!("Cannot read entry: {error}")))?;
-        let file_type = entry.file_type().map_err(|error| {
+        let file_type = fs::symlink_metadata(&entry).map_err(|error| {
             PlaybackFailure::task_failed(format!("Cannot inspect entry: {error}"))
         })?;
-        let path = entry.path();
-        if file_type.is_file() && is_supported_audio(&path) {
+        let path = entry;
+        if file_type.is_file() && (is_supported_audio(&path) || is_cue(&path)) {
             paths.push(path);
         }
     }
     paths.sort_by(|left, right| compare_paths(left, right));
     Ok(paths)
+}
+
+fn is_cue(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("cue"))
 }
 
 fn rejected_path(path: PathBuf, reason: RejectedPathReason) -> RejectedPath {
@@ -423,6 +448,40 @@ mod tests {
         assert_eq!(context.sources[context.selected_index].path, selected);
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn context_and_recursive_import_keep_same_name_cue_tracks() {
+        let root = tempfile::tempdir().unwrap();
+        let album = root.path().join("nested");
+        fs::create_dir(&album).unwrap();
+        let audio = album.join("album.flac");
+        fs::write(&audio, []).unwrap();
+        fs::write(
+            album.join("ALBUM.CUE"),
+            "FILE \"album.flac\" WAVE\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n  TRACK 02 AUDIO\n    INDEX 01 00:10:00\n",
+        )
+        .unwrap();
+        let context = audio_file_context(&audio).unwrap();
+        assert_eq!(context.warning, None);
+        assert_eq!(context.selected_index, 0);
+        assert_eq!(context.sources.len(), 2);
+        assert_eq!(context.sources[1].cue.as_ref().unwrap().start_ms, 10000);
+        for input in [audio.clone(), root.path().to_owned()] {
+            let resolved = resolve_audio_paths(vec![input.clone()]);
+            assert!(resolved.rejected.is_empty());
+            assert_eq!(
+                resolved
+                    .items
+                    .iter()
+                    .map(|item| &item.source)
+                    .collect::<Vec<_>>(),
+                context.sources.iter().collect::<Vec<_>>()
+            );
+            assert!(resolved.items.iter().all(|item| {
+                item.folder_root.as_deref() == (input != audio).then_some(root.path())
+            }));
+        }
     }
 
     #[test]

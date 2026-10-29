@@ -1080,15 +1080,7 @@ fn discover_scan_candidates(
     if !metadata.is_dir() {
         return Ok(());
     }
-    if !crate::platform::file_access::supports_directory_discovery(path) {
-        warnings.push(scan_warning(
-            path,
-            "network_folder_unavailable",
-            "Network folder import is unavailable; select WAV files instead",
-        ));
-        return Ok(());
-    }
-    let entries = match fs::read_dir(path) {
+    let entries = match crate::platform::file_access::read_directory(path) {
         Ok(entries) => entries,
         Err(error) => {
             warnings.push(scan_warning(path, "directory_unreadable", error));
@@ -1103,11 +1095,11 @@ fn discover_scan_candidates(
         }
     }
     let mut entries = collected;
-    entries.sort_by_key(|entry| path_sort_key(&entry.path()));
+    entries.sort_by_key(|entry| path_sort_key(entry));
     for entry in entries {
         discover_scan_candidates(
             root,
-            &entry.path(),
+            &entry,
             exclusions,
             cancel,
             candidates,

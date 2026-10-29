@@ -198,7 +198,6 @@ export const resources = {
         start: "转换 {{count}} 个文件",
         warnings: "{{count}} 个扫描警告",
         scanWarnings: {
-          network_folder_unavailable: "暂不支持导入网络文件夹，请选择其中的 WAV 文件",
         },
         showMore: "再显示 {{count}} 项",
         overallProgress: "总体处理进度",
@@ -331,7 +330,6 @@ export const resources = {
           invalid_location: "文件位置无效",
           unsupported_location: "不支持的文件位置",
           network_location_unavailable: "网络位置不可用，请检查连接和 KIO-FUSE",
-          network_folder_unavailable: "暂不支持导入网络文件夹，请选择其中的音频文件",
           linked_path: "未跟随链接目录",
           empty_folder: "文件夹无音频",
           duplicate: "重复文件",
@@ -560,7 +558,6 @@ export const resources = {
         start: "Convert {{count}} files",
         warnings: "{{count}} scan warnings",
         scanWarnings: {
-          network_folder_unavailable: "Network folder import is unavailable; select WAV files instead",
         },
         showMore: "Show {{count}} more",
         overallProgress: "Overall processing progress",
@@ -693,7 +690,6 @@ export const resources = {
           invalid_location: "invalid file location",
           unsupported_location: "unsupported file location",
           network_location_unavailable: "network location unavailable; check the connection and KIO-FUSE",
-          network_folder_unavailable: "Network folder import is unavailable; select audio files instead",
           linked_path: "linked folder was not followed",
           empty_folder: "folder has no audio",
           duplicate: "duplicate",

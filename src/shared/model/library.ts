@@ -72,7 +72,7 @@ export interface PlaylistItem {
 export interface RejectedPath {
   path: string;
   reason: "missing" | "unsupported" | "unreadable" | "linked_path" | "empty_folder" | "duplicate"
-    | "invalid_location" | "unsupported_location" | "network_location_unavailable" | "network_folder_unavailable";
+    | "invalid_location" | "unsupported_location" | "network_location_unavailable";
 }
 
 export interface PlaylistMutationResult extends PlaylistDetails {

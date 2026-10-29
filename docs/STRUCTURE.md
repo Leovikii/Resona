@@ -48,7 +48,8 @@ Resona/
 │  │     ├─ tray.rs
 │  │     ├─ window_controls.rs     # 自绘标题栏的 Win32 Snap / GTK 窗口菜单
 │  │     ├─ window_geometry.rs     # 内容区逻辑尺寸 / Wayland 几何适配
-│  │     ├─ file_access.rs         # URI 解析与 Linux KIO-FUSE 映射/目录能力
+│  │     ├─ file_access.rs         # URI 解析、KIO-FUSE 映射与标准/网络目录列举
+│  │     ├─ kio_directory.cpp       # 同一可执行文件内的 QtCore/KIO 目录工作模式
 │  │     ├─ file_dialog.rs         # Linux XDG portal / Windows 原生选择
 │  │     ├─ file_drop.rs           # 原生拖放 URI 保真与跨平台逻辑坐标事件
 │  │     ├─ system_languages.rs    # GLib / Win32 用户界面语言列表

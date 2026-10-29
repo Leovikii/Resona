@@ -199,16 +199,13 @@ mod tests {
                             for path in paths {
                                 use std::io::Read;
                                 let path = std::path::Path::new(&path);
-                                assert!(!super::super::file_access::supports_directory_discovery(
-                                    path
-                                ));
                                 let mut header = [0; 4];
                                 std::fs::File::open(path)
                                     .unwrap()
                                     .read_exact(&mut header)
                                     .unwrap();
                                 let context = crate::filesystem::audio_file_context(path).unwrap();
-                                assert_eq!(context.sources.len(), 1);
+                                assert!(!context.sources.is_empty());
                             }
                             assert!(select_native(&window, MediaSelection::Audio, false)
                                 .expect("cancel the second native chooser")

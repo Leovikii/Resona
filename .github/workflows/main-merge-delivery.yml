@@ -103,7 +103,7 @@ jobs:
       contents: read
     steps:
       - name: Install Arch build and package dependencies
-        run: pacman -Syu --noconfirm --needed git rust nodejs npm webkit2gtk-4.1 libayatana-appindicator alsa-lib openssl gtk-layer-shell namcap desktop-file-utils polkit
+        run: pacman -Syu --noconfirm --needed git rust nodejs npm webkit2gtk-4.1 libayatana-appindicator alsa-lib openssl gtk-layer-shell namcap desktop-file-utils polkit qt6-base kio
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
