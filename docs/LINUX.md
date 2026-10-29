@@ -122,7 +122,8 @@ cargo fmt --manifest-path src-tauri/Cargo.toml --check
 cargo test --manifest-path src-tauri/Cargo.toml --locked
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
 # 本机有真实输出设备和系统 FFmpeg 时，串行运行通常忽略的用例
-cargo test --manifest-path src-tauri/Cargo.toml --locked -- --ignored --skip native_ --skip packaged_update_metadata --skip selected_nfs_audio --test-threads=1
+cargo test --manifest-path src-tauri/Cargo.toml --locked -- --ignored --skip native_ --skip packaged_update_metadata --skip nfs_ --skip unreachable_network_ --test-threads=1
+# NFS/失联专项需桌面会话与专用环境，见 beta.1 Linux 验证文档；不纳入上述通用命令
 # packaged_update_metadata 需先构建真实 Arch 包，并设置 RESONA_TEST_PACKAGE 指向包文件
 # KDE Wayland 协议与生命周期测试，单独运行，使用隔离目录
 resona_native_root=$(mktemp -d)
