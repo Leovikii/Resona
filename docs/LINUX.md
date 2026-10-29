@@ -2,7 +2,7 @@
 
 `0.3.0-alpha.1` 开始支持 Arch Linux 系 x86_64 的原生 Wayland 会话。本机验证环境为 CachyOS、KDE Plasma、PipeWire；其他发行版、X11 和 ARM 不在范围内；交付状态见 [STATUS](STATUS.md)。
 
-当前开发版本为 [0.3.0-beta.1](plans/0.3.0-beta.1.md)，仅推送 dev，Windows 验收前不合并发布；[beta.1 本机验证与限制](plans/0.3.0-beta.1-linux-validation.md)。当前公开安装版仍为 [0.3.0-alpha.4](plans/0.3.0-alpha.4.md)，所有者已确认本机测试通过并授权发布；双平台交付状态以 [main Actions](https://github.com/Leovikii/Resona/actions/workflows/main-merge-delivery.yml) 和下方 Release 资产为准。安装与更新规则见 [ADR 0032](decisions/0032-arch-in-app-update.md)。alpha.4 改用无边框标题栏与 KDE 模糊外壳，本机自动回归已完成，压缩窗口 squash 动画严格门禁仍失败，最终功能与标题栏视觉已由所有者确认，鼠标/菜单专项未逐项记录，性能未测；完整步骤、CI 历史与本机结果见 [alpha.4 Linux 实机交接](plans/0.3.0-alpha.4-linux-validation.md)。
+当前开发版本为 [0.3.0-beta.1](plans/0.3.0-beta.1.md)；[Linux 已有验证与保留项](plans/0.3.0-beta.1-linux-validation.md)、[Windows 自动结果与人工清单](plans/0.3.0-beta.1-windows-validation.md)。所有者已授权测试通过后合并发布，原生人工项尚待确认。当前公开版为 alpha.4，交付事实见 [main Actions](https://github.com/Leovikii/Resona/actions/workflows/main-merge-delivery.yml)。当前 Windows 主机缺少 KDE/Wayland；CI 无法覆盖的 Linux 桌面、动画/材质与硬件项目交由人工，不用鼠标模拟替代。历史压缩最小化动画未捕获不计通过，后续只人工观察；规则见 [开发规范](DEVELOPMENT.md#双平台精简执行)。
 
 ## 安装、打开方式与更新
 
@@ -121,16 +121,17 @@ npm run build
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
 cargo test --manifest-path src-tauri/Cargo.toml --locked
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
-# 本机有真实输出设备和系统 FFmpeg 时，串行运行通常忽略的用例
-cargo test --manifest-path src-tauri/Cargo.toml --locked -- --ignored --skip native_ --skip packaged_update_metadata --skip nfs_ --skip unreachable_network_ --test-threads=1
-# NFS/失联专项需桌面会话与专用环境，见 beta.1 Linux 验证文档；不纳入上述通用命令
+# 有系统 FFmpeg 时运行真实转换；有输出设备时按需选定音频用例，不运行全部 --ignored
+cargo test --manifest-path src-tauri/Cargo.toml --locked ffmpeg -- --ignored --test-threads=1
+cargo test --manifest-path src-tauri/Cargo.toml focused_controls_preserve_paused_cue_position_on_real_output -- --ignored --test-threads=1
+# NFS/失联专项需专用环境，见 beta.1 Linux 验证文档
 # packaged_update_metadata 需先构建真实 Arch 包，并设置 RESONA_TEST_PACKAGE 指向包文件
 # KDE Wayland 协议与生命周期测试，单独运行，使用隔离目录
 resona_native_root=$(mktemp -d)
 XDG_DATA_HOME=$resona_native_root/data XDG_CACHE_HOME=$resona_native_root/cache GDK_BACKEND=wayland WAYLAND_DEBUG=client \
 cargo test --manifest-path src-tauri/Cargo.toml --locked --features tauri/custom-protocol \
   native_layer_surface_lifecycle -- --ignored --nocapture --test-threads=1
-# 原生标题栏命中区、按钮动作和并发几何更新，单独运行
+# 原生窗口 API 和并发几何更新，单独运行；不证明真实鼠标命中或动画
 resona_controls_root=$(mktemp -d)
 XDG_DATA_HOME=$resona_controls_root/data XDG_CACHE_HOME=$resona_controls_root/cache \
 GDK_BACKEND=wayland WAYLAND_DEBUG=client \
@@ -138,7 +139,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked --features tauri/custom
   native_window_controls_and_geometry -- --ignored --nocapture --test-threads=1
 ```
 
-alpha.4 窗口测试在主窗口/压缩窗口刚显示时确认无 GTK 装饰、客户端在一秒内映射，再通过 Tauri 原生窗口 API 检查最大化、最小化和 CloseRequested；并发 resize、实际 GTK 内容区尺寸、宽窄切换、自定义尺寸记忆、重新加载和压缩窗口重建继续覆盖。测试要求 `qdbus6` 及已启用的 maximize/squash 特效，通过 KWin activeEffects 观察动画；最小化还需检查 Wayland `xdg_toplevel.set_minimized()`，不依赖协议未提供的最小化状态确认。该用例不能证明 WebView 自绘按钮真实命中、KWin 模糊、窗口菜单或 portal 主题已通过；这些在本版交接中单独验收。
+以上会话测试仅在已有 KDE/Wayland 环境运行；没有环境时交由人工验收，不模拟鼠标或新建交互驱动。窗口用例保留 GTK 内容就绪、Tauri 原生动作/事件、尺寸记忆、两次重建与并发几何断言；移除 qdbus 动画轮询，不要求启用 maximize/squash 特效。最小化无 Wayland 状态确认，协议请求与实际动画分开记录；标题按钮真实命中、动画、模糊、菜单和选择器操作由人工检查。
 
 原生 Release 集成回归（先关闭所有 Resona 实例，脚本拒绝复用正在运行的应用）：
 

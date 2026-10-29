@@ -11,6 +11,7 @@
 4. `main-merge-delivery.yml` 在 `push main` 时只执行 CD：检查版本/tag，构建该 main SHA 的 Windows NSIS 与 Arch 包，验证包安装和产物身份，统一验签、草稿上传并公开。发布依赖已受保护的 PR CI，不在 main 重复整套 CI；签名仅在 release Environment。双平台构建、身份、验签或包校验失败阻止发布。主分支交付串行排队，不取消正在发布的版本。
 5. `setup-node` 按 `package-lock.json` 缓存 npm 下载，仍执行 `npm ci`，不缓存 `node_modules`。Rust 使用固定 SHA 的 `Swatinem/rust-cache` 缓存 Cargo 下载和依赖编译产物；不缓存项目自身产物、签名密钥、发布目录或用户数据。
 6. Rust 缓存按 job、工具链、Cargo 清单/锁文件和编译环境隔离；Windows 加入 runner 镜像版本，Arch 加入安装后完整 Pacman 包版本摘要。缓存缺失时正常完整构建；命中不跳过测试、Clippy、验签或包安装回归。
+7. 所有者于 2026-10-29 明确要求精简测试：自动验证使用可重复的测试/脚本和原生接口，不使用鼠标模拟等低效交互测试。当前主机和 CI 都无法覆盖的 Linux 桌面、视觉或硬件项目交由人工验收；保留真实未测/失败记录，不能以自动测试通过代替人工结论。具体执行见 [开发规范](../DEVELOPMENT.md#双平台精简执行)。
 
 ## 运维与迁移
 

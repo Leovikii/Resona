@@ -492,39 +492,9 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    #[ignore = "requires KDE Wayland, qdbus6 and maximize/squash effects; run alone with fresh XDG data"]
+    #[ignore = "requires KDE Wayland; run alone with fresh XDG data; visual effects are checked manually"]
     fn native_window_controls_and_geometry() {
         crate::platform::initialize_process();
-        fn wait_for_effect(effect: &str) -> bool {
-            let deadline = std::time::Instant::now() + Duration::from_secs(1);
-            loop {
-                let output = std::process::Command::new("qdbus6")
-                    .args([
-                        "org.kde.KWin",
-                        "/Effects",
-                        "org.kde.kwin.Effects.activeEffects",
-                    ])
-                    .output()
-                    .expect("KDE qdbus6");
-                assert!(
-                    output.status.success(),
-                    "{}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
-                if String::from_utf8_lossy(&output.stdout)
-                    .lines()
-                    .any(|name| name == effect)
-                {
-                    println!("KWin {effect} animation active");
-                    return true;
-                }
-                if std::time::Instant::now() >= deadline {
-                    eprintln!("KWin {effect} animation was not observed");
-                    return false;
-                }
-                std::thread::sleep(Duration::from_millis(10));
-            }
-        }
         use gtk::prelude::*;
         use std::sync::{
             atomic::{AtomicUsize, Ordering},
@@ -680,7 +650,7 @@ mod tests {
                         main.set_size(LogicalSize::new(440, 640)).unwrap();
                         wait_for_size(&app, &main, (440, 640));
                         service.capture(&app);
-                        for _ in 0..3 {
+                        for _ in 0..2 {
                             service.set_layout_mode(&app, MainWindowLayoutMode::Wide).unwrap();
                             wait_for_size(&app, &main, (900, 640));
                             service.set_layout_mode(&app, MainWindowLayoutMode::Compact).unwrap();
@@ -699,7 +669,7 @@ mod tests {
                         let compression = app.get_webview_window(crate::compression_window::LABEL).unwrap();
                         compression.set_size(LogicalSize::new(800, 560)).unwrap();
                         wait_for_size(&app, &compression, (800, 560));
-                        for _ in 0..3 {
+                        for _ in 0..2 {
                             crate::compression_window::persist_geometry(&app);
                             app.get_webview_window(crate::compression_window::LABEL).unwrap().destroy().unwrap();
                             let deadline = Instant::now() + Duration::from_secs(2);
@@ -743,7 +713,6 @@ mod tests {
                         wait_for_size(&app, &main, (760, 520));
                         println!("custom sizes, reload and compression recreation preserved client dimensions");
                         // Wayland cannot acknowledge deiconify: test geometry before minimizing.
-                        let mut missing_animations = Vec::new();
                         for label in ["main", crate::compression_window::LABEL] {
                             let window = app.get_webview_window(label).unwrap();
                             // Focus before actions, not between a resize and its configure reply.
@@ -757,9 +726,6 @@ mod tests {
                                     _ => unreachable!(),
                                 }
                                 if action == "maximize" {
-                                    if !wait_for_effect("maximize") {
-                                        missing_animations.push(format!("{label}: maximize"));
-                                    }
                                     let deadline =
                                         std::time::Instant::now() + Duration::from_secs(5);
                                     while !window.is_maximized().unwrap() {
@@ -772,9 +738,6 @@ mod tests {
                                     window.unmaximize().unwrap();
                                     std::thread::sleep(Duration::from_millis(200));
                                 } else if action == "minimize" {
-                                    if !wait_for_effect("squash") {
-                                        missing_animations.push(format!("{label}: squash"));
-                                    }
                                     // Wayland has no minimized-state acknowledgement; check the protocol trace.
                                     std::thread::sleep(Duration::from_millis(200));
                                     window.unminimize().unwrap();
@@ -792,7 +755,6 @@ mod tests {
                             );
                             std::thread::sleep(Duration::from_millis(10));
                         }
-                        assert!(missing_animations.is_empty(), "KWin animations not observed: {missing_animations:?}");
                     }));
                     finished.send(checked.is_ok()).unwrap();
                     app.exit(0);

@@ -192,25 +192,6 @@ mod tests {
                                 .unwrap()
                                 > 0
                         );
-                        if std::env::var_os("RESONA_TEST_SELECT_NFS").is_some() {
-                            let paths = select_native(&window, MediaSelection::Audio, true)
-                                .expect("select NFS audio in the native chooser");
-                            assert!(!paths.is_empty(), "select at least one NFS audio file");
-                            for path in paths {
-                                use std::io::Read;
-                                let path = std::path::Path::new(&path);
-                                let mut header = [0; 4];
-                                std::fs::File::open(path)
-                                    .unwrap()
-                                    .read_exact(&mut header)
-                                    .unwrap();
-                                let context = crate::filesystem::audio_file_context(path).unwrap();
-                                assert!(!context.sources.is_empty());
-                            }
-                            assert!(select_native(&window, MediaSelection::Audio, false)
-                                .expect("cancel the second native chooser")
-                                .is_empty());
-                        }
                     }));
                     sent.send(checked.is_ok()).unwrap();
                     app.exit(0);

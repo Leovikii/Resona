@@ -2032,8 +2032,16 @@ mod tests {
             engine
                 .replace_queue_and_play(context.sources, context.selected_index)
                 .expect("start network playback");
-            std::thread::sleep(Duration::from_millis(200));
-            let paused = engine.control(PlaybackControl::Toggle, 1).unwrap();
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while engine.snapshot().unwrap().position_ms == 0 {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "network playback did not advance within five seconds"
+                );
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            engine.control(PlaybackControl::Toggle, 1).unwrap();
+            let paused = engine.snapshot().unwrap();
             assert_eq!(paused.status, PlaybackStatus::Paused);
             assert!(paused.position_ms > 0);
             assert!(

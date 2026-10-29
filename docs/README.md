@@ -17,6 +17,6 @@
 | [releases/](releases/) | 版本发布说明 |
 | [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) | 自动生成的依赖许可证 |
 
-当前入口：[alpha.2 问题核对与开发计划](plans/0.3.0-alpha.2.md) · [0.3.0 计划与验证](plans/0.3.0.md) · [跨平台预览交付方案](plans/0.3.0-preview-delivery.md) · [Arch Linux / Wayland](LINUX.md)；[0.2.1](plans/0.2.1.md) 保留原有发行门禁，0.2.0 已发布并归入发行说明。
+当前入口：[beta.1 方案](plans/0.3.0-beta.1.md) · [Windows 验证与人工清单](plans/0.3.0-beta.1-windows-validation.md) · [Linux 验证](plans/0.3.0-beta.1-linux-validation.md) · [测试执行规则](DEVELOPMENT.md#双平台精简执行) · [Arch Linux / Wayland](LINUX.md)。历史发行事实见 STATUS 与 releases/。
 
 冲突时优先级：当前代码/测试/构建结果 > Accepted ADR > 架构与开发规范 > 状态与路线图 > 其他说明。发现不一致必须在同一任务修正文档，不新增逐日流水或复制同一事实到多处。
