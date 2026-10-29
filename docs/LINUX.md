@@ -2,7 +2,7 @@
 
 `0.3.0-alpha.1` 开始支持 Arch Linux 系 x86_64 的原生 Wayland 会话。本机验证环境为 CachyOS、KDE Plasma、PipeWire；其他发行版、X11 和 ARM 不在范围内；交付状态见 [STATUS](STATUS.md)。
 
-当前版本为 [0.3.0-alpha.4](plans/0.3.0-alpha.4.md)，所有者已确认本机测试通过并授权发布；双平台交付状态以 [main Actions](https://github.com/Leovikii/Resona/actions/workflows/main-merge-delivery.yml) 和下方 Release 资产为准。安装与更新规则见 [ADR 0032](decisions/0032-arch-in-app-update.md)。alpha.4 改用无边框标题栏与 KDE 模糊外壳，本机自动回归已完成，压缩窗口 squash 动画严格门禁仍失败，最终功能与标题栏视觉已由所有者确认，鼠标/菜单专项未逐项记录，性能未测；完整步骤、CI 历史与本机结果见 [alpha.4 Linux 实机交接](plans/0.3.0-alpha.4-linux-validation.md)。
+当前开发版本为 [0.3.0-beta.1](plans/0.3.0-beta.1.md)，仅推送 dev，Windows 验收前不合并发布；[beta.1 本机验证与限制](plans/0.3.0-beta.1-linux-validation.md)。当前公开安装版仍为 [0.3.0-alpha.4](plans/0.3.0-alpha.4.md)，所有者已确认本机测试通过并授权发布；双平台交付状态以 [main Actions](https://github.com/Leovikii/Resona/actions/workflows/main-merge-delivery.yml) 和下方 Release 资产为准。安装与更新规则见 [ADR 0032](decisions/0032-arch-in-app-update.md)。alpha.4 改用无边框标题栏与 KDE 模糊外壳，本机自动回归已完成，压缩窗口 squash 动画严格门禁仍失败，最终功能与标题栏视觉已由所有者确认，鼠标/菜单专项未逐项记录，性能未测；完整步骤、CI 历史与本机结果见 [alpha.4 Linux 实机交接](plans/0.3.0-alpha.4-linux-validation.md)。
 
 ## 安装、打开方式与更新
 
@@ -35,7 +35,7 @@ sudo pacman -S --needed base-devel rust nodejs npm webkit2gtk-4.1 libayatana-app
 播放复用 Rodio / CPAL 的 ALSA 后端；PipeWire 桌面需安装 `pipewire-alsa`。压缩使用系统 `ffmpeg` 包。文件选择需有当前桌面适用的 portal 后端，例如 KDE 的 `xdg-desktop-portal-kde`。
 
 ```bash
-sudo pacman -S --needed pipewire-alsa ffmpeg
+sudo pacman -S --needed pipewire-alsa ffmpeg xdg-desktop-portal xdg-desktop-portal-kde kio-fuse
 npm ci
 npm run dev:linux
 ```
@@ -52,6 +52,12 @@ GDK_BACKEND=wayland ./src-tauri/target/release/resona /path/to/track.flac
 `build:linux` 使用 Tauri `--no-bundle`，启用 `custom-protocol`；无需 Vite 服务。它不生成 NSIS、AppImage、deb 或 updater 资产，也不安装到系统目录。可执行文件仍依赖本机 GTK / WebKitGTK 等共享库，不是跨发行版便携包。`dev:linux`、`start:linux` 明确选择 Wayland，不以 XWayland 启动成功代替原生验证。
 
 数据遵循 Tauri 的 XDG 目录（应用标识 `io.github.vki.resona`）。测试使用临时 XDG 数据、配置与缓存目录，与用户数据分离。
+
+### beta.1 文件选择与 NFS
+
+Linux 通过标准 XDG FileChooser 调用当前桌面 backend，KDE 下共享网络位置；它是 KDE 原生选择对话框，并非 Dolphin 主窗口。应用直接使用已锁定的 ashpd API，以保留远端 URI、错误和 Wayland 父窗口；Windows 继续使用系统原生后端。缺失 portal 服务会明确报错，不自动切换到不共享网络位置的 GTK/zenity 界面。
+
+KIO-FUSE 的 NFS 父目录枚举在本机可能破坏原可读文件映射。beta.1 先通过官方 D-Bus 刷新父目录/文件映射，并跳过该挂载的目录发现：请直接单选/多选音频或 WAV，暂不递归导入 KIO-FUSE 文件夹，也不自动发现同目录 CUE/外置封面。内嵌封面及本地、内核挂载目录沿用既有行为。临时物理路径可能在会话结束或断线后失效，需重新选择；不自动挂载或修改系统配置。
 
 ### alpha.4 本机测试程序
 
@@ -112,7 +118,7 @@ cargo fmt --manifest-path src-tauri/Cargo.toml --check
 cargo test --manifest-path src-tauri/Cargo.toml --locked
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
 # 本机有真实输出设备和系统 FFmpeg 时，串行运行通常忽略的用例
-cargo test --manifest-path src-tauri/Cargo.toml --locked -- --ignored --skip native_ --skip packaged_update_metadata --test-threads=1
+cargo test --manifest-path src-tauri/Cargo.toml --locked -- --ignored --skip native_ --skip packaged_update_metadata --skip selected_nfs_audio --test-threads=1
 # packaged_update_metadata 需先构建真实 Arch 包，并设置 RESONA_TEST_PACKAGE 指向包文件
 # KDE Wayland 协议与生命周期测试，单独运行，使用隔离目录
 resona_native_root=$(mktemp -d)

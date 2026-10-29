@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-18
 - Matching rule amended: 2026-07-19
+- beta.1 exception: [ADR 0036](0036-native-file-access-and-focused-playback-controls.md) skips sidecar discovery on KIO-FUSE mounts because directory enumeration can invalidate readable NFS files. Local and kernel-mounted paths keep the matching rules below.
 
 ## Decision
 

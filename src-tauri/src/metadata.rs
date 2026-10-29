@@ -499,6 +499,9 @@ struct ArtworkCandidate {
 }
 
 fn fallback_artwork_candidate(audio_path: &Path) -> Option<ArtworkCandidate> {
+    if !crate::platform::file_access::supports_directory_discovery(audio_path) {
+        return None;
+    }
     let directory = audio_path.parent()?;
     let mut candidates = std::fs::read_dir(directory)
         .ok()?

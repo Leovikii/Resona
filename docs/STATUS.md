@@ -1,6 +1,16 @@
 # 开发状态
 
-最后更新：2026-10-28
+最后更新：2026-10-29
+
+## beta.1 实施与待验收
+
+- 当前开发版本为 `0.3.0-beta.1`。所有者已批准方案、实施、本机与可行 Windows 测试、交接及推送 `dev`；**Windows 实机测试完成前不合并，不发布**。[开发方案](plans/0.3.0-beta.1.md)、[ADR 0036](decisions/0036-native-file-access-and-focused-playback-controls.md) 已接受。
+- 文件打开保留明确选择的目标，目录扫描空/失败/漏项只产生警告。Linux adapter 统一处理 `file://`、原始 `nfs://` 与 KIO-FUSE 物理路径，并通过 KIO-FUSE 官方 D-Bus 映射或刷新路径；Rodio 保持单引擎。
+- 本机发现 KIO-FUSE 目录枚举不只返回空，还会使原可读 NFS 文件返回 ENOTDIR；按 GIO 挂载类型识别后跳过同目录音频、自动 CUE、伴随歌词、外置封面与递归目录发现，提示选择文件。内嵌封面与正常本地/内核挂载目录逻辑保留。临时映射失效后需重新选择。
+- Linux 直接使用锁定的 ashpd 标准 XDG FileChooser API，保留完整 URI、取消/失败区别及真实 Wayland 父窗口；Windows 沿用 Tauri dialog 原生后端并指定父窗口。Arch 运行依赖已补 portal、KDE backend、KIO-FUSE；不修改用户桌面配置。
+- 主/压缩窗口新增 Space 播放暂停、左右 ±5 秒、上下 ±10 个音量百分点。Rust actor 计算相对动作；窗口聚焦、可见且无弹窗阻挡时生效，控件操作优先。主窗口复用音量滑条弹层，压缩窗口用单条百分比/音量条反馈。
+- 本机共享 Node 68 项、Rust 常规 129 项（15 项条件忽略）、fmt/Clippy、TypeScript/生产前端和嵌入前端 Release 构建通过；另有真实 FFmpeg 2 项、CUE 暂停定位及 NFS 完整解码/输出专项通过。KDE chooser 的 OMV 选择和取消已由所有者操作，返回路径可读与取消结果自动断言通过。最终 Release 桌面回归及两首 NFS 冷启动/第二实例、暂停/定位/继续通过。详见 [Linux 验证](plans/0.3.0-beta.1-linux-validation.md)。
+- Windows 的共享逻辑在 Linux 验证不等于 Windows 原生通过；MSVC/CI 与实机操作的独立清单见 [Windows 交接](plans/0.3.0-beta.1-windows-validation.md)。界面变英文仍未复现，不声明已修复；原生网络中断、物理听感与既有硬件/动画门禁仍保留。
 
 ## alpha.4 实施与验证
 
@@ -41,6 +51,8 @@
 
 ## 开放门禁与限制
 
+- beta.1 已替换 Linux GTK chooser 并修复所选 NFS 文件的目录依赖；KIO-FUSE 递归目录发现不支持，需选择具体文件。网络断线/权限失败与恢复仍需实机专项；不能将当前会话的映射当作永久网络列表路径。
+- 整套界面变英文尚未复现：此前隔离普通启动、直接 NFS 路径与 KDE ApplicationLauncherJob 均测得 `zh-CN`，用户偏好为 `system`。本轮不改语言初始化，继续保留故障状态采集门禁。
 - 当前主机为 CachyOS / KDE Plasma 6.8.1 / 原生 Wayland，双屏均为 150% 缩放；本轮未更改系统安装版。alpha.4 Arch 包已构建并只读验证，实际 Pacman 首装/升级/重装/卸载未跑：专用脚本只允许 disposable Actions root 容器，不在个人系统执行。Polkit 授权、应用内跨版本升级与重启仍未验收。
 - Linux 系统 `LocalFileSigLevel` 不变；Tauri `.tauri.sig` 不是 OpenPGP。无图形授权代理、包锁、冲突或严格本地签名政策时明确失败，程序不删锁、不关闭检查、不自动全系统升级。
 - Windows NSIS 真实跨版本覆盖、取消、卸载及完整 SMTC/托盘/Mica/文件关联仍需安装版实机回归；本机测试和 CI 构建不能替代。安装包尚无 Authenticode，Tauri 包与清单签名保留。

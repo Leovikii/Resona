@@ -40,10 +40,11 @@ export function useLibrary() {
   const [itemsLoading, setItemsLoading] = useState(false);
   const [rejectedPaths, setRejectedPaths] = useState<RejectedPath[]>([]);
   const errorSequenceRef = useRef(0);
-  const [error, setError] = useState<{ id: number; message: string } | null>(null);
+  const [error, setError] = useState<{ id: number; message: string; code?: string } | null>(null);
   const reportError = useCallback((cause: unknown) => {
     errorSequenceRef.current += 1;
-    setError({ id: errorSequenceRef.current, message: messageFrom(cause) });
+    const code = typeof cause === "object" && cause !== null && "code" in cause && typeof cause.code === "string" ? cause.code : undefined;
+    setError({ id: errorSequenceRef.current, message: messageFrom(cause), code });
   }, []);
 
   const selectedPlaylist = useMemo(
@@ -301,18 +302,22 @@ export function useLibrary() {
   }, [playlists, preview, previewItemsByPlaylist, refresh, reportError]);
 
   const chooseAndAddItems = useCallback(async (playlistId: number, position: number | null = null) => {
-    const paths = preview
-      ? ["C:\\Music\\New track.flac"]
-      : await selectAudioFiles(true);
-    return addItems(playlistId, paths, position);
-  }, [addItems, preview]);
+    try {
+      const paths = preview
+        ? ["C:\\Music\\New track.flac"]
+        : await selectAudioFiles(true);
+      return addItems(playlistId, paths, position);
+    } catch (cause) { reportError(cause); return null; }
+  }, [addItems, preview, reportError]);
 
   const chooseAndAddFolders = useCallback(async (playlistId: number) => {
-    const paths = preview
-      ? ["C:\\Music\\Imported\\Folder track.flac"]
-      : await selectAudioFolders();
-    return addItems(playlistId, paths);
-  }, [addItems, preview]);
+    try {
+      const paths = preview
+        ? ["C:\\Music\\Imported\\Folder track.flac"]
+        : await selectAudioFolders();
+      return addItems(playlistId, paths);
+    } catch (cause) { reportError(cause); return null; }
+  }, [addItems, preview, reportError]);
 
   const removeItem = useCallback(async (playlistId: number, itemId: number) => {
     setItemsLoading(true);

@@ -73,6 +73,9 @@ pub fn expand_same_name_cue(path: &Path) -> Vec<MediaSource> {
 }
 
 fn same_name_cue(path: &Path) -> Option<PathBuf> {
+    if !crate::platform::file_access::supports_directory_discovery(path) {
+        return None;
+    }
     let parent = path.parent()?;
     let stem = path.file_stem()?.to_string_lossy();
     fs::read_dir(parent)

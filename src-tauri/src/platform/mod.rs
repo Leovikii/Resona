@@ -3,7 +3,9 @@
 pub mod compression_tools;
 pub mod desktop_lyrics;
 pub mod distribution;
+pub mod file_access;
 pub mod file_commit;
+pub mod file_dialog;
 pub mod media_session;
 pub mod playback_projection;
 pub mod taskbar;

@@ -10,6 +10,7 @@ export interface SeekTransaction {
   pending: boolean;
   setDragPosition: (positionMs: number) => void;
   requestSeek: (positionMs: number) => Promise<boolean>;
+  acceptControlPosition: (positionMs: number) => void;
 }
 
 export function useSeekTransaction(
@@ -64,7 +65,16 @@ export function useSeekTransaction(
     return result !== null;
   }, [runSeek]);
 
+  const acceptControlPosition = useCallback((positionMs: number) => {
+    transactionRef.current += 1;
+    authoritativeRef.current = positionMs;
+    setDragging(false);
+    setDragPositionState(positionMs);
+    setPendingTarget(null);
+  }, []);
+
   return {
+    acceptControlPosition,
     displayPositionMs: dragging ? dragPosition : pendingTarget ?? authoritativePositionMs,
     dragging,
     pending: pendingTarget !== null,

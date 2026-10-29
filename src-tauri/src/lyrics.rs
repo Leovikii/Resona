@@ -205,6 +205,9 @@ fn load_for_audio(audio_path: &Path) -> LoadedLyrics {
 }
 
 fn discover_sidecar(audio_path: &Path) -> Option<(PathBuf, LyricsFormat)> {
+    if !crate::platform::file_access::supports_directory_discovery(audio_path) {
+        return None;
+    }
     let parent = audio_path.parent()?;
     let audio_stem = audio_path.file_stem()?.to_string_lossy();
     let audio_file_name = audio_path.file_name()?.to_string_lossy();

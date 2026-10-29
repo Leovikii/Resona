@@ -43,6 +43,7 @@ export interface ActivePlaylistSnapshot {
 }
 
 export interface OpenMediaResult {
+  warning?: "empty_directory" | "directory_unreadable" | "target_missing" | null;
   playback: import("./playback").PlaybackSnapshot;
   defaultPlaylist: DefaultPlaylistSnapshot;
   activePlaylist: ActivePlaylistSnapshot;

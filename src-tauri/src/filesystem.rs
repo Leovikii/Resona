@@ -27,7 +27,16 @@ pub enum RejectedPathReason {
     Duplicate,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DirectoryWarning {
+    EmptyDirectory,
+    DirectoryUnreadable,
+    TargetMissing,
+}
+
 pub struct AudioFileContext {
+    pub warning: Option<DirectoryWarning>,
     pub sources: Vec<MediaSource>,
     pub selected_index: usize,
 }
@@ -52,7 +61,35 @@ pub fn audio_file_context(path: &Path) -> Result<AudioFileContext, PlaybackFailu
     let parent = path.parent().ok_or_else(|| {
         PlaybackFailure::task_failed(format!("Audio file has no parent: {}", path.display()))
     })?;
-    let paths = audio_files_in_directory(parent)?;
+    if !crate::platform::file_access::supports_directory_discovery(path) {
+        return Ok(AudioFileContext {
+            sources: vec![MediaSource::file(path.to_owned())],
+            selected_index: 0,
+            warning: Some(DirectoryWarning::DirectoryUnreadable),
+        });
+    }
+    context_from_directory(path, audio_files_in_directory(parent))
+}
+
+fn context_from_directory(
+    path: &Path,
+    scanned: Result<Vec<PathBuf>, PlaybackFailure>,
+) -> Result<AudioFileContext, PlaybackFailure> {
+    let (mut paths, warning) = match scanned {
+        Ok(paths) if paths.is_empty() => (paths, Some(DirectoryWarning::EmptyDirectory)),
+        Ok(paths) if !paths.iter().any(|candidate| candidate == path) => {
+            (paths, Some(DirectoryWarning::TargetMissing))
+        }
+        Ok(paths) => (paths, None),
+        Err(_) => (Vec::new(), Some(DirectoryWarning::DirectoryUnreadable)),
+    };
+    if let Some(warning) = warning {
+        log::warn!("Selected audio directory degraded: {warning:?}");
+    }
+    if !paths.iter().any(|candidate| candidate == path) {
+        paths.push(path.to_owned());
+        paths.sort_by(|left, right| compare_paths(left, right));
+    }
     let sources = paths
         .iter()
         .flat_map(|path| expand_same_name_cue(path))
@@ -67,6 +104,7 @@ pub fn audio_file_context(path: &Path) -> Result<AudioFileContext, PlaybackFailu
             ))
         })?;
     Ok(AudioFileContext {
+        warning,
         sources,
         selected_index,
     })
@@ -178,6 +216,10 @@ fn audio_files_in_tree(root: &Path, rejected: &mut Vec<RejectedPath>) -> Vec<Pat
             continue;
         }
 
+        if !crate::platform::file_access::supports_directory_discovery(&path) {
+            rejected.push(rejected_path(path, RejectedPathReason::Unreadable));
+            continue;
+        }
         let entries = match fs::read_dir(&path) {
             Ok(entries) => entries,
             Err(_) => {
@@ -291,6 +333,39 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
+
+    #[test]
+    fn selected_file_survives_empty_unreadable_and_partial_directory_results() {
+        let root = tempfile::tempdir().unwrap();
+        let selected = root.path().join("2 中文.flac");
+        let other = root.path().join("1.wav");
+        fs::write(&selected, []).unwrap();
+        fs::write(&other, []).unwrap();
+        for (scan, expected) in [
+            (Ok(vec![]), DirectoryWarning::EmptyDirectory),
+            (
+                Err(PlaybackFailure::task_failed("denied".into())),
+                DirectoryWarning::DirectoryUnreadable,
+            ),
+            (Ok(vec![other.clone()]), DirectoryWarning::TargetMissing),
+        ] {
+            let context = context_from_directory(&selected, scan).unwrap();
+            assert_eq!(context.warning, Some(expected));
+            assert_eq!(context.sources[context.selected_index].path, selected);
+            assert_eq!(
+                context
+                    .sources
+                    .iter()
+                    .filter(|s| s.path == selected)
+                    .count(),
+                1
+            );
+        }
+        let context =
+            context_from_directory(&selected, Ok(vec![selected.clone(), other.clone()])).unwrap();
+        assert_eq!(context.warning, None);
+        assert!(audio_file_context(&root.path().join("missing.flac")).is_err());
+    }
 
     #[test]
     fn builds_a_sorted_context_with_the_selected_file_index() {

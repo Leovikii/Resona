@@ -94,4 +94,10 @@ SQLite schema v7 只保存用户播放列表、列表项目（含可空导入根
 - 数据库迁移在事务内执行并以旧 schema fixture 验证用户列表不丢失。
 - 原生视觉与硬件行为必须在 Windows Release 中验证；浏览器只证明布局、状态、溢出和静态样式。
 
+## 文件访问与窗口内快捷键
+
+[ADR 0036](decisions/0036-native-file-access-and-focused-playback-controls.md) 将所选文件验证与可选目录发现分开；Linux 文件访问 adapter 解析 URI 并映射/刷新 KIO-FUSE 路径。KIO-FUSE 挂载禁止自动目录发现，避免枚举破坏文件映射；本地与内核挂载目录沿用正常 CUE、排序和外置封面逻辑。冷启动外部打开结果保留到前端监听完成后一次消费。
+
+Linux 文件选择 adapter 直接使用锁定 ashpd 的标准 XDG portal，保留 URI、响应错误与真实 Wayland parent；Windows 使用 Tauri dialog 原生后端。选择与映射在后台边界执行。前端窗口内按键只提交有界意图，播放 actor 根据当前真实位置/音量处理相对操作并返回快照；压缩窗口不创建第二播放器。边界及验收见 [beta.1](plans/0.3.0-beta.1.md)。
+
 长期决定见 [decisions/](decisions/README.md)。

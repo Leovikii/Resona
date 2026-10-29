@@ -423,10 +423,18 @@ pub async fn open_media_context(
 ) -> Result<OpenMediaResult, PlaybackFailure> {
     let media_import = Arc::clone(media_import.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        media_import.open_media_context(std::path::Path::new(&path))
+        let path = crate::platform::file_access::resolve_location(&path)?;
+        media_import.open_media_context(&path)
     })
     .await
     .map_err(|error| PlaybackFailure::task_failed(format!("playback task failed: {error}")))?
+}
+
+#[tauri::command]
+pub fn take_external_media_result(
+    media_import: State<'_, ManagedMediaImportService>,
+) -> Result<Option<OpenMediaResult>, PlaybackFailure> {
+    media_import.take_external_result()
 }
 
 #[tauri::command]
@@ -610,6 +618,16 @@ pub async fn seek_playback(
 ) -> Result<PlaybackSnapshot, PlaybackFailure> {
     let engine = Arc::clone(engine.inner());
     run_engine_operation(engine, move |engine| engine.seek(position_ms)).await
+}
+
+#[tauri::command]
+pub async fn control_playback(
+    action: crate::playback::PlaybackControl,
+    steps: u16,
+    engine: State<'_, ManagedPlaybackEngine>,
+) -> Result<PlaybackSnapshot, PlaybackFailure> {
+    let engine = Arc::clone(engine.inner());
+    run_engine_operation(engine, move |engine| engine.control(action, steps)).await
 }
 
 #[tauri::command]
@@ -1061,4 +1079,17 @@ pub async fn desktop_lyrics_pointer(
     service: State<'_, ManagedDesktopLyricsWindowService>,
 ) -> Result<(), DesktopLyricsWindowFailure> {
     crate::platform::desktop_lyrics::pointer(&service, phase, kind, x, y)
+}
+
+#[tauri::command]
+pub async fn select_media_paths(
+    window: tauri::WebviewWindow,
+    kind: crate::platform::file_dialog::MediaSelection,
+    multiple: bool,
+) -> Result<Vec<String>, PlaybackFailure> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::platform::file_dialog::select(window, kind, multiple)
+    })
+    .await
+    .map_err(|_| PlaybackFailure::task_failed("File selection task failed".into()))?
 }

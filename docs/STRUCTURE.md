@@ -48,6 +48,8 @@ Resona/
 │  │     ├─ tray.rs
 │  │     ├─ window_controls.rs     # 自绘标题栏的 Win32 Snap / GTK 窗口菜单
 │  │     ├─ window_geometry.rs     # 内容区逻辑尺寸 / Wayland 几何适配
+│  │     ├─ file_access.rs         # URI 解析与 Linux KIO-FUSE 映射/目录能力
+│  │     ├─ file_dialog.rs         # Linux XDG portal / Windows 原生选择
 │  │     ├─ file_commit.rs         # 不覆盖原子提交
 │  │     ├─ distribution/          # updater 平台能力与 Arch 事务安装 adapter
 │  │     ├─ compression_tools.rs   # 默认测试/开发工具路径

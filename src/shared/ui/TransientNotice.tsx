@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Notification, Transition } from "@mantine/core";
+import { Notification, Progress, Transition } from "@mantine/core";
 import { CircleAlert, CircleCheck, CircleX, Info } from "lucide-react";
 
 export type TransientNoticeTone = "error" | "info" | "success" | "warning";
@@ -8,6 +8,7 @@ export interface TransientNoticeMessage {
   id: number;
   message: string;
   tone: TransientNoticeTone;
+  progress?: number;
 }
 
 const toneAppearance = {
@@ -62,6 +63,7 @@ export function TransientNotice({
           withCloseButton
         >
           {notice?.message}
+          {notice?.progress !== undefined && <Progress aria-label={notice.message} mt={6} size="xs" value={notice.progress} />}
         </Notification>
       )}
     </Transition>

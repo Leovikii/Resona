@@ -1080,6 +1080,14 @@ fn discover_scan_candidates(
     if !metadata.is_dir() {
         return Ok(());
     }
+    if !crate::platform::file_access::supports_directory_discovery(path) {
+        warnings.push(scan_warning(
+            path,
+            "directory_unreadable",
+            "KIO-FUSE directory discovery is unavailable; select files instead",
+        ));
+        return Ok(());
+    }
     let entries = match fs::read_dir(path) {
         Ok(entries) => entries,
         Err(error) => {

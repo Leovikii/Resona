@@ -86,11 +86,7 @@ pub fn run() {
                 );
                 eprintln!("second instance main window restore failed: {}", error.message);
             }
-            if let Some(path) =
-                media_import::external_media_path(argv, std::path::Path::new(&cwd))
-            {
-                dispatch_external_media(app.clone(), path);
-            }
+            dispatch_external_media(app.clone(), argv, std::path::PathBuf::from(cwd));
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -202,15 +198,14 @@ pub fn run() {
             log::info!("application services initialized");
             let arguments = std::env::args().collect::<Vec<_>>();
             let current_directory = std::env::current_dir().unwrap_or_default();
-            if let Some(path) =
-                media_import::external_media_path(arguments, &current_directory)
-            {
-                dispatch_external_media(app.handle().clone(), path);
-            }
+            dispatch_external_media(app.handle().clone(), arguments, current_directory);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             open_media_context,
+            commands::select_media_paths,
+            commands::take_external_media_result,
+            commands::control_playback,
             get_default_playlist,
             add_default_playlist_items,
             remove_default_playlist_items,
@@ -590,30 +585,34 @@ fn persist_playback_session(app: &tauri::AppHandle) {
     }
 }
 
-fn dispatch_external_media(app: tauri::AppHandle, path: std::path::PathBuf) {
+fn dispatch_external_media(app: tauri::AppHandle, arguments: Vec<String>, cwd: std::path::PathBuf) {
+    if arguments.len() < 2 {
+        return;
+    }
     let media_import = Arc::clone(app.state::<Arc<MediaImportService>>().inner());
     tauri::async_runtime::spawn(async move {
-        let result =
-            tauri::async_runtime::spawn_blocking(move || media_import.open_media_context(&path))
-                .await
-                .map_err(|error| {
-                    crate::playback::PlaybackFailure::task_failed(format!(
-                        "external media task failed: {error}"
-                    ))
-                })
-                .and_then(|result| result);
-
-        match result {
-            Ok(result) => {
-                if let Err(error) = app.emit_to("main", "resona://media-opened", result) {
-                    eprintln!("external media event failed: {error}");
-                }
-            }
-            Err(failure) => {
-                if let Err(error) = app.emit_to("main", "resona://media-open-failed", failure) {
-                    eprintln!("external media failure event failed: {error}");
-                }
-            }
+        let service = Arc::clone(&media_import);
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            let Some(path) = media_import::external_media_path(arguments, &cwd)? else {
+                return Ok(None);
+            };
+            service.open_media_context(&path).map(Some)
+        })
+        .await
+        .map_err(|_| playback::PlaybackFailure::task_failed("external media task failed".into()))
+        .and_then(|result| result);
+        let result = match result {
+            Ok(Some(result)) => Ok(result),
+            Ok(None) => return,
+            Err(error) => Err(error),
+        };
+        if let Err(error) = media_import.store_external_result(result) {
+            log::error!(
+                "external media result storage failed: code={:?}",
+                error.code
+            );
+        } else if let Err(error) = app.emit_to("main", "resona://external-media-ready", ()) {
+            log::warn!("external media notification failed: {error}");
         }
     });
 }

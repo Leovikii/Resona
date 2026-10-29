@@ -64,6 +64,7 @@ pub struct DefaultPlaylistSnapshot {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenMediaResult {
+    pub warning: Option<filesystem::DirectoryWarning>,
     pub playback: PlaybackSnapshot,
     pub default_playlist: DefaultPlaylistSnapshot,
     pub active_playlist: ActivePlaylistSnapshot,
@@ -98,6 +99,7 @@ struct DefaultPlaylistState {
 pub struct MediaImportService {
     engine: Arc<RodioPlaybackEngine>,
     state: Mutex<DefaultPlaylistState>,
+    external_result: Mutex<Option<Result<OpenMediaResult, PlaybackFailure>>>,
 }
 
 impl MediaImportService {
@@ -105,7 +107,24 @@ impl MediaImportService {
         Self {
             engine,
             state: Mutex::new(DefaultPlaylistState::default()),
+            external_result: Mutex::new(None),
         }
+    }
+
+    pub fn store_external_result(
+        &self,
+        result: Result<OpenMediaResult, PlaybackFailure>,
+    ) -> Result<(), PlaybackFailure> {
+        *self.external_result.lock().map_err(|_| state_poisoned())? = Some(result);
+        Ok(())
+    }
+
+    pub fn take_external_result(&self) -> Result<Option<OpenMediaResult>, PlaybackFailure> {
+        self.external_result
+            .lock()
+            .map_err(|_| state_poisoned())?
+            .take()
+            .transpose()
     }
 
     pub fn snapshot(&self) -> Result<DefaultPlaylistSnapshot, PlaybackFailure> {
@@ -123,9 +142,11 @@ impl MediaImportService {
         let mut state = self.state.lock().map_err(|_| state_poisoned())?;
         let playback =
             self.play_sources(&state.sources, &context.sources, context.selected_index)?;
+        let warning = context.warning;
         commit_context(&mut state, context);
         state.active_playlist = Some(ActivePlaylistSnapshot::default_playlist());
         Ok(OpenMediaResult {
+            warning,
             playback,
             default_playlist: snapshot_from_state(&state),
             active_playlist: ActivePlaylistSnapshot::default_playlist(),
@@ -170,6 +191,7 @@ impl MediaImportService {
         state.selected_index = Some(selected_index);
         state.active_playlist = Some(ActivePlaylistSnapshot::default_playlist());
         Ok(OpenMediaResult {
+            warning: None,
             playback,
             default_playlist: snapshot_from_state(&state),
             active_playlist: ActivePlaylistSnapshot::default_playlist(),
@@ -474,24 +496,30 @@ impl MediaImportService {
     }
 }
 
-pub fn external_media_path<I, S>(arguments: I, current_directory: &Path) -> Option<PathBuf>
+pub fn external_media_path<I, S>(
+    arguments: I,
+    current_directory: &Path,
+) -> Result<Option<PathBuf>, PlaybackFailure>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
-    arguments.into_iter().skip(1).find_map(|argument| {
+    for argument in arguments.into_iter().skip(1) {
         let argument = argument.as_ref();
         if argument.starts_with('-') {
-            return None;
+            continue;
         }
-        let candidate = PathBuf::from(argument);
+        let candidate = crate::platform::file_access::resolve_location(argument)?;
         let candidate = if candidate.is_absolute() {
             candidate
         } else {
             current_directory.join(candidate)
         };
-        (candidate.is_file() && filesystem::is_supported_audio(&candidate)).then_some(candidate)
-    })
+        if filesystem::is_supported_audio(&candidate) {
+            return Ok(Some(candidate));
+        }
+    }
+    Ok(None)
 }
 
 fn commit_context(state: &mut DefaultPlaylistState, context: AudioFileContext) {
@@ -726,12 +754,22 @@ mod tests {
     }
 
     #[test]
+    fn external_error_is_retained_until_consumed_once() {
+        let service = MediaImportService::new(Arc::new(RodioPlaybackEngine::new()));
+        service
+            .store_external_result(Err(PlaybackFailure::task_failed("test".into())))
+            .unwrap();
+        assert!(service.take_external_result().is_err());
+        assert!(service.take_external_result().unwrap().is_none());
+    }
+
+    #[test]
     fn external_arguments_accept_supported_relative_or_absolute_files() {
         let root = test_directory();
         let audio = root.join("track.flac");
         File::create(&audio).expect("create audio");
         assert_eq!(
-            external_media_path(["resona.exe", "track.flac"], &root),
+            external_media_path(["resona.exe", "track.flac"], &root).unwrap(),
             Some(audio.clone())
         );
         assert_eq!(
@@ -741,10 +779,14 @@ mod tests {
                     audio.to_string_lossy().into_owned()
                 ],
                 &root,
-            ),
+            )
+            .unwrap(),
             Some(audio)
         );
-        assert_eq!(external_media_path(["resona.exe", "--flag"], &root), None);
+        assert_eq!(
+            external_media_path(["resona.exe", "--flag"], &root).unwrap(),
+            None
+        );
         let _ = fs::remove_dir_all(root);
     }
 

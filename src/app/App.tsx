@@ -77,6 +77,7 @@ import { useTrackDetails } from "../features/metadata/useTrackDetails";
 import { useTrackSummaries } from "../features/metadata/useTrackSummaries";
 import { showAudioCompressionWindow } from "../shared/bridge/compressionWindow";
 import { usePlaybackController } from "../features/playback/usePlaybackController";
+import { usePlaybackShortcuts } from "../features/playback/usePlaybackShortcuts";
 import { useSeekTransaction } from "../features/playback/useSeekTransaction";
 import { useMainWindowLayout } from "../features/window/useMainWindowLayout";
 import { useApplicationLifetime } from "../features/window/useApplicationLifetime";
@@ -241,14 +242,19 @@ export default function App() {
     t,
   ]);
 
+  useEffect(() => {
+    if (playback.directoryWarning) publishNotice(t(`playback.directoryWarnings.${playback.directoryWarning}`), "warning");
+  }, [playback.directoryWarning, playback.openSequence, publishNotice, t]);
+
   const playbackFailure = playback.snapshot.error ?? playback.refreshError;
   useEffect(() => {
     if (playbackFailure) publishNotice(localizeFailure(playbackFailure, t));
   }, [playbackFailure, publishNotice, t]);
 
   useEffect(() => {
-    if (library.error) publishNotice(library.error.message);
-  }, [library.error, publishNotice]);
+    if (library.error) publishNotice(library.error.code
+      ? t(`errors.${library.error.code}`, { defaultValue: library.error.message }) : library.error.message);
+  }, [library.error, publishNotice, t]);
 
   useEffect(() => {
     if (mainWindow.error) publishNotice(mainWindow.error.message);
@@ -268,6 +274,14 @@ export default function App() {
     [playback.run],
   );
   const seek = useSeekTransaction(playback.snapshot.positionMs, runSeek);
+  const shortcuts = usePlaybackShortcuts({
+    blocked: playback.dialogOpen || seek.dragging || createPlaylistOpen || playlistDialogOpen || updateDialogOpen || Boolean(fileInfoPath) || applicationLifetime.closePromptOpen || applicationLifetime.exitConfirmationOpen,
+    run: (action, steps) => playback.run("control_playback", { action, steps }),
+    onResult: (action, result) => {
+      if (action === "seek_backward" || action === "seek_forward") seek.acceptControlPosition(result.positionMs);
+    },
+  });
+  const volumeFeedback = shortcuts.feedback?.action.startsWith("volume_") ? shortcuts.feedback.id : 0;
   const compact = mainWindow.snapshot.layoutMode === "compact";
 
   useEffect(() => {
@@ -690,6 +704,7 @@ export default function App() {
       </section>
 
       <PlayerBar
+        volumeFeedback={volumeFeedback}
         busy={playback.busy}
         desktopLyrics={desktopLyrics}
         details={trackDetails.details}
@@ -1837,7 +1852,8 @@ function SettingRow({ children, className, label }: { children: ReactNode; class
   );
 }
 
-function PlayerBar({ busy, canLocateCurrentTrack, compact, desktopLyrics, details, expanded, hasCurrentTrack, onLocateCurrentTrack, onRun, onToggleExpanded, seek, snapshot, title }: {
+function PlayerBar({ busy, canLocateCurrentTrack, compact, desktopLyrics, details, expanded, hasCurrentTrack, onLocateCurrentTrack, onRun, onToggleExpanded, seek, snapshot, title, volumeFeedback }: {
+  volumeFeedback: number;
   busy: boolean;
   canLocateCurrentTrack: boolean;
   compact: boolean;
@@ -1949,6 +1965,7 @@ function PlayerBar({ busy, canLocateCurrentTrack, compact, desktopLyrics, detail
       ) : track}
       {compact ? (
         <CompactPlayerControls
+          volumeFeedback={volumeFeedback}
           busy={busy}
           canControl={canControl}
           canLocateCurrentTrack={canLocateCurrentTrack}
@@ -1973,6 +1990,7 @@ function PlayerBar({ busy, canLocateCurrentTrack, compact, desktopLyrics, detail
           />
           <div className="wide-player-actions">
             <VolumeButton
+              feedback={volumeFeedback}
               busy={busy}
               onChange={changeVolume}
               onChangeEnd={commitVolume}
@@ -2016,6 +2034,7 @@ function PlaybackCoreControls({ busy, canControl, currentId, onRun, snapshot }: 
       <Tooltip label={toggleLabel}>
         <ActionIcon
           aria-label={toggleLabel}
+          aria-keyshortcuts="Space"
           className="player-control-action player-control-action-primary"
           color={currentId === undefined ? "gray" : undefined}
           disabled={currentId === undefined || busy}
@@ -2040,7 +2059,7 @@ function PlaybackCoreControls({ busy, canControl, currentId, onRun, snapshot }: 
   );
 }
 
-function CompactPlayerControls({ busy, canControl, canLocateCurrentTrack, currentId, desktopLyrics, hasCurrentTrack, onLocateCurrentTrack, onRun, onVolumeChange, onVolumeChangeEnd, snapshot, volume }: {
+function CompactPlayerControls({ busy, canControl, canLocateCurrentTrack, currentId, desktopLyrics, hasCurrentTrack, onLocateCurrentTrack, onRun, onVolumeChange, onVolumeChangeEnd, snapshot, volume, volumeFeedback }: {
   busy: boolean;
   canControl: boolean;
   canLocateCurrentTrack: boolean;
@@ -2049,6 +2068,7 @@ function CompactPlayerControls({ busy, canControl, canLocateCurrentTrack, curren
   hasCurrentTrack: boolean;
   onLocateCurrentTrack: () => void;
   onRun: ReturnType<typeof usePlaybackController>["run"];
+  volumeFeedback: number;
   onVolumeChange: (value: number) => void;
   onVolumeChangeEnd: (value: number) => void;
   snapshot: PlaybackSnapshot;
@@ -2059,6 +2079,7 @@ function CompactPlayerControls({ busy, canControl, canLocateCurrentTrack, curren
       <div className="compact-player-side compact-player-side-left">
         <div className="compact-player-volume">
           <VolumeButton
+            feedback={volumeFeedback}
             busy={busy}
             onChange={onVolumeChange}
             onChangeEnd={onVolumeChangeEnd}
@@ -2091,14 +2112,24 @@ function CompactPlayerControls({ busy, canControl, canLocateCurrentTrack, curren
   );
 }
 
-function VolumeButton({ busy, onChange, onChangeEnd, volume }: {
+function VolumeButton({ busy, onChange, onChangeEnd, volume, feedback }: {
+  feedback: number;
   busy: boolean;
   onChange: (value: number) => void;
   onChangeEnd: (value: number) => void;
   volume: number;
 }) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  useEffect(() => {
+    if (!feedback) return;
+    setKeyboardOpen(true);
+    const timer = window.setTimeout(() => setKeyboardOpen(false), 1200);
+    return () => window.clearTimeout(timer);
+  }, [feedback]);
+  const open = manualOpen || keyboardOpen;
+  const setOpen = (value: boolean) => { setManualOpen(value); setKeyboardOpen(false); };
   const VolumeIcon = volume === 0 ? VolumeX : volume < 50 ? Volume1 : Volume2;
   const adjustWithWheel = (event: WheelEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -2119,13 +2150,15 @@ function VolumeButton({ busy, onChange, onChangeEnd, volume }: {
       withArrow
     >
       <Popover.Target>
-        <Tooltip label={t("playback.volume")}>
+        <Tooltip label={t("playback.shortcuts")}>
           <ActionIcon
             aria-label={t("playback.volume")}
+            aria-description={t("playback.shortcuts")}
+            aria-keyshortcuts="ArrowUp ArrowDown"
             className="player-control-action"
             color="gray"
             disabled={busy}
-            onClick={() => setOpen((value) => !value)}
+            onClick={() => setOpen(!manualOpen)}
             size="xl"
             variant="transparent"
           >

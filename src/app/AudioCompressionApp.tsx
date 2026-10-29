@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent, ReactNode } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -36,6 +36,8 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { usePlaybackShortcuts } from "../features/playback/usePlaybackShortcuts";
+import { TransientNotice, type TransientNoticeMessage } from "../shared/ui/TransientNotice";
 import { compressionProgress } from "../features/compression/compressionProgress";
 import { useAudioCompression } from "../features/compression/useAudioCompression";
 import { selectCompressionFolders, selectWavFiles } from "../shared/bridge/audioDialog";
@@ -63,6 +65,22 @@ export default function AudioCompressionApp() {
   const { compression: preferences, setCompression } = usePreferences();
   const { deleteSource, preset } = preferences;
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [playbackNotice, setPlaybackNotice] = useState<TransientNoticeMessage | null>(null);
+  const dismissPlaybackNotice = useCallback(() => setPlaybackNotice(null), []);
+  const shortcuts = usePlaybackShortcuts({ blocked: confirmOpen });
+  useEffect(() => {
+    const feedback = shortcuts.feedback;
+    if (!feedback) return;
+    const volume = feedback.action.startsWith("volume_");
+    const snapshot = feedback.snapshot;
+    setPlaybackNotice({ id: feedback.id, tone: "info",
+      message: volume ? t("playback.volumeFeedback", { volume: Math.round(snapshot.volume * 100) })
+        : t("playback.controlFeedback", { status: t(`playback.${snapshot.status}`), position: Math.floor(snapshot.positionMs / 1000) }),
+      progress: volume ? snapshot.volume * 100 : undefined });
+  }, [shortcuts.feedback, t]);
+  useEffect(() => {
+    if (shortcuts.error) setPlaybackNotice({ id: Date.now(), tone: "error", message: t(`errors.${shortcuts.error.code}`, { defaultValue: shortcuts.error.message }) });
+  }, [shortcuts.error, t]);
   const [dragActive, setDragActive] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const expandedRootsRef = useRef({ scanId: 0, seenRoots: new Set<string>() });
@@ -177,13 +195,22 @@ export default function AudioCompressionApp() {
     };
   }, [compression.addInputs, locked]);
 
+  const reportSelectionError = (error: unknown) => {
+    const code = typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+      ? error.code : "dialog_open_failed";
+    setPlaybackNotice({ id: Date.now(), tone: "error", message: t(`errors.${code}`, { defaultValue: t("errors.dialog_open_failed") }) });
+  };
   const addFiles = async () => {
-    const paths = await selectWavFiles();
-    if (paths.length > 0) void compression.addInputs(paths);
+    try {
+      const paths = await selectWavFiles();
+      if (paths.length > 0) void compression.addInputs(paths);
+    } catch (error) { reportSelectionError(error); }
   };
   const addFolders = async () => {
-    const paths = await selectCompressionFolders();
-    if (paths.length > 0) void compression.addInputs(paths);
+    try {
+      const paths = await selectCompressionFolders();
+      if (paths.length > 0) void compression.addInputs(paths);
+    } catch (error) { reportSelectionError(error); }
   };
   const start = () => {
     if (!canStart) return;
@@ -209,6 +236,7 @@ export default function AudioCompressionApp() {
         setDragActive(false);
       }}
     >
+      <TransientNotice autoClose={1800} closeLabel={t("common.close")} notice={playbackNotice} onDismiss={dismissPlaybackNotice} />
       <WindowTitleBar title={`${t("app.name")} · ${t("tools.compression")}`} />
 
       <section className="compression-toolbar" aria-label={t("compression.inputs")}>

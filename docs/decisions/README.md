@@ -49,3 +49,4 @@ ADR 记录会长期影响代码、依赖或产品边界且无法仅从实现看�
 - [0034 - PR CI、main CD 与依赖缓存](0034-main-only-ci-and-dependency-cache.md)
 
 - [0035 - 统一 Arch 包名与 alpha.4 重发](0035-unified-arch-package.md)
+- [0036 - 原生文件访问与窗口内播放快捷键（Accepted）](0036-native-file-access-and-focused-playback-controls.md)
