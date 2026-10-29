@@ -134,78 +134,93 @@ export const CompactTopNavigation = memo(function CompactTopNavigation({
                   <PlaylistTabLabel label={t("library.default")} order={1} playing={activePlaylist?.kind === "default"} />
                 </Tabs.Tab>
               </AppContextMenu>
-              <CompactPlaylistGap active={dropPlaylistPosition === 0 || reorder.insertionPosition === 0} position={0} />
+              <CompactPlaylistGap active={externalDragActive && playlists.length === 0 ? false : dropPlaylistPosition === 0 || reorder.insertionPosition === 0} position={0} />
               {playlists.map((playlist, index) => {
                 const playing = activePlaylist?.kind === "user" && activePlaylist.playlistId === playlist.id;
                 return (
                   <Fragment key={playlist.id}>
-                    <AppContextMenu items={[
-                      {
-                        disabled: index <= 0,
-                        icon: ArrowUp,
-                        id: "move-up",
-                        label: t("library.moveUp"),
-                        onSelect: () => void onMovePlaylist(playlist.id, index - 1),
-                      },
-                      {
-                        disabled: index >= playlists.length - 1,
-                        icon: ArrowDown,
-                        id: "move-down",
-                        label: t("library.moveDown"),
-                        onSelect: () => void onMovePlaylist(playlist.id, index + 1),
-                      },
-                      {
-                        dividerBefore: true,
-                        icon: Pencil,
-                        id: "rename",
-                        label: t("library.rename"),
-                        onSelect: () => onRenamePlaylist(playlist.id),
-                      },
-                      {
-                        destructive: true,
-                        disabled: playlists.length <= 1,
-                        dividerBefore: true,
-                        icon: ListX,
-                        id: "delete-others",
-                        label: t("library.closeOthers"),
-                        onSelect: () => onDeleteOtherPlaylists(playlist.id),
-                      },
-                      {
-                        destructive: true,
-                        icon: Trash2,
-                        id: "delete",
-                        label: t("library.delete"),
-                        onSelect: () => onDeletePlaylist(playlist.id),
-                      },
-                    ]}>
-                      <Tabs.Tab
-                        data-drop-active={dropPlaylistId === playlist.id || undefined}
-                        data-dragging={reorder.draggedId === playlist.id || undefined}
-                        data-drop-kind="playlist"
-                        data-playlist-id={playlist.id}
-                        data-playing={playing || undefined}
-                        data-reorder-position={index}
-                        onPointerCancel={reorder.onPointerCancel}
-                        onPointerDown={(event) => reorder.onPointerDown(event, playlist.id)}
-                        onPointerMove={reorder.onPointerMove}
-                        onPointerUp={reorder.onPointerUp}
-                        title={playlist.name}
-                        value={`user:${playlist.id}`}
-                      >
-                        <PlaylistTabLabel label={playlist.name} order={index + 2} playing={playing} />
-                      </Tabs.Tab>
-                    </AppContextMenu>
-                    <CompactPlaylistGap active={dropPlaylistPosition === index + 1 || reorder.insertionPosition === index + 1} position={index + 1} />
+                    <div className="compact-playlist-tab-wrap"
+                      data-drop-kind="playlist" data-playlist-id={playlist.id}>
+                      <AppContextMenu items={[
+                        {
+                          disabled: index <= 0,
+                          icon: ArrowUp,
+                          id: "move-up",
+                          label: t("library.moveUp"),
+                          onSelect: () => void onMovePlaylist(playlist.id, index - 1),
+                        },
+                        {
+                          disabled: index >= playlists.length - 1,
+                          icon: ArrowDown,
+                          id: "move-down",
+                          label: t("library.moveDown"),
+                          onSelect: () => void onMovePlaylist(playlist.id, index + 1),
+                        },
+                        {
+                          dividerBefore: true,
+                          icon: Pencil,
+                          id: "rename",
+                          label: t("library.rename"),
+                          onSelect: () => onRenamePlaylist(playlist.id),
+                        },
+                        {
+                          destructive: true,
+                          disabled: playlists.length <= 1,
+                          dividerBefore: true,
+                          icon: ListX,
+                          id: "delete-others",
+                          label: t("library.closeOthers"),
+                          onSelect: () => onDeleteOtherPlaylists(playlist.id),
+                        },
+                        {
+                          destructive: true,
+                          icon: Trash2,
+                          id: "delete",
+                          label: t("library.delete"),
+                          onSelect: () => onDeletePlaylist(playlist.id),
+                        },
+                      ]}>
+                        <Tabs.Tab
+                          data-drop-active={dropPlaylistId === playlist.id || undefined}
+                          data-dragging={reorder.draggedId === playlist.id || undefined}
+                          data-drop-kind="playlist"
+                          data-playlist-id={playlist.id}
+                          data-playing={playing || undefined}
+                          data-reorder-position={index}
+                          onPointerCancel={reorder.onPointerCancel}
+                          onPointerDown={(event) => reorder.onPointerDown(event, playlist.id)}
+                          onPointerMove={reorder.onPointerMove}
+                          onPointerUp={reorder.onPointerUp}
+                          title={playlist.name}
+                          value={`user:${playlist.id}`}
+                        >
+                          <PlaylistTabLabel label={playlist.name} order={index + 2} playing={playing} />
+                        </Tabs.Tab>
+                      </AppContextMenu>
+                      <Tooltip label={t("library.delete")}>
+                        <ActionIcon aria-label={`${t("library.delete")}: ${playlist.name}`}
+                          className="compact-playlist-delete" color="red" size="sm" variant="subtle"
+                          disabled={moveDisabled}
+                          onClick={(event) => { event.stopPropagation(); onDeletePlaylist(playlist.id); }}>
+                          <Trash2 size={14} />
+                        </ActionIcon>
+                      </Tooltip>
+                    </div>
+                    <CompactPlaylistGap
+                      active={externalDragActive && index === playlists.length - 1
+                        ? false : dropPlaylistPosition === index + 1 || reorder.insertionPosition === index + 1}
+                      position={index + 1} />
                   </Fragment>
                 );
               })}
+              <span className="compact-playlist-drop-blank" aria-hidden="true"
+                data-drop-kind="playlist-gap" data-position={playlists.length}
+                data-drop-active={externalDragActive && dropPlaylistPosition === playlists.length || undefined} />
             </Tabs.List>
           </Tabs>
         </ScrollArea>
         <Tooltip label={t("library.create")}>
-          <ActionIcon aria-label={t("library.create")} className="compact-create-drop"
-            data-drop-kind="playlist-gap" data-position={playlists.length}
-            data-drop-active={externalDragActive && dropPlaylistPosition === playlists.length || undefined}
+          <ActionIcon aria-label={t("library.create")} className="compact-create-button"
             disabled={moveDisabled} onClick={onCreatePlaylist} size={44} variant="subtle">
             <Plus size={16} />
           </ActionIcon>
