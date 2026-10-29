@@ -10,7 +10,7 @@
 - Linux 直接使用锁定的 ashpd 标准 XDG FileChooser API，保留完整 URI、取消/失败区别及真实 Wayland 父窗口；Windows 沿用 Tauri dialog 原生后端并指定父窗口。Arch 运行依赖已补 portal、KDE backend、KIO-FUSE；不修改用户桌面配置。
 - 主/压缩窗口新增 Space 播放暂停、左右 ±5 秒、上下 ±10 个音量百分点。Rust actor 计算相对动作；窗口聚焦、可见且无弹窗阻挡时生效，控件操作优先。主窗口复用音量滑条弹层，压缩窗口用单条百分比/音量条反馈。
 - 本机共享 Node 68 项、Rust 常规 129 项（15 项条件忽略）、fmt/Clippy、TypeScript/生产前端和嵌入前端 Release 构建通过；另有真实 FFmpeg 2 项、CUE 暂停定位及 NFS 完整解码/输出专项通过。KDE chooser 的 OMV 选择和取消已由所有者操作，返回路径可读与取消结果自动断言通过。最终 Release 桌面回归及两首 NFS 冷启动/第二实例、暂停/定位/继续通过。详见 [Linux 验证](plans/0.3.0-beta.1-linux-validation.md)。
-- 已推送 dev，并创建保持草稿的 [PR #23](https://github.com/Leovikii/Resona/pull/23) 运行双平台 CI；不合并发布。Windows 的共享逻辑在 Linux 验证不等于 Windows 原生通过；MSVC/CI 与实机操作的独立清单见 [Windows 交接](plans/0.3.0-beta.1-windows-validation.md)。界面变英文仍未复现，不声明已修复；原生网络中断、物理听感与既有硬件/动画门禁仍保留。
+- 已推送 dev，并创建保持草稿的 [PR #23](https://github.com/Leovikii/Resona/pull/23) 运行双平台 CI；不合并发布。首轮 Windows 前端/构建、许可证、fmt 与 Rust 139 项通过（12 项条件忽略），Arch job 通过；仅 Linux 构造的共享错误枚举已按 ADR 0028 补非 Linux 局部 lint 标注，最终双平台门禁以 PR 最新 SHA 为准。CI 不等于 Windows 原生通过；MSVC/CI 与实机操作的独立清单见 [Windows 交接](plans/0.3.0-beta.1-windows-validation.md)。界面变英文仍未复现，不声明已修复；原生网络中断、物理听感与既有硬件/动画门禁仍保留。
 
 ## alpha.4 实施与验证
 

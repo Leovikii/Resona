@@ -139,6 +139,7 @@ pub enum PlaybackErrorCode {
     DialogOpenFailed,
     InvalidLocation,
     UnsupportedLocation,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     NetworkLocationUnavailable,
     InvalidFile,
     OpenFile,
