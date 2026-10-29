@@ -8,11 +8,11 @@
 - 文件打开保留明确选择的目标，目录扫描空/失败/漏项只产生警告。Linux adapter 统一处理 `file://`、原始 `nfs://` 与 KIO-FUSE 物理路径，并通过 KIO-FUSE 官方 D-Bus 映射或刷新路径；Rodio 保持单引擎。
 - 本机发现 KIO-FUSE 目录枚举不只返回空，还会使原可读 NFS 文件返回 ENOTDIR；按 GIO 挂载类型识别后跳过同目录音频、自动 CUE、伴随歌词、外置封面与递归目录发现，提示选择文件。内嵌封面与正常本地/内核挂载目录逻辑保留。临时映射失效后需重新选择。
 - Linux 直接使用锁定的 ashpd 标准 XDG FileChooser API，保留完整 URI、取消/失败区别及真实 Wayland 父窗口；Windows 沿用 Tauri dialog 原生后端并指定父窗口。Arch 运行依赖已补 portal、KDE backend、KIO-FUSE；不修改用户桌面配置。
-- 本机人工反馈补修 Dolphin 拖入 NFS：GTK adapter 保留原始 URI，避免锁定 Wry 提前解码损坏 `#`/`%` 文件名；主/压缩窗口消费统一逻辑坐标事件，Linux 不重复除以缩放。列表导入与压缩输入统一在后台解析网络位置，失败可诊断；真实 Dolphin 拖放仍需重建包人工复测。
-- 本次工具启动的测试版英文已定位为继承 `LC_ALL=C.UTF-8`，覆盖系统 `LANG=zh_CN.UTF-8`；重启测试时清除此工具覆盖，不修改应用语言初始化或强制中文。原始 Dolphin 启动变英文仍需独立复现。
+- 本机人工反馈补修 Dolphin 拖入 NFS：GTK adapter 保留原始 URI，避免锁定 Wry 提前解码损坏 `#`/`%` 文件名；主/压缩窗口消费统一逻辑坐标事件，Linux 不重复除以缩放。列表导入与压缩输入统一在后台解析网络位置，失败可诊断；所有者已确认单首 NFS 从 Dolphin 拖入成功，多文件/取消与其他落点仍待验收。
+- 清除工具的 `LC_ALL` 覆盖后，所有者仍复现“跟随系统”显示英文；同机 WebKit 探针返回 `C`、GLib 返回中文，确认不能只依赖 navigator。现通过原生 GLib / Win32 GetUserPreferredUILanguages 读取语言，首次 React 渲染前初始化，手动偏好优先，保留可诊断回退；不强制中文。网络文件夹继续拒绝递归枚举，但改用明确的“暂不支持导入网络文件夹，请选择其中的音频文件”提示。
 - 主/压缩窗口新增 Space 播放暂停、左右 ±5 秒、上下 ±10 个音量百分点。Rust actor 计算相对动作；窗口聚焦、可见且无弹窗阻挡时生效，控件操作优先。主窗口复用音量滑条弹层，压缩窗口用单条百分比/音量条反馈。
-- 本机共享 Node 68 项、Rust 常规 131 项（15 项条件忽略）、fmt/Clippy、TypeScript/生产前端和嵌入前端 Release 构建通过；另有真实 FFmpeg 2 项、CUE 暂停定位及 NFS 完整解码/输出专项通过。拖放补修新增 URI 保真、取消清理、坐标、文件 URI 导入与去重检查，真实 NFS 原始 URI 导入专项通过。KDE chooser 的 OMV 选择和取消已由所有者操作，返回路径可读与取消结果自动断言通过。Release 桌面回归及两首 NFS 冷启动/第二实例、暂停/定位/继续通过；不将其当作真实鼠标拖放通过。详见 [Linux 验证](plans/0.3.0-beta.1-linux-validation.md)。
-- 已推送 dev，并创建保持草稿的 [PR #23](https://github.com/Leovikii/Resona/pull/23) 运行双平台 CI；不合并发布。首轮 Windows 前端/构建、许可证、fmt 与 Rust 139 项通过（12 项条件忽略），Arch job 通过；仅 Linux 构造的共享错误枚举已按 ADR 0028 补非 Linux 局部 lint 标注，最终双平台门禁以 PR 最新 SHA 为准。CI 不等于 Windows 原生通过；MSVC/CI 与实机操作的独立清单见 [Windows 交接](plans/0.3.0-beta.1-windows-validation.md)。界面变英文仍未复现，不声明已修复；原生网络中断、物理听感与既有硬件/动画门禁仍保留。
+- 本机共享 Node 71 项、Rust 常规 132 项（15 项条件忽略）、fmt/Clippy、TypeScript/生产前端和嵌入前端 Release 构建通过；另有真实 FFmpeg 2 项、CUE 暂停定位及 NFS 完整解码/输出专项通过。拖放补修新增 URI 保真、取消清理、坐标、文件 URI 导入与去重检查，真实 NFS 原始 URI 导入专项通过。KDE chooser 的 OMV 选择和取消已由所有者操作，返回路径可读与取消结果自动断言通过。Release 桌面回归及两首 NFS 冷启动/第二实例、暂停/定位/继续通过；所有者确认单文件鼠标拖入成功，不扩展为未记录的其他拖放用例。详见 [Linux 验证](plans/0.3.0-beta.1-linux-validation.md)。
+- 已推送 dev，并创建保持草稿的 [PR #23](https://github.com/Leovikii/Resona/pull/23) 运行双平台 CI；不合并发布。拖放修正 `1689bb7` 已通过双平台 CI；语言与文件夹提示补修的最终门禁以 PR 最新 SHA 为准，Windows 新增 Win32 语言接口与实机语言清单。CI 不等于 Windows 原生通过；MSVC/CI 与实机操作的独立清单见 [Windows 交接](plans/0.3.0-beta.1-windows-validation.md)。语言差异已复现并补修，重建后的原生界面与 Windows 语言行为仍需独立验收；原生网络中断、物理听感与既有硬件/动画门禁仍保留。
 
 ## alpha.4 实施与验证
 
@@ -54,7 +54,7 @@
 ## 开放门禁与限制
 
 - beta.1 已替换 Linux GTK chooser 并修复所选 NFS 文件的目录依赖；KIO-FUSE 递归目录发现不支持，需选择具体文件。网络断线/权限失败与恢复仍需实机专项；不能将当前会话的映射当作永久网络列表路径。
-- 整套界面变英文尚未复现：此前隔离普通启动、直接 NFS 路径与 KDE ApplicationLauncherJob 均测得 `zh-CN`，用户偏好为 `system`。本轮不改语言初始化，继续保留故障状态采集门禁。
+- 语言初始化已改用原生接口，避免本机 WebKit 报告 `C` 导致英文；用户偏好为 `system`，手动选择仍优先。需继续验证实际主/辅助窗口、原始 Dolphin 冷启动及 Windows 显示语言，不能仅凭进程环境宣布 UI 通过。
 - 当前主机为 CachyOS / KDE Plasma 6.8.1 / 原生 Wayland，双屏均为 150% 缩放；本轮未更改系统安装版。alpha.4 Arch 包已构建并只读验证，实际 Pacman 首装/升级/重装/卸载未跑：专用脚本只允许 disposable Actions root 容器，不在个人系统执行。Polkit 授权、应用内跨版本升级与重启仍未验收。
 - Linux 系统 `LocalFileSigLevel` 不变；Tauri `.tauri.sig` 不是 OpenPGP。无图形授权代理、包锁、冲突或严格本地签名政策时明确失败，程序不删锁、不关闭检查、不自动全系统升级。
 - Windows NSIS 真实跨版本覆盖、取消、卸载及完整 SMTC/托盘/Mica/文件关联仍需安装版实机回归；本机测试和 CI 构建不能替代。安装包尚无 Authenticode，Tauri 包与清单签名保留。

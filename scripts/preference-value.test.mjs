@@ -1,5 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { resolveLocalePreference } from "../src/shared/i18n/localePreference.ts";
+
+test("system language accepts native POSIX and Windows UI language names", () => {
+  for (const language of ["zh_CN.UTF-8", "zh_CN", "zh-Hant-HK", "ZH-cn"]) {
+    assert.equal(resolveLocalePreference("system", [language, "C"]), "zh-CN");
+  }
+  for (const language of ["en_US.UTF-8", "en-US", "C.UTF-8", "POSIX"]) {
+    assert.equal(resolveLocalePreference("system", [language, "zh_CN"]), "en");
+  }
+});
+
+test("explicit language wins over native and WebView language differences", () => {
+  assert.equal(resolveLocalePreference("zh-CN", ["C"]), "zh-CN");
+  assert.equal(resolveLocalePreference("en", ["zh_CN.UTF-8"]), "en");
+  assert.equal(resolveLocalePreference("system", ["zh_CN.UTF-8", "C"]), "zh-CN");
+});
+
+test("unsupported and empty system language lists fall back to English", () => {
+  assert.equal(resolveLocalePreference("system", []), "en");
+  assert.equal(resolveLocalePreference("system", ["fr-FR"]), "en");
+});
 
 import {
   normalizeSteppedPreference,

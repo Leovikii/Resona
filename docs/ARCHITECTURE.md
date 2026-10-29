@@ -29,6 +29,8 @@ Tauri commands 负责 DTO 转换和服务调用，不包含领域分支。长任
 
 `src/app` 负责窗口壳、路由和跨 feature 编排；`src/features` 负责用户工作流；`src/shared` 负责模型、Tauri bridge、i18n 和无业务组件。Mantine 只能经应用层或 `shared/ui` 使用，领域 hook 不返回 Mantine 类型。
 
+“跟随系统”通过原生 adapter 获取界面语言：Linux 使用 GLib，Windows 使用 GetUserPreferredUILanguages。各窗口在 React 首次渲染前读取语言并初始化 i18n；手动偏好优先。WebView 语言只作为原生读取失败或浏览器预览的回退，启动日志记录两者以诊断差异；不修改进程 locale 或强制某种语言。
+
 主窗口有宽屏和窄屏两种信息架构，但共享同一状态。完整播放器是主内容互斥视图；底部播放器稳定挂载。设置、更新和压缩窗口不得创建第二份播放状态。
 
 普通窗口材质由 Rust `window_material` adapter 决定。Windows 11 可用 Mica；KDE Wayland 探测 ext-background-effect/旧 KWin blur 协议，为外壳区域请求合成器模糊，能力不可用时使用实色 token；桌面歌词保持专用透明窗口，不复用普通窗口材质。

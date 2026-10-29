@@ -1083,8 +1083,8 @@ fn discover_scan_candidates(
     if !crate::platform::file_access::supports_directory_discovery(path) {
         warnings.push(scan_warning(
             path,
-            "directory_unreadable",
-            "KIO-FUSE directory discovery is unavailable; select files instead",
+            "network_folder_unavailable",
+            "Network folder import is unavailable; select WAV files instead",
         ));
         return Ok(());
     }

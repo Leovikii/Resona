@@ -10,7 +10,7 @@ import {
 } from "@mantine/core";
 import "@mantine/core/styles.css";
 
-import i18n, { resolveLocale } from "../shared/i18n";
+import i18n, { loadSystemLanguages, resolveLocale } from "../shared/i18n";
 import type { LocalePreference } from "../shared/i18n";
 import type { CompressionPreset } from "../shared/model/compression";
 import { syncCurrentWindowTheme } from "../shared/bridge/windowAppearance";
@@ -97,6 +97,7 @@ export function AppProvider({ children }: PropsWithChildren) {
   );
 
   useEffect(() => {
+    let disposed = false;
     const applyLocale = () => {
       const resolved = resolveLocale(locale);
       void i18n.changeLanguage(resolved);
@@ -104,8 +105,14 @@ export function AppProvider({ children }: PropsWithChildren) {
     };
     applyLocale();
     if (locale !== "system") return;
-    window.addEventListener("languagechange", applyLocale);
-    return () => window.removeEventListener("languagechange", applyLocale);
+    const onLanguageChange = () => {
+      void loadSystemLanguages().then(() => { if (!disposed) applyLocale(); });
+    };
+    window.addEventListener("languagechange", onLanguageChange);
+    return () => {
+      disposed = true;
+      window.removeEventListener("languagechange", onLanguageChange);
+    };
   }, [locale]);
 
   useEffect(() => {

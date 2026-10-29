@@ -65,6 +65,20 @@ pub enum ProjectPage {
 }
 
 #[tauri::command]
+pub fn get_system_languages(browser_languages: Vec<String>) -> Result<Vec<String>, String> {
+    let languages = crate::platform::system_languages::preferred().inspect_err(|error| {
+        log::warn!("Native system languages unavailable: {error}");
+    })?;
+    let browser = browser_languages
+        .iter()
+        .take(8)
+        .map(|value| value.chars().take(64).collect::<String>())
+        .collect::<Vec<_>>();
+    log::info!("System language detection: native={languages:?}, webview={browser:?}");
+    Ok(languages)
+}
+
+#[tauri::command]
 pub async fn open_project_page(page: ProjectPage, app: AppHandle) -> Result<(), String> {
     let url = match page {
         ProjectPage::Repository => "https://github.com/Leovikii/Resona",

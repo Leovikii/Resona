@@ -2005,6 +2005,14 @@ mod tests {
                 imported.rejected[0].reason,
                 crate::filesystem::RejectedPathReason::Duplicate
             );
+            let folder =
+                crate::filesystem::resolve_audio_paths(vec![path.parent().unwrap().to_owned()]);
+            assert!(folder.items.is_empty());
+            assert_eq!(folder.rejected.len(), 1);
+            assert_eq!(
+                folder.rejected[0].reason,
+                crate::filesystem::RejectedPathReason::NetworkFolderUnavailable
+            );
             crate::metadata::MetadataService::default().load(&path);
             crate::lyrics::LyricsService::default().snapshot(
                 &PlaybackSnapshot {

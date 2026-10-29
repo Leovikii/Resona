@@ -327,8 +327,8 @@ export default function AudioCompressionApp() {
                 <Text fw={650} size="xs">{t("compression.warnings", { count: compression.scan.warnings.length })}</Text>
               </Group>
               {compression.scan.warnings.slice(0, 4).map((warning) => (
-                <Text c="dimmed" key={`${warning.code}-${warning.path}`} lineClamp={1} size="xs" title={warning.message}>
-                  {warning.path}
+                <Text c="dimmed" key={`${warning.code}-${warning.path}`} lineClamp={2} size="xs" title={`${t(`compression.scanWarnings.${warning.code}`, { defaultValue: warning.message })}: ${warning.path}`}>
+                  {t(`compression.scanWarnings.${warning.code}`, { defaultValue: warning.message })} · {warning.path}
                 </Text>
               ))}
             </div>

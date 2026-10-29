@@ -20,6 +20,7 @@ Dolphin 通过 KIO-FUSE 传给 Resona 的 NFS 文件可读，但本机父目录�
 6. **actor 计算相对动作**：空格切换、左右各 5 秒、上下各 10 个音量百分点在现有播放 actor 中按命令处理时的状态计算；复用现有暂停、继续、定位、音量方法并返回权威快照。限制到当前音轨范围和 0–100%；空格抑制重复，方向键重复输入有界。
 7. **反馈不产生第二播放器**：主窗口复用音量 Popover 显示滑条/百分比，压缩窗口显示简短状态反馈；不移焦、不堆叠通知、不用未成功的命令更新成功数值。定位与既有拖动事务协调。
 8. **拖放保留原始 URI**：锁定 Wry 的 GTK 后端将远端 URI percent-decode 后存入 PathBuf，可能损坏 `#`/`%`，且把 GTK 逻辑坐标标作物理坐标。Linux adapter 在 GTK SelectionData 边界保留 URI，沿用原生拖放生命周期；主/压缩窗口只消费 adapter 的统一逻辑坐标事件。Windows 沿用原生文件路径并按窗口缩放转换坐标。列表与压缩导入复用文件访问 adapter，在后台处理网络映射；不修改依赖源码或增加全局输入 hook。
+9. **系统语言来自原生接口**：本机 WebKit 在系统 GLib 语言为中文时返回 `navigator.language = "C"`，只依赖它会误选英文。Linux 使用 GLib language_names，Windows 使用 GetUserPreferredUILanguages；支持 POSIX 与 BCP 47 语言名。窗口首次 React 渲染前初始化，手动选择优先；原生读取失败显式记录并回退 WebView。只激活已有 Windows crate 的 Globalization feature，不引入 locale 库或强制中文。
 
 ## 后果与范围
 

@@ -205,6 +205,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_media_context,
             commands::select_media_paths,
+            commands::get_system_languages,
             commands::take_external_media_result,
             commands::control_playback,
             get_default_playlist,

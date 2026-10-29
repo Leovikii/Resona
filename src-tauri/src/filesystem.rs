@@ -28,6 +28,7 @@ pub enum RejectedPathReason {
     InvalidLocation,
     UnsupportedLocation,
     NetworkLocationUnavailable,
+    NetworkFolderUnavailable,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -238,7 +239,10 @@ fn audio_files_in_tree(root: &Path, rejected: &mut Vec<RejectedPath>) -> Vec<Pat
         }
 
         if !crate::platform::file_access::supports_directory_discovery(&path) {
-            rejected.push(rejected_path(path, RejectedPathReason::Unreadable));
+            rejected.push(rejected_path(
+                path,
+                RejectedPathReason::NetworkFolderUnavailable,
+            ));
             continue;
         }
         let entries = match fs::read_dir(&path) {

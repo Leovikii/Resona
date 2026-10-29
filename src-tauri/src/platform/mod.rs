@@ -9,6 +9,7 @@ pub mod file_dialog;
 pub mod file_drop;
 pub mod media_session;
 pub mod playback_projection;
+pub mod system_languages;
 pub mod taskbar;
 pub mod tray;
 pub mod window_controls;
