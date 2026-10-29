@@ -9,10 +9,10 @@
 - 本机发现 KIO-FUSE 目录枚举不只返回空，还会使原可读 NFS 文件返回 ENOTDIR；按 GIO 挂载类型识别后跳过同目录音频、自动 CUE、伴随歌词、外置封面与递归目录发现，提示选择文件。内嵌封面与正常本地/内核挂载目录逻辑保留。临时映射失效后需重新选择。
 - Linux 直接使用锁定的 ashpd 标准 XDG FileChooser API，保留完整 URI、取消/失败区别及真实 Wayland 父窗口；Windows 沿用 Tauri dialog 原生后端并指定父窗口。Arch 运行依赖已补 portal、KDE backend、KIO-FUSE；不修改用户桌面配置。
 - 本机人工反馈补修 Dolphin 拖入 NFS：GTK adapter 保留原始 URI，避免锁定 Wry 提前解码损坏 `#`/`%` 文件名；主/压缩窗口消费统一逻辑坐标事件，Linux 不重复除以缩放。列表导入与压缩输入统一在后台解析网络位置，失败可诊断；所有者已确认单首 NFS 从 Dolphin 拖入成功，多文件/取消与其他落点仍待验收。
-- 清除工具的 `LC_ALL` 覆盖后，所有者仍复现“跟随系统”显示英文；同机 WebKit 探针返回 `C`、GLib 返回中文，确认不能只依赖 navigator。现通过原生 GLib / Win32 GetUserPreferredUILanguages 读取语言，首次 React 渲染前初始化，手动偏好优先，保留可诊断回退；不强制中文。网络文件夹继续拒绝递归枚举，但改用明确的“暂不支持导入网络文件夹，请选择其中的音频文件”提示。
+- 清除工具的 `LC_ALL` 覆盖后，所有者仍复现“跟随系统”显示英文；同机 WebKit 探针返回 `C`、GLib 返回中文，确认不能只依赖 navigator。现通过原生 GLib / Win32 GetUserPreferredUILanguages 读取语言，首次 React 渲染前初始化，手动偏好优先，保留可诊断回退；不强制中文。网络文件夹继续拒绝递归枚举，但改用明确的“暂不支持导入网络文件夹，请选择其中的音频文件”提示。所有者已在重建程序中确认主界面中文、文件夹提示明确。
 - 主/压缩窗口新增 Space 播放暂停、左右 ±5 秒、上下 ±10 个音量百分点。Rust actor 计算相对动作；窗口聚焦、可见且无弹窗阻挡时生效，控件操作优先。主窗口复用音量滑条弹层，压缩窗口用单条百分比/音量条反馈。
 - 本机共享 Node 71 项、Rust 常规 132 项（15 项条件忽略）、fmt/Clippy、TypeScript/生产前端和嵌入前端 Release 构建通过；另有真实 FFmpeg 2 项、CUE 暂停定位及 NFS 完整解码/输出专项通过。拖放补修新增 URI 保真、取消清理、坐标、文件 URI 导入与去重检查，真实 NFS 原始 URI 导入专项通过。KDE chooser 的 OMV 选择和取消已由所有者操作，返回路径可读与取消结果自动断言通过。Release 桌面回归及两首 NFS 冷启动/第二实例、暂停/定位/继续通过；所有者确认单文件鼠标拖入成功，不扩展为未记录的其他拖放用例。详见 [Linux 验证](plans/0.3.0-beta.1-linux-validation.md)。
-- 已推送 dev，并创建保持草稿的 [PR #23](https://github.com/Leovikii/Resona/pull/23) 运行双平台 CI；不合并发布。拖放修正 `1689bb7` 已通过双平台 CI；语言与文件夹提示补修的最终门禁以 PR 最新 SHA 为准，Windows 新增 Win32 语言接口与实机语言清单。CI 不等于 Windows 原生通过；MSVC/CI 与实机操作的独立清单见 [Windows 交接](plans/0.3.0-beta.1-windows-validation.md)。语言差异已复现并补修，重建后的原生界面与 Windows 语言行为仍需独立验收；原生网络中断、物理听感与既有硬件/动画门禁仍保留。
+- 已推送 dev，并创建保持草稿的 [PR #23](https://github.com/Leovikii/Resona/pull/23) 运行双平台 CI；不合并发布。拖放修正 `1689bb7` 已通过双平台 CI；语言与文件夹提示补修的最终门禁以 PR 最新 SHA 为准，Windows 新增 Win32 语言接口与实机语言清单。CI 不等于 Windows 原生通过；MSVC/CI 与实机操作的独立清单见 [Windows 交接](plans/0.3.0-beta.1-windows-validation.md)。本机主界面语言与网络文件夹提示已由所有者实测通过，Windows 语言行为仍需独立验收；原生网络中断、物理听感与既有硬件/动画门禁仍保留。
 
 ## alpha.4 实施与验证
 
