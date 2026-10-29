@@ -22,7 +22,10 @@ Dolphin 通过 KIO-FUSE 传给 Resona 的 NFS 文件可读，但本机父目录�
 8. **拖放保留原始 URI**：锁定 Wry 的 GTK 后端将远端 URI percent-decode 后存入 PathBuf，可能损坏 `#`/`%`，且把 GTK 逻辑坐标标作物理坐标。Linux adapter 在 GTK SelectionData 边界保留 URI，沿用原生拖放生命周期；主/压缩窗口只消费 adapter 的统一逻辑坐标事件。Windows 沿用原生文件路径并按窗口缩放转换坐标。列表与压缩导入复用文件访问 adapter，在后台处理网络映射；不修改依赖源码或增加全局输入 hook。
 9. **系统语言来自原生接口**：本机 WebKit 在系统 GLib 语言为中文时返回 `navigator.language = "C"`，只依赖它会误选英文。Linux 使用 GLib language_names，Windows 使用 GetUserPreferredUILanguages；支持 POSIX 与 BCP 47 语言名。窗口首次 React 渲染前初始化，手动选择优先；原生读取失败显式记录并回退 WebView。只激活已有 Windows crate 的 Globalization feature，不引入 locale 库或强制中文。
 
-10. **网络目录直接使用 KIO**：所有者不接受永久禁用网络文件夹，也不接受以内核挂载作为前提。本机已复现 KIO NFS 列举的“.”为普通文件，KIO-FUSE 刷新该节点后可出现 ENOTDIR；应用通过 remoteUrl 还原来源，KIO ListJob 排除“.”/“..”后列目录，文件继续走已验证的物理映射与 Rodio。C++ adapter 静态编译进同一应用并动态链接系统 QtCore/KIO；仅在 re-exec 工作模式创建 QCoreApplication，先于 GTK/单实例初始化。工作模式无窗口，15 秒任务期限、20 秒父进程兜底，限制条目/响应大小并验证子名称；普通目录仍用标准库。三个文件夹入口、同目录上下文、CUE、歌词、封面与压缩扫描共用目录边界；导入复用已列出的 CUE 候选。选择该最小补修，不引入 libnfs、新播放引擎或网络源迁移。
+10. **网络目录直接使用 KIO**：所有者不接受永久禁用网络文件夹，也不接受以内核挂载作为前提。本机已复现 KIO NFS 列举的“.”为普通文件，KIO-FUSE 刷新该节点后可出现 ENOTDIR；应用通过 remoteUrl 还原来源，KIO ListJob 排除“.”/“..”后列目录，文件继续走已验证的物理映射与 Rodio。C++ adapter 静态编译进同一应用并动态链接系统 QtCore/KIO；仅在 re-exec 工作模式创建 QCoreApplication，先于 GTK/单实例初始化。工作模式无窗口，首次创建后以换行 JSON 串行复用 KIO 会话，Qt quit lock 保持事件循环直到父进程 EOF；每请求 15 秒任务期限、20 秒父进程读取兜底，失败回收、下一请求重建，限制条目/响应大小并验证子名称；普通目录仍用标准库。三个文件夹入口、同目录上下文、CUE、歌词、封面与压缩扫描共用目录边界；导入复用已列出的 CUE 候选。选择该最小补修，不引入 libnfs、新播放引擎或网络源迁移。
+
+11. **保留平台 URI 的标准表示**：KIO-FUSE remoteUrl 返回 Qt 可读 URI，空格/方括号/中文不代表无效路径。KIO adapter 使用 QUrl TolerantMode，保留 NFS、主机与无 userinfo 校验；不手工拼接或反复解码 URI。
+12. **共享导入互斥与反馈**：默认/用户列表、外部打开与压缩输入复用已有 file_task_gate，覆盖解析/扫描/提交，与转换、压缩扫描和安装互斥；忙时拒绝，不排队。主/压缩 UI 共用导入 gate 和 Rust busy/scanning 快照，200 毫秒后显示不遮挡正文的状态条，禁止重复添加/拖入，完成或失败释放，播放控制保持可用。不以未经测量的目录缓存换取速度。
 
 ## 后果与范围
 

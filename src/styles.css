@@ -2233,7 +2233,7 @@ h2.page-heading {
 
 .app-notice {
   width: max-content;
-  max-width: calc(100% - 32px);
+  max-width: min(380px, calc(100% - 32px));
   position: absolute;
   right: 16px;
   bottom: 14px;
@@ -2613,4 +2613,19 @@ h2.page-heading {
   .overflow-marquee-static {
     opacity: 1 !important;
   }
+}
+
+.main-region[data-importing] {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.file-import-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 12px 0;
+  padding: 8px 12px;
+  border-radius: var(--mantine-radius-sm);
+  background: var(--mantine-color-default);
+  border: 1px solid var(--mantine-color-default-border);
 }

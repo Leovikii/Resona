@@ -1,3 +1,4 @@
+import type { FileImportActivity } from "../../shared/bridge/useFileImportActivity";
 import { previewPlaybackControl, type PlaybackControl } from "./playbackShortcuts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
@@ -47,7 +48,7 @@ const emptyDefaultPlaylist: DefaultPlaylistSnapshot = {
   items: [],
 };
 
-export function usePlaybackController() {
+export function usePlaybackController(imports: FileImportActivity) {
   const documentVisible = useDocumentVisibility();
   const preview = import.meta.env.DEV && !isTauriRuntime();
   const previewPlayback = useMemo(() => previewSnapshot(), []);
@@ -204,8 +205,7 @@ export function usePlaybackController() {
     }
   }, [acceptPlaybackSnapshot, preview]);
 
-  const openPath = useCallback(async (path: string) => {
-    setPending(true);
+  const openPath = useCallback(async (path: string) => imports.run(async () => {
     try {
       if (preview) {
         const playback = playPreviewPath(snapshotRef.current, path);
@@ -223,15 +223,12 @@ export function usePlaybackController() {
       const failure = toPlaybackFailure(error);
       setSnapshot((current) => ({ ...current, error: failure }));
       return null;
-    } finally {
-      setPending(false);
     }
-  }, [acceptOpenResult, preview]);
+  }), [imports.run, acceptOpenResult, preview]);
 
-  const addDefaultItems = useCallback(async (paths: string[], position: number | null = null) => {
+  const addDefaultItems = useCallback(async (paths: string[], position: number | null = null) => imports.run(async () => {
     if (paths.length === 0) return null;
     setDefaultRejectedPaths([]);
-    setPending(true);
     try {
       const result = preview
         ? insertPreviewDefault(defaultPlaylistRef.current, paths, position)
@@ -245,10 +242,8 @@ export function usePlaybackController() {
       const failure = toPlaybackFailure(error);
       setSnapshot((current) => ({ ...current, error: failure }));
       return null;
-    } finally {
-      setPending(false);
     }
-  }, [acceptDefaultPlaylist, preview, refresh]);
+  }), [imports.run, acceptDefaultPlaylist, preview, refresh]);
 
   const chooseAndAddDefault = useCallback(async (kind: "files" | "folders") => {
     setDialogOpen(true);

@@ -106,6 +106,7 @@ export const resources = {
         },
       },
       library: {
+        importing: "正在扫描并加入文件…",
         default: "默认",
         currentPlaylist: "当前播放列表",
         locateCurrentTrack: "定位当前歌曲",
@@ -354,6 +355,7 @@ export const resources = {
         list_output_devices: "无法读取输出设备",
         invalid_output_device: "输出设备无效",
         output_device_unavailable: "输出设备不可用",
+        file_import_busy: "请等待当前文件任务完成",
         task_failed: "操作失败",
         dialog_open_failed: "无法打开文件选择窗口",
       },
@@ -466,6 +468,7 @@ export const resources = {
         },
       },
       library: {
+        importing: "Scanning and adding files…",
         default: "Default",
         currentPlaylist: "Current playlist",
         locateCurrentTrack: "Locate current track",
@@ -714,6 +717,7 @@ export const resources = {
         list_output_devices: "Could not read output devices",
         invalid_output_device: "The output device is invalid",
         output_device_unavailable: "The output device is unavailable",
+        file_import_busy: "Wait for the current file task to finish",
         task_failed: "The operation failed",
         dialog_open_failed: "Could not open the file picker",
       },

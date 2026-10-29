@@ -1,3 +1,4 @@
+import { useFileImportActivity } from "../shared/bridge/useFileImportActivity";
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode, WheelEvent } from "react";
 import { onFileDragDropEvent } from "../shared/bridge/fileDrop";
@@ -143,8 +144,9 @@ type DropTarget =
 
 export default function App() {
   const { t } = useTranslation();
-  const playback = usePlaybackController();
-  const library = useLibrary();
+  const fileImport = useFileImportActivity();
+  const playback = usePlaybackController(fileImport);
+  const library = useLibrary(fileImport);
   const desktopLyrics = useDesktopLyricsWindow();
   const applicationLifetime = useApplicationLifetime();
   const applicationUpdate = useApplicationUpdate();
@@ -171,9 +173,9 @@ export default function App() {
   ) | null>(null);
   const playlistLocateRequestIdRef = useRef(0);
   const noticeIdRef = useRef(0);
-  const dropActionsRef = useRef({ library, playback, t });
+  const dropActionsRef = useRef({ library, playback, t, fileImport });
   const autoLyricsPathRef = useRef<string | null>(null);
-  dropActionsRef.current = { library, playback, t };
+  dropActionsRef.current = { library, playback, t, fileImport };
 
   const openUpdateDialog = useCallback(() => {
     setUpdateDialogMounted(true);
@@ -370,6 +372,9 @@ export default function App() {
         setDropTarget(null);
         setExternalDragActive(false);
         return;
+      }
+      if (dropActionsRef.current.fileImport.busy) {
+        stopEdgeScroll(); setDropTarget(null); setExternalDragActive(false); return;
       }
       const clientX = event.payload.position.x;
       const clientY = event.payload.position.y;
@@ -594,7 +599,10 @@ export default function App() {
         </>
       ) : sidebar}
 
-      <section className="main-region" data-player-expanded={playerExpanded || undefined}>
+      <section className="main-region" data-importing={fileImport.showStatus || undefined} data-player-expanded={playerExpanded || undefined}>
+        {fileImport.showStatus && <div className="file-import-status" role="status" aria-live="polite">
+          <Loader size="xs" /><Text size="sm">{t("library.importing")}</Text>
+        </div>}
         {playerExpanded && hasCurrentTrack ? (
           <MemoFullPlayerView
             compact={compact}
@@ -615,7 +623,7 @@ export default function App() {
           <div className="view-transition" key={`${selection.kind}-${selectedPlaylist?.id ?? ""}`}>
             {selection.kind === "default" && (
               <MemoDefaultPlaylistView
-                busy={playback.busy}
+                busy={playback.busy || fileImport.busy}
                 currentCue={playback.currentItem?.cue ?? null}
                 currentPath={playback.selectedPath}
                 dropTarget={dropTarget}
@@ -636,7 +644,7 @@ export default function App() {
             )}
             {selection.kind === "user" && (
               <MemoUserPlaylistView
-                busy={playback.busy || library.loading}
+                busy={playback.busy || library.loading || fileImport.busy}
                 currentCue={playback.currentItem?.cue ?? null}
                 currentPath={playback.selectedPath}
                 dropTarget={dropTarget}
@@ -717,7 +725,7 @@ export default function App() {
               if (event.key !== "Enter") return;
               event.preventDefault();
               const name = playlistName.trim();
-              if (!name || library.loading) return;
+              if (!name || library.loading || fileImport.busy) return;
               void library.createPlaylist({ name }).then((result) => {
                 if (!result) return;
                 setSelection({ kind: "user", playlistId: result.playlist.id });
@@ -731,7 +739,7 @@ export default function App() {
               {t("common.cancel")}
             </Button>
             <Button
-              disabled={!playlistName.trim() || library.loading}
+              disabled={!playlistName.trim() || library.loading || fileImport.busy}
               loading={library.loading}
               onClick={() => {
                 const name = playlistName.trim();

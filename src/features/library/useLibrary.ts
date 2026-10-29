@@ -1,3 +1,4 @@
+import type { FileImportActivity } from "../../shared/bridge/useFileImportActivity";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { selectAudioFiles, selectAudioFolders } from "../../shared/bridge/audioDialog";
@@ -28,7 +29,7 @@ const previewItems: Record<number, PlaylistItem[]> = {
   2: [item(4, 2, "C:\\Music\\Afterimage.flac", 0)],
 };
 
-export function useLibrary() {
+export function useLibrary(imports: FileImportActivity) {
   const preview = import.meta.env.DEV && !isTauriRuntime();
   const [playlists, setPlaylists] = useState<PlaylistSummary[]>(preview ? previewPlaylists : []);
   const [previewItemsByPlaylist, setPreviewItemsByPlaylist] = useState<Record<number, PlaylistItem[]>>(
@@ -109,7 +110,7 @@ export function useLibrary() {
     paths?: string[];
     position?: number | null;
     requireItems?: boolean;
-  }) => {
+  }) => imports.run(async () => {
     if (paths.length > 0) setRejectedPaths([]);
     setLoading(true);
     try {
@@ -157,7 +158,7 @@ export function useLibrary() {
     } finally {
       setLoading(false);
     }
-  }, [playlists, preview, previewItemsByPlaylist, refresh, reportError]);
+  }), [imports.run, playlists, preview, previewItemsByPlaylist, refresh, reportError]);
 
   const renamePlaylist = useCallback(async (id: number, name: string) => {
     setLoading(true);
@@ -258,7 +259,7 @@ export function useLibrary() {
     playlistId: number,
     paths: string[],
     position: number | null = null,
-  ) => {
+  ) => imports.run(async () => {
     if (paths.length === 0) return null;
     setRejectedPaths([]);
     setItemsLoading(true);
@@ -299,7 +300,7 @@ export function useLibrary() {
     } finally {
       setItemsLoading(false);
     }
-  }, [playlists, preview, previewItemsByPlaylist, refresh, reportError]);
+  }), [imports.run, playlists, preview, previewItemsByPlaylist, refresh, reportError]);
 
   const chooseAndAddItems = useCallback(async (playlistId: number, position: number | null = null) => {
     try {

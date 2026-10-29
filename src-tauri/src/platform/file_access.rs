@@ -172,60 +172,78 @@ pub fn run_directory_worker() -> i32 {
 }
 
 #[cfg(target_os = "linux")]
-fn network_directory(path: &Path, uri: &str) -> std::io::Result<Vec<PathBuf>> {
-    use std::io::{Read, Seek, Write};
-    use std::process::{Command, Stdio};
-    use std::time::{Duration, Instant};
+struct DirectoryWorker {
+    child: std::process::Child,
+    output: std::io::BufReader<std::os::unix::net::UnixStream>,
+}
 
-    let executable = std::env::current_exe()?;
-    #[cfg(test)]
-    let executable = std::env::var_os("RESONA_TEST_BINARY")
-        .map(PathBuf::from)
-        .unwrap_or(executable);
-    let mut output = tempfile::tempfile()?;
-    let mut child = Command::new(executable)
-        .arg("--resona-list-directory")
-        .stdin(Stdio::piped())
-        .stdout(output.try_clone()?)
-        .stderr(Stdio::null())
-        .spawn()?;
-    let result = (|| {
-        let request = serde_json::to_vec(&serde_json::json!({"uri": uri}))?;
-        if request.len() > 65536 {
-            return Err(std::io::Error::other("Network directory URI is too long"));
-        }
-        child.stdin.take().unwrap().write_all(&request)?;
-        let deadline = Instant::now() + Duration::from_secs(20);
-        loop {
-            if let Some(status) = child.try_wait()? {
-                if !status.success() {
-                    return Err(std::io::Error::other(format!(
-                        "KIO directory request failed: {status}"
-                    )));
-                }
-                break;
-            }
-            if Instant::now() >= deadline {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "KIO directory request timed out",
-                ));
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        output.rewind()?;
+#[cfg(target_os = "linux")]
+impl DirectoryWorker {
+    fn start() -> std::io::Result<Self> {
+        use std::os::fd::OwnedFd;
+        use std::os::unix::net::UnixStream;
+        use std::process::{Command, Stdio};
+        let executable = std::env::current_exe()?;
+        #[cfg(test)]
+        let executable = std::env::var_os("RESONA_TEST_BINARY")
+            .map(PathBuf::from)
+            .unwrap_or(executable);
+        let (output, child_output) = UnixStream::pair()?;
+        output.set_read_timeout(Some(std::time::Duration::from_secs(20)))?;
+        let child = Command::new(executable)
+            .arg("--resona-list-directory")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::from(OwnedFd::from(child_output)))
+            .stderr(Stdio::null())
+            .spawn()?;
+        Ok(Self {
+            child,
+            output: std::io::BufReader::new(output),
+        })
+    }
+
+    fn list(&mut self, path: &Path, request: &[u8]) -> std::io::Result<Vec<PathBuf>> {
+        use std::io::{BufRead, Read, Write};
+        let input = self.child.stdin.as_mut().expect("worker stdin is piped");
+        input.write_all(request)?;
+        input.write_all(b"\n")?;
         let mut bytes = Vec::new();
-        output.take(16 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
-        if bytes.len() > 16 * 1024 * 1024 {
-            return Err(std::io::Error::other(
-                "Network directory response is too large",
-            ));
+        self.output
+            .by_ref()
+            .take(16 * 1024 * 1024 + 1)
+            .read_until(b'\n', &mut bytes)?;
+        if bytes.len() > 16 * 1024 * 1024 || bytes.last() != Some(&b'\n') {
+            return Err(std::io::Error::other("Invalid network directory response"));
         }
         directory_paths(path, &bytes)
-    })();
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for DirectoryWorker {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn network_directory(path: &Path, uri: &str) -> std::io::Result<Vec<PathBuf>> {
+    // One serialized session preserves KIO connections/handles; EOF ends the child with its parent.
+    static WORKER: std::sync::Mutex<Option<DirectoryWorker>> = std::sync::Mutex::new(None);
+    let request = serde_json::to_vec(&serde_json::json!({"uri": uri}))?;
+    if request.len() > 65536 {
+        return Err(std::io::Error::other("Network directory URI is too long"));
+    }
+    let mut worker = WORKER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if worker.is_none() {
+        *worker = Some(DirectoryWorker::start()?);
+    }
+    let result = worker.as_mut().unwrap().list(path, &request);
     if let Err(error) = &result {
-        let _ = child.kill();
-        let _ = child.wait();
+        *worker = None;
         log::warn!("Network directory listing failed: {error}");
     }
     result
@@ -302,6 +320,47 @@ mod tests {
         assert!(!error.to_string().is_empty());
         eprintln!("Unreachable directory returned after {:?}", start.elapsed());
     }
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires RESONA_TEST_NFS_LOCATIONS and RESONA_TEST_BINARY in a KDE session"]
+    fn network_worker_reuses_process_and_recovers_after_protocol_failure() {
+        let locations: Vec<String> =
+            serde_json::from_str(&std::env::var("RESONA_TEST_NFS_LOCATIONS").unwrap()).unwrap();
+        let root = resolve_location(&locations[0])
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_owned();
+        let uri = mapped_location(&root).unwrap();
+        let request = serde_json::to_vec(&serde_json::json!({"uri": uri})).unwrap();
+        let mut worker = DirectoryWorker::start().unwrap();
+        let pid = worker.child.id();
+        let mut first = worker.list(&root, &request).unwrap();
+        first.sort();
+        assert!(!first.is_empty());
+        for _ in 0..3 {
+            let mut next = worker.list(&root, &request).unwrap();
+            next.sort();
+            assert_eq!(next, first);
+            assert_eq!(worker.child.id(), pid);
+            assert!(worker.child.try_wait().unwrap().is_none());
+        }
+        assert!(network_directory(&root, "https://invalid.example/").is_err());
+        let mut recovered = network_directory(&root, &uri).unwrap();
+        recovered.sort();
+        assert_eq!(recovered, first);
+        assert!(network_directory(&root, &"x".repeat(65537)).is_err());
+        worker.child.stdin.take();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while worker.child.try_wait().unwrap().is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "worker exits on parent EOF"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
     #[test]
     fn paths_and_file_uris_are_not_confused_with_network_protocols() {
         let root = tempfile::tempdir().unwrap();

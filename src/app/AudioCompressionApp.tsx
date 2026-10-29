@@ -1,3 +1,4 @@
+import { useFileImportActivity } from "../shared/bridge/useFileImportActivity";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent, ReactNode } from "react";
 import { onFileDragDropEvent } from "../shared/bridge/fileDrop";
@@ -61,7 +62,10 @@ import { usePreferences } from "./preferences";
 
 export default function AudioCompressionApp() {
   const { t } = useTranslation();
+  const fileImport = useFileImportActivity();
   const compression = useAudioCompression();
+  const addInputs = useCallback((paths: string[]) => fileImport.run(() => compression.addInputs(paths)),
+    [fileImport.run, compression.addInputs]);
   const { compression: preferences, setCompression } = usePreferences();
   const { deleteSource, preset } = preferences;
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -99,7 +103,7 @@ export default function AudioCompressionApp() {
   const overall = compressionProgress(compression.snapshot);
   const scanBusy = compression.scan.status === "scanning" || compression.scan.status === "cancelling";
   const taskBusy = compression.snapshot.status === "running" || compression.snapshot.status === "cancelling";
-  const locked = scanBusy || taskBusy || compression.pending;
+  const locked = scanBusy || taskBusy || compression.pending || fileImport.busy;
   const finished = compression.snapshot.status !== "idle" && !taskBusy;
   const readyPaths = useMemo(() => collectReadyPaths(compression.scan.roots), [compression.scan.roots]);
   const readyBytes = useMemo(() => collectReadyBytes(compression.scan.roots), [compression.scan.roots]);
@@ -183,7 +187,7 @@ export default function AudioCompressionApp() {
       }
       setDragActive(false);
       if (!locked && event.payload.paths.length > 0) {
-        void compression.addInputs(event.payload.paths);
+        void addInputs(event.payload.paths);
       }
     }).then((stop) => {
       if (disposed) stop();
@@ -193,7 +197,7 @@ export default function AudioCompressionApp() {
       disposed = true;
       unlisten?.();
     };
-  }, [compression.addInputs, locked]);
+  }, [addInputs, locked]);
 
   const reportSelectionError = (error: unknown) => {
     const code = typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
@@ -203,13 +207,13 @@ export default function AudioCompressionApp() {
   const addFiles = async () => {
     try {
       const paths = await selectWavFiles();
-      if (paths.length > 0) void compression.addInputs(paths);
+      if (paths.length > 0) void addInputs(paths);
     } catch (error) { reportSelectionError(error); }
   };
   const addFolders = async () => {
     try {
       const paths = await selectCompressionFolders();
-      if (paths.length > 0) void compression.addInputs(paths);
+      if (paths.length > 0) void addInputs(paths);
     } catch (error) { reportSelectionError(error); }
   };
   const start = () => {
@@ -301,9 +305,9 @@ export default function AudioCompressionApp() {
         </Group>
       </section>
 
-      {(scanBusy || compression.scan.warnings.length > 0 || compression.error) && (
+      {(scanBusy || fileImport.showStatus || compression.scan.warnings.length > 0 || compression.error) && (
         <section className="compression-status-band" aria-live="polite">
-          {scanBusy && (
+          {(scanBusy || fileImport.showStatus) && (
             <div className="compression-scan-progress">
               <Progress
                 animated
@@ -313,7 +317,7 @@ export default function AudioCompressionApp() {
                   : 20}
               />
               <Text c="dimmed" size="xs">
-                {t("compression.scanning", {
+                {!scanBusy ? t("library.importing") : t("compression.scanning", {
                   candidates: compression.scan.candidateFiles,
                   scanned: compression.scan.scannedEntries,
                 })}

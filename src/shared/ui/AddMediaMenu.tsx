@@ -31,10 +31,10 @@ export function AddMediaMenu({
         </Button>
       </Menu.Target>
       <Menu.Dropdown>
-        <Menu.Item leftSection={<FileAudio size={15} />} onClick={onAddFiles}>
+        <Menu.Item disabled={disabled} leftSection={<FileAudio size={15} />} onClick={onAddFiles}>
           {fileLabel}
         </Menu.Item>
-        <Menu.Item leftSection={<FolderPlus size={15} />} onClick={onAddFolders}>
+        <Menu.Item disabled={disabled} leftSection={<FolderPlus size={15} />} onClick={onAddFolders}>
           {folderLabel}
         </Menu.Item>
       </Menu.Dropdown>

@@ -210,6 +210,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             open_media_context,
+            commands::get_file_import_state,
             commands::select_media_paths,
             commands::get_system_languages,
             commands::take_external_media_result,
@@ -598,9 +599,17 @@ fn dispatch_external_media(app: tauri::AppHandle, arguments: Vec<String>, cwd: s
         return;
     }
     let media_import = Arc::clone(app.state::<Arc<MediaImportService>>().inner());
+    let compression = Arc::clone(app.state::<Arc<compression::CompressionService>>().inner());
     tauri::async_runtime::spawn(async move {
         let service = Arc::clone(&media_import);
         let result = tauri::async_runtime::spawn_blocking(move || {
+            let _guard =
+                compression
+                    .file_import_guard()
+                    .map_err(|error| playback::PlaybackFailure {
+                        code: playback::PlaybackErrorCode::FileImportBusy,
+                        message: error.message,
+                    })?;
             let Some(path) = media_import::external_media_path(arguments, &cwd)? else {
                 return Ok(None);
             };

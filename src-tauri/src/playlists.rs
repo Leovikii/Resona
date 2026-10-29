@@ -78,6 +78,81 @@ mod network_tests {
     use std::io::Read;
     use std::sync::Arc;
 
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct TreeFixture {
+        location: String,
+        relative_audio: Vec<String>,
+    }
+
+    #[test]
+    #[ignore = "requires private RESONA_TEST_NFS_TREE manifest and RESONA_TEST_BINARY in a KDE session"]
+    fn nfs_recursive_tree_matches_manifest_and_measures_local_baseline() {
+        let fixture: TreeFixture =
+            serde_json::from_str(&std::env::var("RESONA_TEST_NFS_TREE").unwrap()).unwrap();
+        let root = crate::platform::file_access::resolve_location(&fixture.location).unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let database = PersistenceService::open(&data.path().join("lists.sqlite")).unwrap();
+        let start = std::time::Instant::now();
+        let created = create_playlist(
+            &database,
+            "Tree regression",
+            vec![fixture.location.into()],
+            None,
+            true,
+            true,
+        )
+        .unwrap();
+        let create_ms = start.elapsed().as_secs_f64() * 1000.0;
+        assert!(
+            created.rejected.is_empty(),
+            "complete tree must have no unreadable branches"
+        );
+        let mut actual = created
+            .items
+            .iter()
+            .map(|item| {
+                assert_eq!(item.folder_root.as_deref(), root.to_str());
+                std::path::Path::new(&item.path)
+                    .strip_prefix(&root)
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>();
+        actual.sort();
+        assert!(
+            actual == fixture.relative_audio,
+            "recursive import must match every expected relative audio path"
+        );
+        let local = data.path().join("local");
+        for relative in &fixture.relative_audio {
+            let path = local.join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"scan only").unwrap();
+        }
+        for run in 0..3 {
+            let start = std::time::Instant::now();
+            let network = crate::filesystem::resolve_audio_paths(vec![root.clone()]);
+            let network_ms = start.elapsed().as_secs_f64() * 1000.0;
+            let start = std::time::Instant::now();
+            let baseline = crate::filesystem::resolve_audio_paths(vec![local.clone()]);
+            let local_ms = start.elapsed().as_secs_f64() * 1000.0;
+            assert!(network.rejected.is_empty());
+            assert_eq!(network.items.len(), fixture.relative_audio.len());
+            assert_eq!(baseline.items.len(), network.items.len());
+            eprintln!("Recursive import run {run}: network {network_ms:.2} ms, local audio structure {local_ms:.2} ms");
+        }
+        let appended =
+            add_playlist_items(&database, created.playlist.id, vec![root.clone()], None).unwrap();
+        assert_eq!(appended.items.len(), created.items.len() * 2);
+        eprintln!(
+            "Tree create/commit {create_ms:.2} ms; {} paths, root contexts and append verified",
+            created.items.len()
+        );
+    }
+
     #[test]
     #[ignore = "requires RESONA_TEST_NFS_LOCATIONS and RESONA_TEST_BINARY in a KDE session"]
     fn nfs_folders_create_append_and_default_import_without_invalidating_files() {

@@ -133,8 +133,27 @@ impl CompressionFailure {
     }
 }
 
+pub struct FileImportGuard<'a> {
+    _gate: MutexGuard<'a, ()>,
+    active: &'a AtomicBool,
+}
+
+impl Drop for FileImportGuard<'_> {
+    fn drop(&mut self) {
+        self.active.store(false, Ordering::Release);
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileImportSnapshot {
+    pub busy: bool,
+    pub scanning: bool,
+}
+
 pub struct CompressionService {
     file_task_gate: Mutex<()>,
+    import_active: AtomicBool,
     ffmpeg: PathBuf,
     next_task_id: AtomicU64,
     next_scan_id: AtomicU64,
@@ -157,6 +176,7 @@ impl Default for CompressionService {
         let ffmpeg = resolve_ffmpeg_binary();
         Self {
             file_task_gate: Mutex::new(()),
+            import_active: AtomicBool::new(false),
             ffmpeg,
             next_task_id: AtomicU64::new(1),
             next_scan_id: AtomicU64::new(1),
@@ -171,6 +191,32 @@ impl Default for CompressionService {
 }
 
 impl CompressionService {
+    pub fn file_import_guard(&self) -> Result<FileImportGuard<'_>, CompressionFailure> {
+        let gate = self.system_install_guard().map_err(|_| {
+            CompressionFailure::new(
+                "file_import_busy",
+                "Wait for the current file task to finish",
+            )
+        })?;
+        self.import_active.store(true, Ordering::Release);
+        Ok(FileImportGuard {
+            _gate: gate,
+            active: &self.import_active,
+        })
+    }
+
+    pub fn file_import_snapshot(&self) -> FileImportSnapshot {
+        let scanning = self.import_active.load(Ordering::Acquire)
+            || matches!(
+                self.scan_snapshot().status.as_str(),
+                "scanning" | "cancelling"
+            );
+        FileImportSnapshot {
+            busy: scanning || self.has_active_work() || self.file_task_gate.try_lock().is_err(),
+            scanning,
+        }
+    }
+
     pub fn system_install_guard(&self) -> Result<MutexGuard<'_, ()>, CompressionFailure> {
         let guard = self.file_task_gate.try_lock().map_err(|_| {
             CompressionFailure::new("compression_busy", "A file task or installation is running")
@@ -261,6 +307,34 @@ impl CompressionService {
                 "no files or folders were selected",
             ));
         }
+        if self.has_active_work() {
+            return Err(CompressionFailure::new(
+                "compression_busy",
+                "A file task is running",
+            ));
+        }
+        self.import_active.store(true, Ordering::Release);
+        let _import_guard = FileImportGuard {
+            _gate: _install_guard,
+            active: &self.import_active,
+        };
+        let paths = paths
+            .into_iter()
+            .map(|path| {
+                crate::platform::file_access::resolve_path(path).map_err(|error| {
+                    use crate::playback::PlaybackErrorCode;
+                    let code = match error.code {
+                        PlaybackErrorCode::InvalidLocation => "invalid_location",
+                        PlaybackErrorCode::UnsupportedLocation => "unsupported_location",
+                        PlaybackErrorCode::NetworkLocationUnavailable => {
+                            "network_location_unavailable"
+                        }
+                        _ => "compression_input_unavailable",
+                    };
+                    CompressionFailure::new(code, error.message)
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let mut task = self.prepare_input_change()?;
         {
             let mut workspace = self
@@ -1375,6 +1449,67 @@ fn resolve_ffmpeg_binary() -> PathBuf {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires private RESONA_TEST_NFS_TREE manifest and RESONA_TEST_BINARY in a KDE session"]
+    fn nfs_compression_scan_preserves_tree_and_shared_import_exclusion() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(&std::env::var("RESONA_TEST_NFS_TREE").unwrap()).unwrap();
+        let location = fixture["location"].as_str().unwrap();
+        let expected = fixture["relativeWav"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        let root = crate::platform::file_access::resolve_location(location).unwrap();
+        let service = Arc::new(CompressionService::default());
+        let start = std::time::Instant::now();
+        service
+            .add_scan_inputs(vec![PathBuf::from(location)])
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        let snapshot = loop {
+            let snapshot = service.scan_snapshot();
+            if !matches!(snapshot.status.as_str(), "scanning" | "cancelling") {
+                break snapshot;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(10));
+        };
+        assert!(
+            snapshot.warnings.is_empty(),
+            "network traversal must not hide unreadable subdirectories"
+        );
+        assert_eq!(snapshot.status, "ready");
+        assert_eq!(
+            snapshot.input_roots,
+            vec![root.to_string_lossy().to_string()]
+        );
+        let mut actual = snapshot
+            .roots
+            .iter()
+            .flat_map(file_nodes)
+            .map(|node| {
+                Path::new(&node.path)
+                    .strip_prefix(&root)
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>();
+        actual.sort();
+        assert!(
+            actual == expected,
+            "compression must discover every WAV path"
+        );
+        assert_eq!(snapshot.candidate_files, expected.len());
+        assert!(!service.file_import_snapshot().busy);
+        assert!(service.file_import_guard().is_ok());
+        eprintln!("NFS compression scan: {} entries, {} WAV candidates, {} validated; {:.2} ms; shared lock released", snapshot.scanned_entries, snapshot.candidate_files, snapshot.validated_files, start.elapsed().as_secs_f64() * 1000.0);
+    }
+
     #[test]
     fn presets_map_to_lossless_compression_levels() {
         assert_eq!(CompressionPreset::Fast.level(), "0");
@@ -1552,6 +1687,70 @@ mod tests {
         assert!(service.system_install_guard().is_err());
         service.snapshot.lock().unwrap().status = "idle".into();
         assert!(service.system_install_guard().is_ok());
+    }
+
+    #[test]
+    fn imports_reject_concurrent_file_tasks_and_release_after_failure() {
+        let service = Arc::new(CompressionService::default());
+        let failed_import = || -> Result<(), ()> {
+            let _guard = service.file_import_guard().unwrap();
+            assert!(service.file_import_snapshot().busy);
+            assert!(service.file_import_snapshot().scanning);
+            std::thread::scope(|scope| {
+                scope
+                    .spawn(|| {
+                        assert_eq!(
+                            service.file_import_guard().err().unwrap().code,
+                            "file_import_busy"
+                        );
+                        assert!(service.system_install_guard().is_err());
+                        assert_eq!(
+                            service
+                                .add_scan_inputs(vec!["test.wav".into()])
+                                .unwrap_err()
+                                .code,
+                            "compression_busy"
+                        );
+                        assert_eq!(
+                            service
+                                .start(
+                                    vec!["test.wav".into()],
+                                    CompressionPreset::Fast,
+                                    false,
+                                    false
+                                )
+                                .unwrap_err()
+                                .code,
+                            "compression_busy"
+                        );
+                    })
+                    .join()
+                    .unwrap();
+            });
+            Err(())
+        };
+        assert!(failed_import().is_err());
+        assert!(!service.file_import_snapshot().busy);
+        assert!(!service.file_import_snapshot().scanning);
+        assert!(service.file_import_guard().is_ok());
+        for status in ["scanning", "cancelling"] {
+            service.scan_snapshot.lock().unwrap().status = status.into();
+            assert_eq!(
+                service.file_import_guard().err().unwrap().code,
+                "file_import_busy"
+            );
+            assert!(service.file_import_snapshot().scanning);
+        }
+        service.scan_snapshot.lock().unwrap().status = "idle".into();
+        assert!(service.file_import_guard().is_ok());
+        assert_eq!(
+            service
+                .add_scan_inputs(vec!["https://example.com/a.wav".into()])
+                .unwrap_err()
+                .code,
+            "unsupported_location"
+        );
+        assert!(!service.file_import_snapshot().busy);
     }
 
     #[test]
