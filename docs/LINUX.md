@@ -2,7 +2,7 @@
 
 `0.3.0-alpha.1` 开始支持 Arch Linux 系 x86_64 的原生 Wayland 会话。本机验证环境为 CachyOS、KDE Plasma、PipeWire；其他发行版、X11 和 ARM 不在范围内；交付状态见 [STATUS](STATUS.md)。
 
-当前开发版本为 [0.3.0-beta.1](plans/0.3.0-beta.1.md)；[Linux 已有验证与保留项](plans/0.3.0-beta.1-linux-validation.md)、[Windows 自动结果与人工清单](plans/0.3.0-beta.1-windows-validation.md)。所有者已授权测试通过后合并发布，原生人工项尚待确认。当前公开版为 alpha.4，交付事实见 [main Actions](https://github.com/Leovikii/Resona/actions/workflows/main-merge-delivery.yml)。当前 Windows 主机缺少 KDE/Wayland；CI 无法覆盖的 Linux 桌面、动画/材质与硬件项目交由人工，不用鼠标模拟替代。历史压缩最小化动画未捕获不计通过，后续只人工观察；规则见 [开发规范](DEVELOPMENT.md#双平台精简执行)。
+当前开发版本为 [0.3.0-beta.1](plans/0.3.0-beta.1.md)；[Linux 已有验证、自动化交接与保留项](plans/0.3.0-beta.1-linux-validation.md)、[Windows 自动结果与人工清单](plans/0.3.0-beta.1-windows-validation.md)。所有者已授权测试通过后合并发布，原生人工项尚待确认。当前公开版为 alpha.4，交付事实见 [main Actions](https://github.com/Leovikii/Resona/actions/workflows/main-merge-delivery.yml)。Linux 自动化由 Linux 平台 AI agent 和测试脚本执行，Arch CI 补足容器检查；当前 Windows 主机缺少 KDE/Wayland 不构成人工接管自动化的理由。确需视觉或物理操作的项目仍人工验收，不用鼠标模拟替代。历史压缩最小化动画未捕获不计通过，后续只人工观察；规则见 [开发规范](DEVELOPMENT.md#双平台精简执行)。
 
 ## 安装、打开方式与更新
 
@@ -139,7 +139,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked --features tauri/custom
   native_window_controls_and_geometry -- --ignored --nocapture --test-threads=1
 ```
 
-以上会话测试仅在已有 KDE/Wayland 环境运行；没有环境时交由人工验收，不模拟鼠标或新建交互驱动。窗口用例保留 GTK 内容就绪、Tauri 原生动作/事件、尺寸记忆、两次重建与并发几何断言；移除 qdbus 动画轮询，不要求启用 maximize/squash 特效。最小化无 Wayland 状态确认，协议请求与实际动画分开记录；标题按钮真实命中、动画、模糊、菜单和选择器操作由人工检查。
+以上会话测试由 Linux 平台 AI agent 在已有 KDE/Wayland 环境通过测试脚本执行；当前主机没有环境时保留待 Linux agent 执行，不改派人工、不模拟鼠标或新建交互驱动。窗口用例保留 GTK 内容就绪、Tauri 原生动作/事件、尺寸记忆、两次重建与并发几何断言；移除 qdbus 动画轮询，不要求启用 maximize/squash 特效。最小化无 Wayland 状态确认，协议请求与实际动画分开记录；标题按钮真实命中、动画、模糊、菜单和选择器操作由人工检查。
 
 原生 Release 集成回归（先关闭所有 Resona 实例，脚本拒绝复用正在运行的应用）：
 

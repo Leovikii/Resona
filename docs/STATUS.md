@@ -4,10 +4,10 @@
 
 ## beta.1 实施与待验收
 
-- 当前验证主机为 Windows 11 x64 build 26200；以下 CachyOS/KDE 结果是此前 Linux 实机记录。本轮 `991f045` 的 Node 71 通过/4 平台跳过、Rust 145 通过/12 条件忽略，另 9 项真实输出/CUE/SMTC 和 1 项固定 FFmpeg 转换矩阵通过；fmt/Clippy、前端/嵌入 Release、许可证/品牌资源/fixture/工作流检查通过。[最新基线双平台 CI](https://github.com/Leovikii/Resona/actions/runs/40884269546) 通过，后续提交仍需新 CI。详情及人工清单见 [Windows 验证](plans/0.3.0-beta.1-windows-validation.md)。
+- 当前验证主机为 Windows 11 x64 build 26200；以下 CachyOS/KDE 结果是此前 Linux 实机记录。本轮 `991f045` 的 Node 71 通过/4 平台跳过、Rust 145 通过/12 条件忽略，另 9 项真实输出/CUE/SMTC 和 1 项固定 FFmpeg 转换矩阵通过；fmt/Clippy、前端/嵌入 Release、许可证/品牌资源/fixture/工作流检查通过。[最新基线双平台 CI](https://github.com/Leovikii/Resona/actions/runs/40888887844) 通过，后续提交仍需新 CI。详情及人工清单见 [Windows 验证](plans/0.3.0-beta.1-windows-validation.md)。
 - 所有者本轮授权 Windows 测试通过后合并 PR #23、由 main CD 发布并将 dev 快进到 main；原生人工结果尚未完整确认，当前不合并发布。Windows 测试版使用独立标识隔离现有数据；没有执行 NSIS 覆盖/卸载，不提交私人媒体路径。
 - Windows 映射网络目录 19 个 FLAC/对应歌词可读，一首真实 FLAC 的目录/去重、完整解码、seek 和低音量暂停/继续专项通过。测试移除“200 毫秒必已启动”的固定等待，最多 5 秒等待实际进度，并在暂停后读取权威快照；不修改播放生产逻辑，不将单首专项扩展成全目录播放或听感通过。
-- 所有者要求禁止鼠标模拟等低效交互测试。保留可靠的 Node/Rust、原生 API/D-Bus 和 CI；当前主机及 CI 无法验证的 Linux 桌面/视觉/硬件项目交由人工。已删除 chooser 测试中的人工点击分支与 KWin 动画轮询，尺寸/重建各保留两次往返；历史压缩最小化动画未捕获保留为未通过记录，今后由人工观察。规则见 [开发规范](DEVELOPMENT.md#双平台精简执行)。
+- 所有者要求禁止鼠标模拟等低效交互测试。Windows 无法自动覆盖的桌面交互交由人工；Linux 自动化由 Linux 平台的 AI agent 和测试脚本执行，包括依赖 KDE/Wayland、D-Bus 和真实输出的条件测试，Arch CI 覆盖容器检查。当前 Windows 主机缺少 Linux 环境的项目标为待 Linux agent 执行，不改派人工。已删除 chooser 测试中的人工点击分支与 KWin 动画轮询，尺寸/重建各保留两次往返；历史压缩最小化动画未捕获保留为未通过记录，视觉和物理操作仍人工验收。规则见 [开发规范](DEVELOPMENT.md#双平台精简执行)。
 
 - 播放列表外部拖放已扩大热区：宽屏侧栏空白处可拖入创建列表，固定 44px 高新建按钮仅用于点击，已有列表整行高亮追加；宽/窄屏间隙使用 28px 几何吸附且不撑开布局，窄屏加号为 44×32px 普通按钮、标签末尾空白可拖入新建。窄屏用户标签右侧增加悬停/聚焦删除按钮，预留位置且不嵌套按钮；宽/窄高亮不再被普通悬停覆盖。末尾新建仅显示空白区高亮，隐藏同位置插入线，避免边框重叠；正文底部固定显示新建/追加目标，沿用导入互斥和边缘滚动。共享 Node 75 项、TypeScript/Vite/嵌入 Release 与桌面生命周期回归通过，四种规定视口代表性明暗及新建/追加预览通过；原生 Dolphin 拖影与实际落点待所有者验收。
 
@@ -72,7 +72,7 @@
 
 - beta.1 已替换 Linux GTK chooser，并通过 KIO 目录边界恢复 NFS 递归导入与伴随文件发现。真实文件夹后端已通过，鼠标落点、文件夹 chooser、网络断线/权限失败与恢复仍需实机专项；不能将当前会话映射当作永久网络列表路径。
 - 语言初始化已改用原生接口，避免本机 WebKit 报告 `C` 导致英文；用户偏好为 `system`，手动选择仍优先。需继续验证实际主/辅助窗口、原始 Dolphin 冷启动及 Windows 显示语言，不能仅凭进程环境宣布 UI 通过。
-- 此前 Linux 实机为 CachyOS / KDE Plasma 6.8.1 / 原生 Wayland，双屏均为 150% 缩放。当前 Windows 主机不重跑 Linux 桌面交互；缺少环境的项目交由人工，Arch 包安装事务由 disposable Actions 容器补足。Polkit 授权、应用内跨版本升级与重启仍未验收。
+- 此前 Linux 实机为 CachyOS / KDE Plasma 6.8.1 / 原生 Wayland，双屏均为 150% 缩放。当前 Windows 主机不重跑 Linux 桌面测试；需要会话环境的自动化交由 Linux 平台 AI agent 按现有脚本执行，Arch 包安装事务由 disposable Actions 容器补足；未回填结果前保持待测。Polkit 授权、应用内跨版本升级与重启仍未验收。
 - Linux 系统 `LocalFileSigLevel` 不变；Tauri `.tauri.sig` 不是 OpenPGP。无图形授权代理、包锁、冲突或严格本地签名政策时明确失败，程序不删锁、不关闭检查、不自动全系统升级。
 - Windows NSIS 真实跨版本覆盖、取消、卸载及完整 SMTC/托盘/Mica/文件关联仍需安装版实机回归；本机测试和 CI 构建不能替代。安装包尚无 Authenticode，Tauri 包与清单签名保留。
 - 多屏/DPI、物理媒体键、睡眠/蓝牙恢复等既有人工门禁保持；歌词跨输出拖动/热拔插恢复、托盘宿主热重启恢复未实现或未验收。Linux 转换目标文件系统需支持同卷硬链接；不支持则保留源文件并失败。
