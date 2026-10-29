@@ -2166,7 +2166,13 @@ function VolumeButton({ busy, onChange, onChangeEnd, volume, feedback }: {
           </ActionIcon>
         </Tooltip>
       </Popover.Target>
-      <Popover.Dropdown className="player-volume-popover" onWheel={adjustWithWheel}>
+      <Popover.Dropdown
+        className="player-volume-popover"
+        onFocusCapture={() => setOpen(true)}
+        onPointerDown={() => setOpen(true)}
+        onWheel={adjustWithWheel}
+        role={manualOpen ? "dialog" : "group"}
+      >
         <Text className="player-volume-value" fw={650} size="xs">{Math.round(volume)}%</Text>
         <Slider
           aria-label={t("playback.volume")}
