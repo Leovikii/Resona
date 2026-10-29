@@ -15,7 +15,8 @@
 - 主/压缩窗口支持 Space 播放暂停、左右 ±5 秒、上下 ±10 个音量百分点。Rust actor 计算相对动作；窗口聚焦、可见且无弹窗阻挡时生效，控件操作优先。主窗口音量滑条弹层、压缩窗口百分比/音量条提供反馈。
 - 本机共享 Node 71 项、Rust 常规 134 项（17 项条件忽略）、fmt/Clippy、TypeScript/Vite 与嵌入前端 Release 构建通过；另补同目录/单文件/递归导入 CUE 回归。真实两首 NFS 完整解码 EOF、seek、低音量输出、暂停/继续及上述文件夹专项通过。最新 Release 的 MP3/WAV/FLAC 关联、单实例、冷桌面打开、歌词 ready/重建、MPRIS 元数据/控制/定位/音量/退出与启动更新单飞再次通过。见 [Linux 验证](plans/0.3.0-beta.1-linux-validation.md)。
 - 本机测试目录仍为 `src-tauri/target/test-build/Resona-0.3.0-beta.1-arch-wayland-x86_64/`，保留原 test-profile，启动器与同名压缩包同步更新；未替换系统安装版。
-- [草稿 PR #23](https://github.com/Leovikii/Resona/pull/23) 用于双平台 CI；最终门禁以最新 SHA 为准。Windows 原生和 UNC/共享目录、CUE/列表命名回归见 [Windows 交接](plans/0.3.0-beta.1-windows-validation.md)。CI 不等于实机通过，真实网络中断、物理听感与既有硬件/动画门禁仍保留。
+- 所有者随后反馈网络位置加入功能正常但速度慢，性能验收仍开放。只读分段探针中 5 个目录/14 首音频：当前逐目录进程链路 5.12 秒，属性查询约 25 毫秒；同进程复用 KIO 列举相同目录约 1.27 秒，暖请求约 0–1 毫秒。主要差异是 KIO 冷请求/会话复用，不能将 stdout 管道采集造成的额外等待当作应用进程退出耗时。元数据封面 revision 还会在缓存检查前列目录。性能优化尚未改入生产代码，下一步优先复用访问会话与已有目录结果，保持故障期限。
+- [草稿 PR #23](https://github.com/Leovikii/Resona/pull/23) 的 [635f2d9 双平台 CI](https://github.com/Leovikii/Resona/actions/runs/40870191090) 已通过：Windows Rust 144/12 条件忽略、Arch Rust 135/17 条件忽略，另有真实 FFmpeg 2 项和包元数据测试；后续提交仍以最新 SHA 门禁为准。Windows 原生和 UNC/共享目录、CUE/列表命名回归见 [Windows 交接](plans/0.3.0-beta.1-windows-validation.md)。CI 不等于实机通过，真实网络中断、物理听感与既有硬件/动画门禁仍保留。
 
 ## alpha.4 实施与验证
 
