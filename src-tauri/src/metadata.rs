@@ -500,11 +500,11 @@ struct ArtworkCandidate {
 
 fn fallback_artwork_candidate(audio_path: &Path) -> Option<ArtworkCandidate> {
     let directory = audio_path.parent()?;
-    let mut candidates = std::fs::read_dir(directory)
+    let mut candidates = crate::platform::file_access::read_directory(directory)
         .ok()?
         .take(MAX_ARTWORK_DIRECTORY_ENTRIES)
         .filter_map(Result::ok)
-        .filter_map(|entry| inspect_artwork_candidate(entry.path()))
+        .filter_map(inspect_artwork_candidate)
         .collect::<Vec<_>>();
     candidates.sort_by(|left, right| {
         left.path

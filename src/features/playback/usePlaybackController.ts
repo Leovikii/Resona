@@ -1,3 +1,5 @@
+import type { FileImportActivity } from "../../shared/bridge/useFileImportActivity";
+import { previewPlaybackControl, type PlaybackControl } from "./playbackShortcuts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 
@@ -27,6 +29,7 @@ import {
 import { useDocumentVisibility } from "../../shared/ui/useDocumentVisibility";
 
 type PlaybackCommand =
+  | "control_playback"
   | "next_playback"
   | "pause_playback"
   | "play_queue_item"
@@ -45,7 +48,7 @@ const emptyDefaultPlaylist: DefaultPlaylistSnapshot = {
   items: [],
 };
 
-export function usePlaybackController() {
+export function usePlaybackController(imports: FileImportActivity) {
   const documentVisible = useDocumentVisibility();
   const preview = import.meta.env.DEV && !isTauriRuntime();
   const previewPlayback = useMemo(() => previewSnapshot(), []);
@@ -71,6 +74,7 @@ export function usePlaybackController() {
   );
   const [dialogOpen, setDialogOpen] = useState(false);
   const [openSequence, setOpenSequence] = useState(0);
+  const [directoryWarning, setDirectoryWarning] = useState<OpenMediaResult["warning"]>(null);
   const [refreshError, setRefreshError] = useState<PlaybackFailure | null>(null);
   const snapshotRef = useRef(snapshot);
   const defaultPlaylistRef = useRef(defaultPlaylist);
@@ -107,6 +111,7 @@ export function usePlaybackController() {
 
   const acceptOpenResult = useCallback((result: OpenMediaResult) => {
     acceptPlaybackSnapshot(result.playback);
+    setDirectoryWarning(result.warning ?? null);
     setActivePlaylist(result.activePlaylist);
     defaultPlaylistRef.current = result.defaultPlaylist;
     setDefaultPlaylist(result.defaultPlaylist);
@@ -166,25 +171,21 @@ export function usePlaybackController() {
   useEffect(() => {
     if (!isTauriRuntime()) return;
     let disposed = false;
-    let stopOpened: (() => void) | undefined;
-    let stopFailed: (() => void) | undefined;
-    void listen<OpenMediaResult>("resona://media-opened", (event) => {
-      if (!disposed) acceptOpenResult(event.payload);
-    }).then((stop) => {
-      if (disposed) stop();
-      else stopOpened = stop;
-    });
-    void listen<PlaybackFailure>("resona://media-open-failed", (event) => {
-      if (!disposed) setRefreshError(event.payload);
-    }).then((stop) => {
-      if (disposed) stop();
-      else stopFailed = stop;
-    });
-    return () => {
-      disposed = true;
-      stopOpened?.();
-      stopFailed?.();
+    let stopReady: (() => void) | undefined;
+    const consume = async () => {
+      try {
+        const result = await invokeTauri<OpenMediaResult | null>("take_external_media_result");
+        if (!disposed && result) acceptOpenResult(result);
+      } catch (error) {
+        if (!disposed) setRefreshError(toPlaybackFailure(error));
+      }
     };
+    void listen("resona://external-media-ready", () => void consume()).then((stop) => {
+      if (disposed) { stop(); return; }
+      stopReady = stop;
+      void consume();
+    }).catch((error) => { if (!disposed) setRefreshError(toPlaybackFailure(error)); });
+    return () => { disposed = true; stopReady?.(); };
   }, [acceptOpenResult]);
 
   const run = useCallback(async (
@@ -204,8 +205,7 @@ export function usePlaybackController() {
     }
   }, [acceptPlaybackSnapshot, preview]);
 
-  const openPath = useCallback(async (path: string) => {
-    setPending(true);
+  const openPath = useCallback(async (path: string) => imports.run(async () => {
     try {
       if (preview) {
         const playback = playPreviewPath(snapshotRef.current, path);
@@ -223,15 +223,12 @@ export function usePlaybackController() {
       const failure = toPlaybackFailure(error);
       setSnapshot((current) => ({ ...current, error: failure }));
       return null;
-    } finally {
-      setPending(false);
     }
-  }, [acceptOpenResult, preview]);
+  }), [imports.run, acceptOpenResult, preview]);
 
-  const addDefaultItems = useCallback(async (paths: string[], position: number | null = null) => {
+  const addDefaultItems = useCallback(async (paths: string[], position: number | null = null) => imports.run(async () => {
     if (paths.length === 0) return null;
     setDefaultRejectedPaths([]);
-    setPending(true);
     try {
       const result = preview
         ? insertPreviewDefault(defaultPlaylistRef.current, paths, position)
@@ -245,10 +242,8 @@ export function usePlaybackController() {
       const failure = toPlaybackFailure(error);
       setSnapshot((current) => ({ ...current, error: failure }));
       return null;
-    } finally {
-      setPending(false);
     }
-  }, [acceptDefaultPlaylist, preview, refresh]);
+  }), [imports.run, acceptDefaultPlaylist, preview, refresh]);
 
   const chooseAndAddDefault = useCallback(async (kind: "files" | "folders") => {
     setDialogOpen(true);
@@ -265,7 +260,7 @@ export function usePlaybackController() {
     } catch (error) {
       setSnapshot((current) => ({
         ...current,
-        error: { ...toPlaybackFailure(error), code: "dialog_open_failed" },
+        error: toPlaybackFailure(error),
       }));
     } finally {
       setDialogOpen(false);
@@ -447,6 +442,7 @@ export function usePlaybackController() {
     defaultRejectedPaths,
     dismissDefaultRejected,
     dialogOpen,
+    directoryWarning,
     lyrics,
     openPath,
     openSequence,
@@ -492,6 +488,7 @@ function applyPreviewCommand(
   command: PlaybackCommand,
   args?: Record<string, unknown>,
 ): PlaybackSnapshot {
+  if (command === "control_playback") return previewPlaybackControl(snapshot, args?.action as PlaybackControl, Number(args?.steps ?? 1));
   if (command === "pause_playback") return { ...snapshot, status: "paused", error: null };
   if (command === "resume_playback") return { ...snapshot, status: "playing", error: null };
   if (command === "seek_playback") {

@@ -48,6 +48,9 @@ impl MediaSessionAdapter {
         let worker = thread::Builder::new()
             .name("resona-mpris".into())
             .spawn(move || {
+                // Portal enables the shared zbus Tokio backend; retain the GTK local executor.
+                let runtime = tauri::async_runtime::handle();
+                let _runtime_context = runtime.inner().enter();
                 let context = gtk::glib::MainContext::new();
                 let result = context.with_thread_default(|| {
                     context.block_on(async {

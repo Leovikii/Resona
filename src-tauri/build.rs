@@ -1,4 +1,7 @@
 fn main() {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+        build_directory_worker();
+    }
     println!("cargo:rerun-if-changed=icons/icon.ico");
     let keys = [
         "RESONA_BUILD_NUMBER",
@@ -30,4 +33,31 @@ fn main() {
         );
     }
     tauri_build::build()
+}
+
+fn build_directory_worker() {
+    println!("cargo:rerun-if-changed=src/platform/kio_directory.cpp");
+    let qt = pkg_config::Config::new()
+        .atleast_version("6.0")
+        .probe("Qt6Core")
+        .expect("Linux builds require qt6-base and kio development files");
+    let prefix = pkg_config::get_variable("Qt6Core", "prefix").expect("Qt6 installation prefix");
+    let mut build = cc::Build::new();
+    build
+        .cpp(true)
+        .std("c++17")
+        .file("src/platform/kio_directory.cpp");
+    for path in qt.include_paths {
+        build.include(path);
+    }
+    for library in ["KIO", "KIOCore", "KCoreAddons"] {
+        build.include(
+            std::path::Path::new(&prefix)
+                .join("include/KF6")
+                .join(library),
+        );
+    }
+    build.compile("resona_kio_directory");
+    println!("cargo:rustc-link-lib=KF6KIOCore");
+    println!("cargo:rustc-link-lib=KF6CoreAddons");
 }

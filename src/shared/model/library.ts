@@ -43,6 +43,7 @@ export interface ActivePlaylistSnapshot {
 }
 
 export interface OpenMediaResult {
+  warning?: "empty_directory" | "directory_unreadable" | "target_missing" | null;
   playback: import("./playback").PlaybackSnapshot;
   defaultPlaylist: DefaultPlaylistSnapshot;
   activePlaylist: ActivePlaylistSnapshot;
@@ -70,7 +71,8 @@ export interface PlaylistItem {
 
 export interface RejectedPath {
   path: string;
-  reason: "missing" | "unsupported" | "unreadable" | "linked_path" | "empty_folder" | "duplicate";
+  reason: "missing" | "unsupported" | "unreadable" | "linked_path" | "empty_folder" | "duplicate"
+    | "invalid_location" | "unsupported_location" | "network_location_unavailable";
 }
 
 export interface PlaylistMutationResult extends PlaylistDetails {

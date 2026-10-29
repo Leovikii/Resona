@@ -962,8 +962,8 @@ input {
   .playlist-playing-indicator i { animation: none; transform: scaleY(0.72); }
 }
 
-.playlist-nav-item:hover:not([data-active]),
-.playlist-nav-item:focus-visible:not([data-active]) {
+.playlist-nav-item:hover:not([data-active]):not([data-drop-active]),
+.playlist-nav-item:focus-visible:not([data-active]):not([data-drop-active]) {
   color: var(--mantine-color-text);
   background: var(--mantine-color-default-hover);
 }
@@ -973,21 +973,12 @@ input {
   background: var(--mantine-primary-color-light);
 }
 
-.playlist-nav-item[data-drop-active] {
-  outline: 2px solid var(--mantine-primary-color-filled);
-  outline-offset: -2px;
-}
-
 .playlist-nav-gap {
   height: 5px;
   padding-inline: 8px;
   display: flex;
   align-items: center;
   transition: height 120ms ease;
-}
-
-.playlist-nav-list[data-external-drag] .playlist-nav-gap {
-  height: 14px;
 }
 
 .playlist-nav-list[data-internal-drag] .playlist-nav-gap {
@@ -2233,7 +2224,7 @@ h2.page-heading {
 
 .app-notice {
   width: max-content;
-  max-width: calc(100% - 32px);
+  max-width: min(380px, calc(100% - 32px));
   position: absolute;
   right: 16px;
   bottom: 14px;
@@ -2271,7 +2262,7 @@ h2.page-heading {
   min-width: 0;
   padding: 0 8px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 36px;
+  grid-template-columns: minmax(0, 1fr) 44px;
   align-items: center;
   gap: 4px;
 }
@@ -2301,7 +2292,6 @@ h2.page-heading {
   transition: width 120ms ease, flex-basis 120ms ease;
 }
 
-.compact-playlist-tabs .mantine-Tabs-list[data-external-drag] .compact-playlist-gap,
 .compact-playlist-tabs .mantine-Tabs-list[data-internal-drag] .compact-playlist-gap {
   width: 16px;
   flex-basis: 16px;
@@ -2339,8 +2329,8 @@ h2.page-heading {
   opacity: 0.5;
 }
 
-.compact-playlist-tabs .mantine-Tabs-tab:hover:not([data-active]),
-.compact-playlist-tabs .mantine-Tabs-tab:focus-visible:not([data-active]) {
+.compact-playlist-tabs .mantine-Tabs-tab:hover:not([data-active]):not([data-drop-active]),
+.compact-playlist-tabs .mantine-Tabs-tab:focus-visible:not([data-active]):not([data-drop-active]) {
   color: var(--mantine-color-text);
   background: var(--mantine-color-default-hover);
 }
@@ -2348,11 +2338,6 @@ h2.page-heading {
 .compact-playlist-tabs .mantine-Tabs-tab[data-active] {
   color: var(--mantine-primary-color-filled);
   background: var(--mantine-primary-color-light);
-}
-
-.compact-playlist-tabs .mantine-Tabs-tab[data-drop-active] {
-  outline: 2px solid var(--mantine-primary-color-filled);
-  outline-offset: -2px;
 }
 
 .compact-playlist-tabs .mantine-Tabs-tabLabel {
@@ -2613,4 +2598,135 @@ h2.page-heading {
   .overflow-marquee-static {
     opacity: 1 !important;
   }
+}
+
+.main-region[data-importing] {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.file-import-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 12px 0;
+  padding: 8px 12px;
+  border-radius: var(--mantine-radius-sm);
+  background: var(--mantine-color-default);
+  border: 1px solid var(--mantine-color-default-border);
+}
+
+/* External file feedback stays fixed while the pointer crosses insertion gaps. */
+.playlist-create-button {
+  flex-shrink: 0;
+  min-height: 44px;
+  width: 100%;
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.playlist-nav-scroll {
+  position: relative;
+  border-radius: var(--mantine-radius-sm);
+}
+
+.playlist-nav-item[data-drop-active],
+.compact-playlist-tabs .mantine-Tabs-tab[data-drop-active] {
+  background: var(--mantine-primary-color-light);
+  color: var(--mantine-primary-color-light-color);
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: -2px;
+}
+
+.file-drop-status {
+  position: absolute;
+  z-index: 8;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 32px);
+  padding: 10px 16px;
+  border: 1px solid var(--mantine-primary-color-filled);
+  border-radius: var(--mantine-radius-md);
+  background: var(--mantine-color-body);
+  color: var(--mantine-color-text);
+  box-shadow: var(--mantine-shadow-sm);
+  font-size: 13px;
+  text-align: center;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
+.playlist-drop-blank {
+  position: relative;
+  flex: 1;
+  min-height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 10px;
+  border-radius: var(--mantine-radius-sm);
+  text-align: center;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.playlist-drop-blank > span {
+  position: absolute;
+  inset: 10px;
+  display: grid;
+  place-items: center;
+}
+
+.compact-create-button {
+  height: 32px;
+  min-height: 32px;
+}
+
+.playlist-nav-scroll[data-drop-active] .playlist-nav-gap[data-active] > span {
+  opacity: 0;
+}
+
+.playlist-nav-scroll[data-drop-active] .playlist-drop-blank,
+.compact-playlist-drop-blank[data-drop-active] {
+  background: var(--mantine-primary-color-light);
+  color: var(--mantine-primary-color-light-color);
+  outline: 1px solid var(--mantine-primary-color-filled);
+  outline-offset: -1px;
+}
+
+.compact-playlist-tabs {
+  width: max-content;
+  min-width: 100%;
+}
+
+.compact-playlist-tab-wrap {
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.compact-playlist-tab-wrap .mantine-Tabs-tab {
+  padding-right: 34px;
+}
+
+.compact-playlist-delete {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  transform: translateY(-50%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.compact-playlist-tab-wrap:hover .compact-playlist-delete,
+.compact-playlist-tab-wrap:focus-within .compact-playlist-delete {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.compact-playlist-drop-blank {
+  flex: 1 0 44px;
+  height: 32px;
+  border-radius: var(--mantine-radius-sm);
 }

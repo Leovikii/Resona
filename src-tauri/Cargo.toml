@@ -1,6 +1,6 @@
 [package]
 name = "resona"
-version = "0.3.0-alpha.4"
+version = "0.3.0-beta.1"
 description = "A local desktop audio player"
 authors = ["Viki"]
 edition = "2021"
@@ -13,6 +13,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+cc = "1"
+pkg-config = "0.3"
 
 [dependencies]
 rodio = { version = "0.22.2", default-features = false, features = ["flac", "mp3", "playback", "wav"] }
@@ -34,7 +36,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 semver = "1"
 tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-dialog = "2"
+tauri-plugin-dialog = { version = "2", default-features = false }
 tauri-plugin-opener = "=2.5.4"
 tauri-plugin-single-instance = "2"
 tauri-plugin-log = "=2.9.0"
@@ -47,10 +49,14 @@ ureq = { version = "3.3.0", features = ["win-system-proxy"] }
 [target.'cfg(target_os = "windows")'.dependencies]
 zip = { version = "8.2.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 souvlaki = { version = "0.8.3", default-features = false }
-windows = { version = "0.44", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_UI_Accessibility", "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.44", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_UI_Accessibility", "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 windows-version = "0.1.7"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# Use the portal library already locked by rfd, preserving remote URIs and errors.
+ashpd = { version = "=0.11.1", default-features = false, features = ["tokio", "raw_handle", "wayland"] }
+raw-window-handle = "0.6"
+tauri-plugin-dialog = { version = "2", default-features = false, features = ["xdg-portal"] }
 gtk = "0.18"
 gtk-layer-shell = { version = "=0.8.2", features = ["v0_6"] }
 mpris-server = "=0.9.0"

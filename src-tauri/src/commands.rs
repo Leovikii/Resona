@@ -65,6 +65,20 @@ pub enum ProjectPage {
 }
 
 #[tauri::command]
+pub fn get_system_languages(browser_languages: Vec<String>) -> Result<Vec<String>, String> {
+    let languages = crate::platform::system_languages::preferred().inspect_err(|error| {
+        log::warn!("Native system languages unavailable: {error}");
+    })?;
+    let browser = browser_languages
+        .iter()
+        .take(8)
+        .map(|value| value.chars().take(64).collect::<String>())
+        .collect::<Vec<_>>();
+    log::info!("System language detection: native={languages:?}, webview={browser:?}");
+    Ok(languages)
+}
+
+#[tauri::command]
 pub async fn open_project_page(page: ProjectPage, app: AppHandle) -> Result<(), String> {
     let url = match page {
         ProjectPage::Repository => "https://github.com/Leovikii/Resona",
@@ -271,7 +285,13 @@ pub async fn scan_audio_compression_inputs(
     paths: Vec<String>,
     service: State<'_, ManagedCompressionService>,
 ) -> Result<CompressionScanSnapshot, CompressionFailure> {
-    Arc::clone(service.inner()).add_scan_inputs(paths.into_iter().map(PathBuf::from).collect())
+    let service = Arc::clone(service.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let paths = paths.into_iter().map(PathBuf::from).collect();
+        service.add_scan_inputs(paths)
+    })
+    .await
+    .map_err(|error| CompressionFailure::new("compression_scan_failed", error.to_string()))?
 }
 
 #[tauri::command]
@@ -417,16 +437,39 @@ where
 }
 
 #[tauri::command]
+pub fn get_file_import_state(
+    service: State<'_, ManagedCompressionService>,
+) -> crate::compression::FileImportSnapshot {
+    service.file_import_snapshot()
+}
+
+#[tauri::command]
 pub async fn open_media_context(
     path: String,
     media_import: State<'_, ManagedMediaImportService>,
+    compression: State<'_, ManagedCompressionService>,
 ) -> Result<OpenMediaResult, PlaybackFailure> {
     let media_import = Arc::clone(media_import.inner());
+    let compression = Arc::clone(compression.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        media_import.open_media_context(std::path::Path::new(&path))
+        let _guard = compression
+            .file_import_guard()
+            .map_err(|error| PlaybackFailure {
+                code: crate::playback::PlaybackErrorCode::FileImportBusy,
+                message: error.message,
+            })?;
+        let path = crate::platform::file_access::resolve_location(&path)?;
+        media_import.open_media_context(&path)
     })
     .await
     .map_err(|error| PlaybackFailure::task_failed(format!("playback task failed: {error}")))?
+}
+
+#[tauri::command]
+pub fn take_external_media_result(
+    media_import: State<'_, ManagedMediaImportService>,
+) -> Result<Option<OpenMediaResult>, PlaybackFailure> {
+    media_import.take_external_result()
 }
 
 #[tauri::command]
@@ -446,9 +489,17 @@ pub async fn add_default_playlist_items(
     paths: Vec<String>,
     position: Option<usize>,
     media_import: State<'_, ManagedMediaImportService>,
+    compression: State<'_, ManagedCompressionService>,
 ) -> Result<DefaultPlaylistMutationResult, PlaybackFailure> {
     let media_import = Arc::clone(media_import.inner());
+    let compression = Arc::clone(compression.inner());
     tauri::async_runtime::spawn_blocking(move || {
+        let _guard = compression
+            .file_import_guard()
+            .map_err(|error| PlaybackFailure {
+                code: crate::playback::PlaybackErrorCode::FileImportBusy,
+                message: error.message,
+            })?;
         media_import.add_paths(paths.into_iter().map(PathBuf::from).collect(), position)
     })
     .await
@@ -613,6 +664,16 @@ pub async fn seek_playback(
 }
 
 #[tauri::command]
+pub async fn control_playback(
+    action: crate::playback::PlaybackControl,
+    steps: u16,
+    engine: State<'_, ManagedPlaybackEngine>,
+) -> Result<PlaybackSnapshot, PlaybackFailure> {
+    let engine = Arc::clone(engine.inner());
+    run_engine_operation(engine, move |engine| engine.control(action, steps)).await
+}
+
+#[tauri::command]
 pub async fn set_playback_volume(
     volume: f32,
     engine: State<'_, ManagedPlaybackEngine>,
@@ -770,18 +831,32 @@ pub async fn create_playlist(
     ensure_unique_name: bool,
     require_items: bool,
     persistence: State<'_, ManagedPersistence>,
+    compression: State<'_, ManagedCompressionService>,
 ) -> Result<PlaylistMutationResult, PersistenceFailure> {
-    run_persistence_operation(Arc::clone(persistence.inner()), move |service| {
+    let database = Arc::clone(persistence.inner());
+    let compression = Arc::clone(compression.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = compression
+            .file_import_guard()
+            .map_err(|error| PersistenceFailure {
+                code: error.code,
+                message: error.message,
+            })?;
         crate::playlists::create_playlist(
-            service,
+            &database,
             &name,
             paths.into_iter().map(PathBuf::from).collect(),
             position,
             ensure_unique_name,
             require_items,
         )
+        .map_err(|error| error.failure())
     })
     .await
+    .map_err(|error| PersistenceFailure {
+        code: "playlist_task_failed".into(),
+        message: error.to_string(),
+    })?
 }
 
 #[tauri::command]
@@ -874,10 +949,18 @@ pub async fn add_playlist_items(
     position: Option<i64>,
     persistence: State<'_, ManagedPersistence>,
     media_import: State<'_, ManagedMediaImportService>,
+    compression: State<'_, ManagedCompressionService>,
 ) -> Result<PlaylistMutationResult, PersistenceFailure> {
     let database = Arc::clone(persistence.inner());
+    let compression = Arc::clone(compression.inner());
     let media_import = Arc::clone(media_import.inner());
     tauri::async_runtime::spawn_blocking(move || {
+        let _guard = compression
+            .file_import_guard()
+            .map_err(|error| PersistenceFailure {
+                code: error.code,
+                message: error.message,
+            })?;
         let previous = database
             .list_playlist_items(playlist_id)
             .map_err(|error| error.failure())?;
@@ -1061,4 +1144,17 @@ pub async fn desktop_lyrics_pointer(
     service: State<'_, ManagedDesktopLyricsWindowService>,
 ) -> Result<(), DesktopLyricsWindowFailure> {
     crate::platform::desktop_lyrics::pointer(&service, phase, kind, x, y)
+}
+
+#[tauri::command]
+pub async fn select_media_paths(
+    window: tauri::WebviewWindow,
+    kind: crate::platform::file_dialog::MediaSelection,
+    multiple: bool,
+) -> Result<Vec<String>, PlaybackFailure> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::platform::file_dialog::select(window, kind, multiple)
+    })
+    .await
+    .map_err(|_| PlaybackFailure::task_failed("File selection task failed".into()))?
 }

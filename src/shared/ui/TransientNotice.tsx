@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Notification, Transition } from "@mantine/core";
-import { CircleAlert, CircleCheck, CircleX, Info } from "lucide-react";
+import { Notification, Progress, Transition } from "@mantine/core";
 
 export type TransientNoticeTone = "error" | "info" | "success" | "warning";
 
@@ -8,13 +7,14 @@ export interface TransientNoticeMessage {
   id: number;
   message: string;
   tone: TransientNoticeTone;
+  progress?: number;
 }
 
 const toneAppearance = {
-  error: { color: "red", icon: CircleX, role: "alert" },
-  info: { color: "blue", icon: Info, role: "status" },
-  success: { color: "green", icon: CircleCheck, role: "status" },
-  warning: { color: "orange", icon: CircleAlert, role: "status" },
+  error: { color: "red", role: "alert" },
+  info: { color: "blue", role: "status" },
+  success: { color: "green", role: "status" },
+  warning: { color: "orange", role: "status" },
 } as const;
 
 export function TransientNotice({
@@ -41,12 +41,12 @@ export function TransientNotice({
       return;
     }
     setVisible(true);
+    if (notice.tone === "error" || notice.tone === "warning") return;
     const timer = window.setTimeout(dismiss, autoClose);
     return () => window.clearTimeout(timer);
   }, [autoClose, dismiss, notice?.id]);
 
   const appearance = toneAppearance[notice?.tone ?? "info"];
-  const Icon = appearance.icon;
   return (
     <Transition duration={160} mounted={Boolean(notice) && visible} transition="slide-left">
       {(transitionStyles) => (
@@ -54,14 +54,15 @@ export function TransientNotice({
           className="app-notice"
           closeButtonProps={{ "aria-label": closeLabel }}
           color={appearance.color}
-          icon={<Icon size={16} />}
           onClose={dismiss}
           role={appearance.role}
           style={transitionStyles}
-          withBorder={false}
+          radius="md"
+          withBorder
           withCloseButton
         >
           {notice?.message}
+          {notice?.progress !== undefined && <Progress aria-label={notice.message} mt={6} size="xs" value={notice.progress} />}
         </Notification>
       )}
     </Transition>

@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-18
 - Matching rule amended: 2026-07-19
+- beta.1 network access: [ADR 0036](0036-native-file-access-and-focused-playback-controls.md) uses native KIO directory listing for NFS on KIO-FUSE mounts, avoiding FUSE enumeration that can invalidate readable files. Sidecar matching rules below apply through the shared directory adapter; local and kernel-mounted paths retain standard filesystem access.
 
 ## Decision
 

@@ -1,55 +1,16 @@
-import { open } from "@tauri-apps/plugin-dialog";
-
-import { isTauriRuntime } from "./tauri";
+import { invokeTauri, isTauriRuntime } from "./tauri";
 
 let pending = false;
+export function isAudioDialogOpen() { return pending; }
 
-export async function selectAudioFiles(multiple: boolean): Promise<string[]> {
-  return selectFiles(multiple, { name: "MP3 / WAV / FLAC", extensions: ["mp3", "wav", "flac"] });
-}
+export function selectAudioFiles(multiple: boolean) { return select("audio", multiple); }
+export function selectWavFiles() { return select("wav", true); }
+export function selectAudioFolders() { return select("folders", true); }
+export function selectCompressionFolders() { return select("folders", true); }
 
-export async function selectWavFiles(): Promise<string[]> {
-  return selectFiles(true, { name: "WAV", extensions: ["wav"] });
-}
-
-export async function selectAudioFolders(): Promise<string[]> {
-  return selectFolders();
-}
-
-export async function selectCompressionFolders(): Promise<string[]> {
-  return selectFolders();
-}
-
-async function selectFolders(): Promise<string[]> {
+async function select(kind: "audio" | "wav" | "folders", multiple: boolean): Promise<string[]> {
   if (pending || !isTauriRuntime()) return [];
   pending = true;
-  try {
-    const selected = await open({
-      title: "Resona",
-      multiple: true,
-      directory: true,
-    });
-    return Array.isArray(selected) ? selected : selected ? [selected] : [];
-  } finally {
-    pending = false;
-  }
-}
-
-async function selectFiles(
-  multiple: boolean,
-  filter: { name: string; extensions: string[] },
-): Promise<string[]> {
-  if (pending || !isTauriRuntime()) return [];
-  pending = true;
-  try {
-    const selected = await open({
-      title: "Resona",
-      multiple,
-      directory: false,
-      filters: [filter],
-    });
-    return Array.isArray(selected) ? selected : selected ? [selected] : [];
-  } finally {
-    pending = false;
-  }
+  try { return await invokeTauri<string[]>("select_media_paths", { kind, multiple }); }
+  finally { pending = false; }
 }

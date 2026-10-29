@@ -57,9 +57,9 @@ impl MediaSource {
     }
 }
 
-pub fn expand_same_name_cue(path: &Path) -> Vec<MediaSource> {
+pub fn expand_same_name_cue(path: &Path, siblings: &[PathBuf]) -> Vec<MediaSource> {
     let fallback = || vec![MediaSource::file(path.to_path_buf())];
-    let Some(cue_path) = same_name_cue(path) else {
+    let Some(cue_path) = same_name_cue(path, siblings) else {
         return fallback();
     };
     match parse_cue_for_audio(&cue_path, path) {
@@ -72,23 +72,20 @@ pub fn expand_same_name_cue(path: &Path) -> Vec<MediaSource> {
     }
 }
 
-fn same_name_cue(path: &Path) -> Option<PathBuf> {
-    let parent = path.parent()?;
+fn same_name_cue(path: &Path, siblings: &[PathBuf]) -> Option<PathBuf> {
     let stem = path.file_stem()?.to_string_lossy();
-    fs::read_dir(parent)
-        .ok()?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
+    siblings
+        .iter()
         .find(|candidate| {
-            candidate.is_file()
-                && candidate
-                    .extension()
-                    .and_then(|value| value.to_str())
-                    .is_some_and(|value| value.eq_ignore_ascii_case("cue"))
+            candidate
+                .extension()
+                .is_some_and(|value| value.eq_ignore_ascii_case("cue"))
                 && candidate
                     .file_stem()
                     .is_some_and(|value| value.to_string_lossy().eq_ignore_ascii_case(&stem))
+                && candidate.is_file()
         })
+        .cloned()
 }
 
 fn parse_cue_for_audio(cue_path: &Path, audio_path: &Path) -> Result<Vec<MediaSource>, String> {
@@ -200,7 +197,7 @@ mod tests {
         )
         .expect("write CUE");
 
-        let tracks = expand_same_name_cue(&audio);
+        let tracks = expand_same_name_cue(&audio, &[root.join("ALBUM.CUE")]);
         assert_eq!(tracks.len(), 2);
         assert_eq!(
             tracks[0].cue.as_ref().and_then(|cue| cue.end_ms),

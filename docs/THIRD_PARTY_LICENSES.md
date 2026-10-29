@@ -14,7 +14,7 @@ Resona does not bundle FFmpeg. On Windows, after an explicit user action, the in
 - FFmpeg license and source information: `https://ffmpeg.org/legal.html`
 - Arch Linux uses `/usr/bin/ffmpeg` and `/usr/bin/ffprobe` from the system `ffmpeg` package (`sudo pacman -S ffmpeg`); Resona neither downloads nor updates them. Its actual version and build configuration belong to the distribution package.
 
-- Rust packages: 615
+- Rust packages: 624
 - npm packages: 214
 - Unknown license declarations: 0
 
@@ -25,6 +25,10 @@ KDE blur uses pinned wayland-client/backend and official wayland-protocols/plasm
 ## Linux desktop runtime
 
 Wayland desktop lyrics dynamically link the Arch system gtk-layer-shell library (LGPL-3.0-or-later; https://github.com/wmww/gtk-layer-shell). The GTK 3 Rust bindings are MIT and pinned to match Tauri GTK 0.18; the binding package is marked unmaintained. MPRIS uses mpris-server 0.9.0 (MPL-2.0) and zbus 5. These dependencies require no runtime downloads, activation, telemetry, or network services; MPRIS uses only the local session bus.
+
+## KDE network directory access
+
+Linux builds link system Qt6Core (LGPL-3.0-only) and KF6KIOCore/KF6CoreAddons (LGPL-2.0-or-later), compatible with Resona GPL-3.0-only. The application compiles its own small KIO directory adapter and re-executes the same binary in a bounded worker mode before GTK starts; no separate bundled executable or runtime download is added. Network access uses the system NFS KIO worker only for user-selected sources. Runtime packages are qt6-base, kio >= 6.23, kio-extras and kio-fuse; their versions and notices are supplied by the Arch packages.
 
 ## Rust
 
@@ -42,6 +46,7 @@ Wayland desktop lyrics dynamically link the Arch system gtk-layer-shell library 
 | anyhow | 1.0.103 | MIT OR Apache-2.0 |
 | arbitrary | 1.4.2 | MIT OR Apache-2.0 |
 | arrayvec | 0.7.8 | MIT OR Apache-2.0 |
+| ashpd | 0.11.1 | MIT |
 | async-broadcast | 0.7.2 | MIT OR Apache-2.0 |
 | async-channel | 2.5.0 | Apache-2.0 OR MIT |
 | async-executor | 1.14.0 | Apache-2.0 OR MIT |
@@ -349,8 +354,10 @@ Wayland desktop lyrics dynamically link the Arch system gtk-layer-shell library 
 | png | 0.17.16 | MIT OR Apache-2.0 |
 | png | 0.18.1 | MIT OR Apache-2.0 |
 | polling | 3.11.0 | Apache-2.0 OR MIT |
+| pollster | 0.4.0 | Apache-2.0/MIT |
 | potential_utf | 0.1.5 | Unicode-3.0 |
 | powerfmt | 0.2.0 | MIT OR Apache-2.0 |
+| ppv-lite86 | 0.2.21 | MIT OR Apache-2.0 |
 | precomputed-hash | 0.1.1 | MIT |
 | proc-macro-crate | 1.3.1 | MIT OR Apache-2.0 |
 | proc-macro-crate | 2.0.2 | MIT OR Apache-2.0 |
@@ -363,6 +370,9 @@ Wayland desktop lyrics dynamically link the Arch system gtk-layer-shell library 
 | quote | 1.0.46 | MIT OR Apache-2.0 |
 | r-efi | 5.3.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later |
 | r-efi | 6.0.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later |
+| rand | 0.9.5 | MIT OR Apache-2.0 |
+| rand_chacha | 0.9.0 | MIT OR Apache-2.0 |
+| rand_core | 0.9.5 | MIT OR Apache-2.0 |
 | raw-window-handle | 0.6.2 | MIT OR Apache-2.0 OR Zlib |
 | rcue | 0.1.3 | MIT |
 | redox_syscall | 0.5.18 | MIT |
@@ -522,6 +532,7 @@ Wayland desktop lyrics dynamically link the Arch system gtk-layer-shell library 
 | ureq | 3.3.0 | MIT OR Apache-2.0 |
 | ureq-proto | 0.6.0 | MIT OR Apache-2.0 |
 | url | 2.5.8 | MIT OR Apache-2.0 |
+| urlencoding | 2.1.3 | MIT |
 | urlpattern | 0.3.0 | MIT |
 | utf8_iter | 1.0.4 | Apache-2.0 OR MIT |
 | utf8-zero | 0.8.1 | MIT OR Apache-2.0 |
@@ -630,6 +641,8 @@ Wayland desktop lyrics dynamically link the Arch system gtk-layer-shell library 
 | zbus | 5.18.0 | MIT |
 | zbus_macros | 5.18.0 | MIT |
 | zbus_names | 4.3.4 | MIT |
+| zerocopy | 0.8.63 | BSD-2-Clause OR Apache-2.0 OR MIT |
+| zerocopy-derive | 0.8.63 | BSD-2-Clause OR Apache-2.0 OR MIT |
 | zerofrom | 0.1.8 | Unicode-3.0 |
 | zerofrom-derive | 0.1.7 | Unicode-3.0 |
 | zeroize | 1.9.0 | Apache-2.0 OR MIT |

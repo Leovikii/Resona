@@ -208,16 +208,21 @@ fn discover_sidecar(audio_path: &Path) -> Option<(PathBuf, LyricsFormat)> {
     let parent = audio_path.parent()?;
     let audio_stem = audio_path.file_stem()?.to_string_lossy();
     let audio_file_name = audio_path.file_name()?.to_string_lossy();
-    let mut entries = fs::read_dir(parent)
+    let mut entries = crate::platform::file_access::read_directory(parent)
         .ok()?
         .filter_map(Result::ok)
         .collect::<Vec<_>>();
-    entries.sort_by_key(|entry| entry.file_name().to_string_lossy().to_ascii_lowercase());
+    entries.sort_by_key(|entry| {
+        entry
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_ascii_lowercase()
+    });
 
     for (format, extension) in FORMAT_PRIORITY {
         let path = entries
             .iter()
-            .map(|entry| entry.path())
             .filter(|path| {
                 path.is_file()
                     && path.extension().is_some_and(|value| {
@@ -230,7 +235,7 @@ fn discover_sidecar(audio_path: &Path) -> Option<(PathBuf, LyricsFormat)> {
                     .map(|rank| (rank, path))
             })
             .min_by_key(|(rank, _)| *rank)
-            .map(|(_, path)| path);
+            .map(|(_, path)| path.clone());
         if let Some(path) = path {
             return Some((path, format));
         }

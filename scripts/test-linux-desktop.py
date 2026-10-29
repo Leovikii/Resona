@@ -2,12 +2,14 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """KDE session integration test; requires a Release build, busctl and FFmpeg."""
 import os
+import json
 import shlex
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import time
+from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[1]
 NAME = "org.mpris.MediaPlayer2.io.github.vki.resona"
@@ -33,6 +35,10 @@ def wait_property(prop, expected):
         value = get(prop)
         if expected in value:
             return value
+        if prop == "Metadata" and expected.startswith("file://"):
+            fields = shlex.split(value)
+            if "xesam:url" in fields and unquote(fields[fields.index("xesam:url") + 2]) == unquote(expected):
+                return value
         time.sleep(0.1)
     raise AssertionError((prop, value, expected))
 
@@ -129,9 +135,21 @@ def check_file_associations(root, first, environment, binary):
         target = association_dir / name
         subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(first), "-c:a", codec, str(target)], check=True, timeout=30)
         targets.append(target)
-    for target in [*targets, first]:
+    network = [Path(path) for path in json.loads(os.environ.get("RESONA_TEST_NFS_PATHS", "[]"))]
+    if network:
+        bus("set-property", NAME, PATH, PLAYER, "Volume", "d", "0.01")
+    for target in [*targets, *network, first]:
         subprocess.run(["gio", "launch", str(desktop), str(target)], env=launch_env, check=True, timeout=10)
         wait_property("Metadata", target.as_uri())
+        if target in network:
+            wait_property("PlaybackStatus", '"Playing"')
+            call("Pause")
+            wait_property("PlaybackStatus", '"Paused"')
+            track = get("Metadata").split('"mpris:trackid" o "')[1].split('"')[0]
+            call("SetPosition", "ox", track, "5000000")
+            wait_property("Position", "5000000")
+            call("Play")
+            wait_property("PlaybackStatus", '"Playing"')
     assert "second instance activation received" in (root / "data/io.github.vki.resona/logs/resona.log").read_text()
 
 
@@ -145,6 +163,9 @@ def check_cold_desktop_open(first, environment, binary):
             assert time.monotonic() < deadline, "Cold desktop launch did not register MPRIS"
             time.sleep(0.1)
         wait_property("Metadata", first.as_uri())
+        wait_property("PlaybackStatus", '"Playing"')
+        # Keep subsequent optional real-network cold launches quiet in this test profile.
+        bus("set-property", NAME, PATH, PLAYER, "Volume", "d", "0.01")
     finally:
         if NAME in bus("call", "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "ListNames"):
             bus("call", NAME, PATH, "org.mpris.MediaPlayer2", "Quit")
@@ -188,6 +209,8 @@ def main():
                 assert process.wait(timeout=10) == 0
                 assert NAME not in bus("call", "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "ListNames")
                 check_cold_desktop_open(first, environment, binary)
+                for path in json.loads(os.environ.get("RESONA_TEST_NFS_PATHS", "[]")):
+                    check_cold_desktop_open(Path(path), environment, binary)
             except BaseException:
                 log.seek(0)
                 print(log.read())
@@ -204,6 +227,8 @@ def main():
                         process.kill()
                         process.wait()
     print("PASS: desktop-entry MP3/WAV/FLAC opening and single instance; one bounded startup update check; native overlay lyrics readiness/recreation; MPRIS metadata/artwork, transport, seek/stale IDs, volume, modes, Raise and Quit")
+    if os.environ.get("RESONA_TEST_NFS_PATHS"):
+        print("PASS: optional NFS desktop opening in cold and existing instances, pause/seek/resume")
 
 
 if __name__ == "__main__":

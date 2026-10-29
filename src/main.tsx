@@ -5,7 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AppProvider } from "./app/preferences";
 import { isTauriRuntime } from "./shared/bridge/tauri";
 import { prepareWindowAppearance } from "./shared/bridge/windowAppearance";
-import "./shared/i18n";
+import i18n, { loadSystemLanguages, resolveLocale } from "./shared/i18n";
 import "./styles.css";
 
 const desktopLyricsWindow = new URLSearchParams(window.location.search).get("window") === "desktop-lyrics"
@@ -24,12 +24,18 @@ const RootWindow = desktopLyricsWindow
     ? lazy(() => import("./windows/AudioCompressionWindow"))
     : lazy(() => import("./App"));
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <AppProvider>
-      <Suspense fallback={null}>
-        <RootWindow />
-      </Suspense>
-    </AppProvider>
-  </StrictMode>,
-);
+async function renderApplication() {
+  await loadSystemLanguages();
+  await i18n.changeLanguage(resolveLocale("system"));
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <AppProvider>
+        <Suspense fallback={null}>
+          <RootWindow />
+        </Suspense>
+      </AppProvider>
+    </StrictMode>,
+  );
+}
+
+void renderApplication();

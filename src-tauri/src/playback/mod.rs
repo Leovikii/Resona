@@ -135,7 +135,13 @@ impl Default for PlaybackSnapshot {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PlaybackErrorCode {
+    FileImportBusy,
     UnsupportedFormat,
+    DialogOpenFailed,
+    InvalidLocation,
+    UnsupportedLocation,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    NetworkLocationUnavailable,
     InvalidFile,
     OpenFile,
     Decode,
@@ -262,7 +268,22 @@ pub trait PlaybackEngine {
 type CommandResult = Result<PlaybackSnapshot, PlaybackError>;
 type ResponseSender = Sender<CommandResult>;
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum PlaybackControl {
+    Toggle,
+    SeekBackward,
+    SeekForward,
+    VolumeUp,
+    VolumeDown,
+}
+
 enum AudioCommand {
+    Control {
+        action: PlaybackControl,
+        steps: u16,
+        response: ResponseSender,
+    },
     AppendQueue {
         sources: Vec<MediaSource>,
         response: ResponseSender,
@@ -326,6 +347,14 @@ pub struct RodioPlaybackEngine {
 }
 
 impl RodioPlaybackEngine {
+    pub fn control(&self, action: PlaybackControl, steps: u16) -> CommandResult {
+        self.request(|response| AudioCommand::Control {
+            action,
+            steps,
+            response,
+        })
+    }
+
     pub fn new() -> Self {
         let (commands, receiver) = mpsc::channel();
         let worker = thread::Builder::new()
@@ -697,6 +726,11 @@ impl AudioActor {
                 device_id,
                 response,
             } => (self.select_output_device(device_id), response, false),
+            AudioCommand::Control {
+                action,
+                steps,
+                response,
+            } => (self.control(action, steps), response, false),
             AudioCommand::Pause(response) => (self.pause(), response, false),
             AudioCommand::Resume(response) => (self.resume(), response, false),
             AudioCommand::Stop(response) => (self.stop(), response, false),
@@ -1353,6 +1387,54 @@ impl AudioActor {
         Ok(self.snapshot.clone())
     }
 
+    fn control(&mut self, action: PlaybackControl, steps: u16) -> CommandResult {
+        self.refresh_playback_state();
+        let steps = steps.clamp(1, 20);
+        match action {
+            PlaybackControl::Toggle => match self.snapshot.status {
+                PlaybackStatus::Playing => self.pause(),
+                PlaybackStatus::Paused => self.resume(),
+                _ => Ok(self.snapshot.clone()),
+            },
+            PlaybackControl::VolumeUp | PlaybackControl::VolumeDown => {
+                let delta = if action == PlaybackControl::VolumeUp {
+                    1.0
+                } else {
+                    -1.0
+                };
+                let percent = self.snapshot.volume * 100.0;
+                self.set_volume(
+                    ((percent + delta * f32::from(steps) * 10.0) / 100.0).clamp(0.0, 1.0),
+                )
+            }
+            PlaybackControl::SeekBackward | PlaybackControl::SeekForward => {
+                if !self.snapshot.seekable
+                    || !matches!(
+                        self.snapshot.status,
+                        PlaybackStatus::Playing | PlaybackStatus::Paused
+                    )
+                {
+                    return Ok(self.snapshot.clone());
+                }
+                let Some(duration) = self.snapshot.duration_ms else {
+                    return Ok(self.snapshot.clone());
+                };
+                let position = self
+                    .player
+                    .as_ref()
+                    .map(|p| duration_to_millis(p.get_pos()))
+                    .unwrap_or(self.snapshot.position_ms);
+                let offset = i64::from(steps)
+                    * if action == PlaybackControl::SeekForward {
+                        5_000
+                    } else {
+                        -5_000
+                    };
+                self.seek(relative_seek_target(position, offset, duration))
+            }
+        }
+    }
+
     fn seek(&mut self, position_ms: u64) -> CommandResult {
         if !matches!(
             self.snapshot.status,
@@ -1520,6 +1602,10 @@ impl AudioActor {
             valid.get(fastrand::usize(..valid.len())).copied()
         }
     }
+}
+
+fn relative_seek_target(position: u64, offset: i64, duration: u64) -> u64 {
+    position.saturating_add_signed(offset).min(duration)
 }
 
 fn duration_to_millis(duration: Duration) -> u64 {
@@ -1788,6 +1874,188 @@ mod tests {
                 .try_seek(Duration::from_millis(100))
                 .expect("seek fixture");
             assert!(decoder.take(32).count() > 0, "fixture {name}");
+        }
+    }
+
+    #[test]
+    fn relative_controls_accumulate_and_clamp_without_an_output_device() {
+        let engine = RodioPlaybackEngine::new();
+        engine.set_volume(0.35).unwrap();
+        assert_eq!(
+            engine.control(PlaybackControl::VolumeUp, 1).unwrap().volume,
+            0.45
+        );
+        assert_eq!(
+            engine
+                .control(PlaybackControl::VolumeDown, 2)
+                .unwrap()
+                .volume,
+            0.25
+        );
+        assert_eq!(
+            engine
+                .control(PlaybackControl::VolumeDown, 20)
+                .unwrap()
+                .volume,
+            0.0
+        );
+        assert_eq!(
+            engine
+                .control(PlaybackControl::VolumeUp, u16::MAX)
+                .unwrap()
+                .volume,
+            1.0
+        );
+        assert_eq!(
+            engine.control(PlaybackControl::Toggle, 1).unwrap().status,
+            PlaybackStatus::Idle
+        );
+        assert_eq!(
+            engine
+                .control(PlaybackControl::SeekForward, 1)
+                .unwrap()
+                .position_ms,
+            0
+        );
+        assert_eq!(relative_seek_target(2_000, -5_000, 10_000), 0);
+        assert_eq!(relative_seek_target(9_000, 5_000, 10_000), 10_000);
+        assert_eq!(relative_seek_target(9_000, -5_000, 10_000), 4_000);
+    }
+
+    #[test]
+    #[ignore = "requires a real output device; playback is muted"]
+    fn focused_controls_preserve_paused_cue_position_on_real_output() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("control.wav");
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 8_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(&path, spec).unwrap();
+        for _ in 0..160_000 {
+            writer.write_sample(0i16).unwrap();
+        }
+        writer.finalize().unwrap();
+        let source = MediaSource {
+            path,
+            cue: Some(crate::media_source::CueTrackSource {
+                cue_path: root.path().join("control.cue"),
+                track_number: 1,
+                title: None,
+                performer: None,
+                album: None,
+                start_ms: 2_000,
+                end_ms: Some(14_000),
+            }),
+        };
+        let engine = RodioPlaybackEngine::new();
+        engine.set_volume(0.0).unwrap();
+        engine.replace_queue_and_play(vec![source], 0).unwrap();
+        assert_eq!(
+            engine.control(PlaybackControl::Toggle, 1).unwrap().status,
+            PlaybackStatus::Paused
+        );
+        engine.seek(1_000).unwrap();
+        let forward = engine.control(PlaybackControl::SeekForward, 1).unwrap();
+        assert_eq!(forward.status, PlaybackStatus::Paused);
+        assert_eq!(forward.duration_ms, Some(12_000));
+        assert!(forward.position_ms.abs_diff(6_000) <= 100);
+        let backward = engine.control(PlaybackControl::SeekBackward, 2).unwrap();
+        assert_eq!(backward.position_ms, 0);
+        assert_eq!(backward.status, PlaybackStatus::Paused);
+        let end = engine.control(PlaybackControl::SeekForward, 20).unwrap();
+        assert!(end.position_ms <= 12_000);
+        engine.seek(1_000).unwrap();
+        assert_eq!(
+            engine.control(PlaybackControl::Toggle, 1).unwrap().status,
+            PlaybackStatus::Playing
+        );
+        engine.stop().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires RESONA_TEST_NFS_LOCATIONS JSON, KDE KIO-FUSE and a real output device"]
+    fn selected_nfs_audio_decodes_seeks_and_plays() {
+        let locations: Vec<String> = serde_json::from_str(
+            &std::env::var("RESONA_TEST_NFS_LOCATIONS").expect("set network test locations"),
+        )
+        .unwrap();
+        assert!(!locations.is_empty());
+        for location in locations {
+            let path = crate::platform::file_access::resolve_location(&location)
+                .expect("resolve network location");
+            let path = crate::platform::file_access::resolve_location(&path.to_string_lossy())
+                .expect("refresh the mapped network path");
+            let context =
+                crate::filesystem::audio_file_context(&path).expect("keep selected network file");
+            assert_eq!(context.sources[context.selected_index].path, path);
+            let imported = crate::filesystem::resolve_audio_paths(vec![
+                PathBuf::from(&location),
+                path.clone(),
+            ]);
+            assert_eq!(
+                imported.items.len(),
+                1,
+                "URI and mapped path refer to one item"
+            );
+            assert_eq!(imported.items[0].source.path, path);
+            assert_eq!(imported.rejected.len(), 1);
+            assert_eq!(
+                imported.rejected[0].reason,
+                crate::filesystem::RejectedPathReason::Duplicate
+            );
+            let folder =
+                crate::filesystem::resolve_audio_paths(vec![path.parent().unwrap().to_owned()]);
+            assert!(folder.items.iter().any(|item| item.source.path == path));
+            assert!(folder.rejected.is_empty());
+            crate::metadata::MetadataService::default().load(&path);
+            crate::lyrics::LyricsService::default().snapshot(
+                &PlaybackSnapshot {
+                    path: Some(path.to_string_lossy().into_owned()),
+                    ..PlaybackSnapshot::default()
+                },
+                None,
+            );
+            let mut decoder = Decoder::try_from(File::open(&path).expect("read network file"))
+                .expect("decode network file");
+            let duration = decoder.total_duration().expect("network duration");
+            assert!(
+                decoder.by_ref().count() > 0,
+                "network decoder must produce samples through EOF"
+            );
+            decoder.try_seek(duration / 2).expect("seek network source");
+            assert!(decoder.next().is_some());
+            let engine = RodioPlaybackEngine::new();
+            engine.set_volume(0.01).unwrap();
+            engine
+                .replace_queue_and_play(context.sources, context.selected_index)
+                .expect("start network playback");
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while engine.snapshot().unwrap().position_ms == 0 {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "network playback did not advance within five seconds"
+                );
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            engine.control(PlaybackControl::Toggle, 1).unwrap();
+            let paused = engine.snapshot().unwrap();
+            assert_eq!(paused.status, PlaybackStatus::Paused);
+            assert!(paused.position_ms > 0);
+            assert!(
+                engine
+                    .control(PlaybackControl::SeekForward, 1)
+                    .unwrap()
+                    .position_ms
+                    > paused.position_ms
+            );
+            assert_eq!(
+                engine.control(PlaybackControl::Toggle, 1).unwrap().status,
+                PlaybackStatus::Playing
+            );
+            engine.stop().unwrap();
         }
     }
 

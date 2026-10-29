@@ -29,6 +29,8 @@ Tauri commands 负责 DTO 转换和服务调用，不包含领域分支。长任
 
 `src/app` 负责窗口壳、路由和跨 feature 编排；`src/features` 负责用户工作流；`src/shared` 负责模型、Tauri bridge、i18n 和无业务组件。Mantine 只能经应用层或 `shared/ui` 使用，领域 hook 不返回 Mantine 类型。
 
+“跟随系统”通过原生 adapter 获取界面语言：Linux 使用 GLib，Windows 使用 GetUserPreferredUILanguages。各窗口在 React 首次渲染前读取语言并初始化 i18n；手动偏好优先。WebView 语言只作为原生读取失败或浏览器预览的回退，启动日志记录两者以诊断差异；不修改进程 locale 或强制某种语言。
+
 主窗口有宽屏和窄屏两种信息架构，但共享同一状态。完整播放器是主内容互斥视图；底部播放器稳定挂载。设置、更新和压缩窗口不得创建第二份播放状态。
 
 普通窗口材质由 Rust `window_material` adapter 决定。Windows 11 可用 Mica；KDE Wayland 探测 ext-background-effect/旧 KWin blur 协议，为外壳区域请求合成器模糊，能力不可用时使用实色 token；桌面歌词保持专用透明窗口，不复用普通窗口材质。
@@ -93,5 +95,13 @@ SQLite schema v7 只保存用户播放列表、列表项目（含可空导入根
 - 输出设备失效由播放服务显式报告并允许重选；不偷偷切换引擎或重采样策略。
 - 数据库迁移在事务内执行并以旧 schema fixture 验证用户列表不丢失。
 - 原生视觉与硬件行为必须在 Windows Release 中验证；浏览器只证明布局、状态、溢出和静态样式。
+
+## 文件访问与窗口内快捷键
+
+[ADR 0036](decisions/0036-native-file-access-and-focused-playback-controls.md) 将所选文件验证与可选目录发现分开；Linux 文件访问 adapter 解析 URI 并映射/刷新 KIO-FUSE 路径。KIO-FUSE 路径的目录列举通过官方 remoteUrl 还原 NFS 来源，交给 KIO ListJob，排除错误的“.”元数据；普通目录沿用标准库。KIO adapter 编译进同一程序，首次网络列目录时 re-exec 为 QtCore 工作模式，入口先于 GTK/单实例初始化；以换行 JSON 串行复用 KIO 会话，每请求设期限，失败回收并在下一请求重建，父进程 EOF 结束工作进程；不增加独立 sidecar。递归导入、同目录音频、CUE、歌词与外置封面共用该边界，一次导入复用目录中的 CUE 候选，不按曲目反复列网络目录。冷启动外部打开结果保留到前端监听完成后一次消费。
+
+默认/用户列表添加、外部打开与压缩输入解析共用 CompressionService 已有文件任务门禁。导入 guard 覆盖网络解析、扫描及列表提交，转换/活动压缩扫描/安装互斥，忙时立即拒绝重复请求；前端共享 gate 只拦重复意图，跨窗口权威状态仍在 Rust。可见窗口以有界轮询读取 busy/scanning，超过 200 毫秒展示正文内状态，不阻断播放器控制。
+
+Linux 文件选择 adapter 直接使用锁定 ashpd 的标准 XDG portal，保留 URI、响应错误与真实 Wayland parent；Windows 使用 Tauri dialog 原生后端。选择与映射在后台边界执行。前端窗口内按键只提交有界意图，播放 actor 根据当前真实位置/音量处理相对操作并返回快照；压缩窗口不创建第二播放器。边界及验收见 [beta.1](plans/0.3.0-beta.1.md)。
 
 长期决定见 [decisions/](decisions/README.md)。
