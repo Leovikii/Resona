@@ -2626,7 +2626,7 @@ h2.page-heading {
 }
 
 /* External file feedback stays fixed while the pointer crosses insertion gaps. */
-.playlist-create-drop {
+.playlist-create-button {
   flex-shrink: 0;
   min-height: 44px;
   width: 100%;
@@ -2640,7 +2640,6 @@ h2.page-heading {
 }
 
 .playlist-nav-scroll[data-drop-active] .playlist-drop-blank,
-.playlist-create-drop[data-drop-active],
 .compact-create-drop[data-drop-active],
 .playlist-nav-item[data-drop-active],
 .compact-playlist-tabs .mantine-Tabs-tab[data-drop-active] {
@@ -2693,4 +2692,12 @@ h2.page-heading {
 .compact-create-drop {
   height: 32px;
   min-height: 32px;
+}
+
+.playlist-nav-scroll[data-drop-active] .playlist-nav-gap[data-active] > span {
+  opacity: 0;
+}
+
+.playlist-nav-scroll[data-drop-active] .playlist-drop-blank {
+  outline-width: 1px;
 }

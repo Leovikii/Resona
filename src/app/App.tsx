@@ -1082,10 +1082,7 @@ function Sidebar({
           </div>
         </ScrollArea>
         <Button
-          className="playlist-create-drop"
-          data-drop-kind="playlist-gap"
-          data-position={playlists.length}
-          data-drop-active={externalDragActive && dropTarget?.kind === "playlist-gap" && dropTarget.position === playlists.length || undefined}
+          className="playlist-create-button"
           disabled={moveDisabled}
           leftSection={<Plus size={16} />}
           onClick={onCreate}
