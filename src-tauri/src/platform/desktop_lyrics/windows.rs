@@ -857,7 +857,15 @@ impl TopmostObserver {
 
 impl Drop for TopmostObserver {
     fn drop(&mut self) {
-        uninstall_topmost_hooks(&self.hooks);
+        // WinEvent hooks must be removed on the thread that installed them.
+        let hooks = std::mem::take(&mut self.hooks);
+        if let Err(error) = self
+            ._state
+            .app
+            .run_on_main_thread(move || uninstall_topmost_hooks(&hooks))
+        {
+            eprintln!("desktop lyrics topmost observer removal dispatch failed: {error}");
+        }
     }
 }
 
@@ -1344,6 +1352,135 @@ unsafe fn create_unlock_font(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(dev))]
+    #[test]
+    #[ignore = "requires an interactive Windows desktop; run scripts/test-windows-lyrics.ps1"]
+    fn native_lyrics_geometry_and_lock_lifecycle() {
+        use windows::Win32::UI::WindowsAndMessaging::{GetWindowRect, IsWindowVisible};
+
+        crate::platform::initialize_process();
+        let mut context = tauri::generate_context!();
+        context.config_mut().identifier = std::env::var("RESONA_TEST_LYRICS_ID")
+            .expect("run scripts/test-windows-lyrics.ps1 for manifest setup and profile cleanup");
+        let service = Arc::new(DesktopLyricsWindowService::default());
+        let events = Arc::clone(&service);
+        let (finished, result) = mpsc::sync_channel(1);
+        let app = tauri::Builder::default()
+            .any_thread()
+            .setup(move |app| {
+                let app = app.handle().clone();
+                thread::spawn(move || {
+                    let directory = app.path().app_local_data_dir().unwrap();
+                    let checked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let monitors = app.available_monitors().unwrap();
+                        assert!(!monitors.is_empty());
+                        for monitor in monitors.iter().chain(monitors.iter().rev()) {
+                            let area = monitor.work_area();
+                            eprintln!(
+                                "lyrics target: {:?}, scale={}",
+                                area,
+                                monitor.scale_factor()
+                            );
+                            service.show(&app, Some(28)).unwrap();
+                            service.window_ready().unwrap();
+                            let window = app.get_webview_window(LYRICS_WINDOW_LABEL).unwrap();
+                            window.set_position(area.position).unwrap();
+                            // Synchronous queries also let the event thread process DPI/resize.
+                            assert_eq!(window.outer_position().unwrap(), area.position);
+                            assert_eq!(window.scale_factor().unwrap(), monitor.scale_factor());
+                            for font_size in [16, 64] {
+                                assert!(service.lock().unwrap().locked);
+                                service.fit_height(font_size).unwrap();
+                                service.persist_geometry(&app);
+                                let position = window.outer_position().unwrap();
+                                let size = window.outer_size().unwrap();
+                                let expected =
+                                    helper_bounds(position, size, monitor.scale_factor());
+                                let helper = service
+                                    .lock_state()
+                                    .resources
+                                    .as_ref()
+                                    .unwrap()
+                                    .native_helper
+                                    .hwnd;
+                                let mut actual = RECT::default();
+                                unsafe {
+                                    assert!(IsWindowVisible(helper).as_bool());
+                                    assert!(GetWindowRect(helper, &mut actual).as_bool());
+                                }
+                                assert_eq!((actual.left, actual.top), (expected.x, expected.y));
+                                assert_eq!(actual.right - actual.left, expected.size as i32);
+                                assert_eq!(
+                                    size.height,
+                                    physical_dimension(
+                                        lyrics_height(font_size),
+                                        monitor.scale_factor()
+                                    )
+                                );
+                                assert!(!service.unlock().unwrap().locked);
+                            }
+                            let saved: WindowGeometry = serde_json::from_slice(
+                                &std::fs::read(directory.join(GEOMETRY_FILE)).unwrap(),
+                            )
+                            .unwrap();
+                            service.hide(&app).unwrap();
+                            let closing = std::time::Instant::now();
+                            while app.get_webview_window(LYRICS_WINDOW_LABEL).is_some() {
+                                assert!(closing.elapsed() < Duration::from_secs(5));
+                                thread::sleep(Duration::from_millis(10));
+                            }
+                            assert!(!service.window_ready().unwrap().visible);
+                            service.show(&app, Some(64)).unwrap();
+                            service.window_ready().unwrap();
+                            let restored = app.get_webview_window(LYRICS_WINDOW_LABEL).unwrap();
+                            let expected = constrain_geometry(
+                                saved,
+                                area,
+                                monitor.scale_factor(),
+                                lyrics_height(64),
+                            );
+                            assert_eq!(
+                                restored.outer_position().unwrap(),
+                                PhysicalPosition::new(expected.x, expected.y)
+                            );
+                            assert_eq!(
+                                restored.outer_size().unwrap(),
+                                PhysicalSize::new(expected.width, expected.height)
+                            );
+                            service.hide(&app).unwrap();
+                            let closing = std::time::Instant::now();
+                            while app.get_webview_window(LYRICS_WINDOW_LABEL).is_some() {
+                                assert!(closing.elapsed() < Duration::from_secs(5));
+                                thread::sleep(Duration::from_millis(10));
+                            }
+                        }
+                    }));
+                    finished.send(checked.is_ok()).unwrap();
+                    app.exit(0);
+                });
+                Ok(())
+            })
+            .build(context)
+            .unwrap();
+        assert_eq!(
+            app.run_return(move |_, event| {
+                if let tauri::RunEvent::WindowEvent { label, event, .. } = event {
+                    if label == LYRICS_WINDOW_LABEL {
+                        match event {
+                            tauri::WindowEvent::Resized(_) => events.enforce_height(),
+                            tauri::WindowEvent::ScaleFactorChanged { .. } => {
+                                events.maintain_topmost()
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }),
+            0
+        );
+        assert!(result.recv_timeout(Duration::from_secs(30)).unwrap());
+    }
 
     #[test]
     fn native_helper_hover_leave_and_reshow() {

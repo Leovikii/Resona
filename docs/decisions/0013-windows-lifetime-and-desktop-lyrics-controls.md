@@ -45,6 +45,7 @@ Windows WebView2 本身采用多进程架构；增加第二个 WebView 可能增
 
 - Windows adapter 使用 `SetWinEventHook` 分别监听外部前台窗口变化、虚拟桌面切换和最小化恢复；回调只合并并投递现有无激活置顶校正，歌词窗口先校正，锁定 helper 后校正。
 - hook 与歌词窗口资源同生命周期，隐藏时通过 `UnhookWinEvent` 释放；资源代次阻止关闭或快速重建后的迟到任务影响新窗口。
+- `SetWinEventHook` 与 `UnhookWinEvent` 必须在同一事件线程执行；工作线程触发隐藏时派发卸载，不在持有歌词服务锁时等待事件线程。beta.2 Windows 原生回归已验证重复关闭/重建没有 hook 卸载错误。
 - 不使用定时轮询、焦点激活、`HWND_NOTOPMOST` 双切换或对抗式 Z-order 循环。独占全屏、安全桌面和持续争夺 topmost 的其他应用仍遵循 Windows 平台边界。
 - 0.2.0 Windows Release 在锁定与解锁状态下完成实机验收，未发现需要引入双切换、轮询或抢焦点回退的新问题。
 - helper 的 38 px 逻辑命中区域保持不变；图标改用系统矢量字体并沿用歌词工具按钮的小圆角、白色图标和 hover 层级。组件库样式可作为视觉规范，但原生 helper 不为复用 React 组件增加 WebView。
