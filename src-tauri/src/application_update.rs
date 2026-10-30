@@ -346,6 +346,7 @@ impl ApplicationUpdateService {
             .await
             .map_err(updater_failure)??;
             self.phase("complete")?;
+            crate::restart_after_update(&app);
             return Ok(());
         }
         self.phase("downloading")?;

@@ -20,7 +20,7 @@ struct Resources {
     window: gtk::ApplicationWindow,
     helper: gtk::Window,
     geometry: Geometry,
-    area: (i32, i32),
+    monitor: gtk::gdk::Monitor,
     gesture: Option<Gesture>,
     path: PathBuf,
     font_size: u32,
@@ -39,6 +39,33 @@ impl Default for Geometry {
             x: 100,
             y: 600,
             width: 760,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct SavedGeometry {
+    #[serde(flatten)]
+    geometry: Geometry,
+    #[serde(default)]
+    output: Option<OutputIdentity>,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+struct OutputIdentity {
+    manufacturer: Option<String>,
+    model: Option<String>,
+    x: i32,
+    y: i32,
+}
+impl OutputIdentity {
+    fn of(monitor: &gtk::gdk::Monitor) -> Self {
+        let bounds = monitor.geometry();
+        Self {
+            manufacturer: monitor.manufacturer().map(|value| value.to_string()),
+            model: monitor.model().map(|value| value.to_string()),
+            x: bounds.x(),
+            y: bounds.y(),
         }
     }
 }
@@ -116,9 +143,9 @@ impl DesktopLyricsWindowService {
             let font_size = font_size.unwrap_or(28).clamp(16, 64);
             let path = app.path().app_local_data_dir().map_err(failure)?.join("desktop-lyrics-wayland.json");
             let saved = match std::fs::read(&path) {
-                Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|error| { log::warn!("invalid Wayland lyrics geometry: {error}"); Geometry::default() }),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Geometry::default(),
-                Err(error) => { log::warn!("cannot read Wayland lyrics geometry: {error}"); Geometry::default() }
+                Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|error| { log::warn!("invalid Wayland lyrics geometry: {error}"); SavedGeometry { geometry: Geometry::default(), output: None } }),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => SavedGeometry { geometry: Geometry::default(), output: None },
+                Err(error) => { log::warn!("cannot read Wayland lyrics geometry: {error}"); SavedGeometry { geometry: Geometry::default(), output: None } }
             };
             let webview = WebviewWindowBuilder::new(&app, "desktop-lyrics", WebviewUrl::App("index.html?window=desktop-lyrics".into()))
                 .title("Resona Desktop Lyrics").inner_size(760.0, height(font_size) as f64)
@@ -129,13 +156,18 @@ impl DesktopLyricsWindowService {
                 // A realized xdg_toplevel cannot be changed into a layer surface.
                 if window.is_realized() { return Err(failure("lyrics window was realized before layer-shell initialization")); }
                 let display = window.display();
-                let monitor = app.get_webview_window("main").and_then(|main| main.gtk_window().ok())
+                let monitors = monitors(&display);
+                let fallback = app.get_webview_window("main").and_then(|main| main.gtk_window().ok())
+                    // Hidden startup windows can report (0, 0), selecting the wrong output.
+                    .filter(|main| main.is_mapped())
                     .and_then(|main| main.window()).and_then(|main| display.monitor_at_window(&main))
-                    .or_else(|| display.primary_monitor()).or_else(|| display.monitor(0))
+                    .or_else(|| display.primary_monitor()).or_else(|| display.monitor(0));
+                let identities = monitors.iter().map(OutputIdentity::of).collect::<Vec<_>>();
+                let monitor = saved.output.as_ref().and_then(|output| restore_output(output, &identities))
+                    .and_then(|index| monitors.get(index).cloned()).or(fallback)
                     .ok_or_else(|| failure("no Wayland output is available"))?;
                 let bounds = monitor.geometry();
-                let area = (bounds.width(), bounds.height());
-                let geometry = constrain(saved, area, height(font_size));
+                let geometry = constrain(saved.geometry, (bounds.width(), bounds.height()), height(font_size));
                 configure_layer(&window, &monitor, "io.github.vki.resona.lyrics");
                 let entering = app.clone();
                 let leaving = app.clone();
@@ -172,7 +204,7 @@ impl DesktopLyricsWindowService {
                     if let Err(error) = service.unlock() { log::warn!("lyrics unlock failed: {}", error.message); }
                 }});
                 helper.add(&button);
-                let resources = Resources { webview: webview.clone(), window, helper, geometry, area, gesture: None, path, font_size, ready: false };
+                let resources = Resources { webview: webview.clone(), window, helper, geometry, monitor, gesture: None, path, font_size, ready: false };
                 resources.apply_geometry();
                 log::info!("desktop lyrics configured: Wayland layer=overlay keyboard=none exclusive-zone=-1");
                 Ok(resources)
@@ -282,14 +314,32 @@ impl DesktopLyricsWindowService {
                         if let Some(gesture) = &resources.gesture {
                             let dx = (x - gesture.x).round() as i32;
                             let dy = (y - gesture.y).round() as i32;
-                            resources.geometry =
-                                gesture_geometry(resources.geometry, gesture, dx, dy);
-                            resources.geometry = constrain(
-                                resources.geometry,
-                                resources.area,
-                                height(resources.font_size),
-                            );
-                            resources.apply_geometry();
+                            let geometry = gesture_geometry(resources.geometry, gesture, dx, dy);
+                            let bounds = resources.monitor.geometry();
+                            let target = if matches!(gesture.kind, GestureKind::Move) {
+                                let pointer = (
+                                    bounds.x() + resources.geometry.x + x.round() as i32,
+                                    bounds.y() + resources.geometry.y + y.round() as i32,
+                                );
+                                monitors(&resources.window.display())
+                                    .into_iter()
+                                    .find(|monitor| {
+                                        let area = monitor.geometry();
+                                        monitor != &resources.monitor && contains(&area, pointer)
+                                    })
+                            } else {
+                                None
+                            };
+                            if let Some(target) = target {
+                                resources.transfer(target, geometry);
+                            } else {
+                                resources.geometry = constrain(
+                                    geometry,
+                                    resources.area(),
+                                    height(resources.font_size),
+                                );
+                                resources.apply_geometry();
+                            }
                         }
                     }
                     "end" => {
@@ -310,7 +360,7 @@ impl DesktopLyricsWindowService {
                     resources.font_size = font_size.clamp(16, 64);
                     resources.geometry = constrain(
                         resources.geometry,
-                        resources.area,
+                        resources.area(),
                         height(resources.font_size),
                     );
                     resources.apply_geometry();
@@ -382,6 +432,36 @@ fn configure_helper_hover(helper: &gtk::Window, button: &gtk::Button) {
     });
 }
 impl Resources {
+    fn area(&self) -> (i32, i32) {
+        let bounds = self.monitor.geometry();
+        (bounds.width(), bounds.height())
+    }
+
+    fn transfer(&mut self, monitor: gtk::gdk::Monitor, geometry: Geometry) {
+        let from = self.monitor.geometry();
+        let to = monitor.geometry();
+        self.geometry = constrain(
+            Geometry {
+                x: geometry.x + from.x() - to.x(),
+                y: geometry.y + from.y() - to.y(),
+                ..geometry
+            },
+            (to.width(), to.height()),
+            height(self.font_size),
+        );
+        self.monitor = monitor;
+        // Changing a layer output remaps its surface and ends the pointer grab.
+        self.gesture = None;
+        self.window.set_monitor(&self.monitor);
+        self.helper.set_monitor(&self.monitor);
+        self.apply_geometry();
+        self.persist();
+        log::info!(
+            "desktop lyrics moved to output: {:?}",
+            OutputIdentity::of(&self.monitor)
+        );
+    }
+
     fn apply_geometry(&self) {
         self.window
             .set_layer_shell_margin(Edge::Left, self.geometry.x);
@@ -396,14 +476,45 @@ impl Resources {
             .set_layer_shell_margin(Edge::Top, self.geometry.y);
     }
     fn persist(&self) {
-        if let Err(error) = serde_json::to_vec(&self.geometry)
-            .map_err(std::io::Error::other)
-            .and_then(|bytes| std::fs::write(&self.path, bytes))
+        if let Err(error) = serde_json::to_vec(&SavedGeometry {
+            geometry: self.geometry,
+            output: Some(OutputIdentity::of(&self.monitor)),
+        })
+        .map_err(std::io::Error::other)
+        .and_then(|bytes| std::fs::write(&self.path, bytes))
         {
             log::warn!("cannot save Wayland lyrics geometry: {error}");
         }
     }
 }
+fn monitors(display: &gtk::gdk::Display) -> Vec<gtk::gdk::Monitor> {
+    (0..display.n_monitors())
+        .filter_map(|index| display.monitor(index))
+        .collect()
+}
+
+fn restore_output(saved: &OutputIdentity, outputs: &[OutputIdentity]) -> Option<usize> {
+    outputs
+        .iter()
+        .position(|output| output == saved)
+        .or_else(|| {
+            let mut matches = outputs.iter().enumerate().filter(|(_, output)| {
+                (saved.model.is_some() || saved.manufacturer.is_some())
+                    && output.model == saved.model
+                    && output.manufacturer == saved.manufacturer
+            });
+            let (index, _) = matches.next()?;
+            matches.next().is_none().then_some(index)
+        })
+}
+
+fn contains(area: &gtk::gdk::Rectangle, point: (i32, i32)) -> bool {
+    point.0 >= area.x()
+        && point.0 < area.x() + area.width()
+        && point.1 >= area.y()
+        && point.1 < area.y() + area.height()
+}
+
 fn height(font_size: u32) -> i32 {
     (56.0 + 2.24 * f64::from(font_size.clamp(16, 64)))
         .clamp(130.0, 240.0)
@@ -455,6 +566,35 @@ mod tests {
         let small = constrain(Geometry::default(), (400, 300), 130);
         assert_eq!((small.width, small.x, small.y), (400, 0, 170));
     }
+    #[test]
+    fn output_identity_survives_reordering_and_unique_model_repositioning() {
+        let output = |model: &str, x| OutputIdentity {
+            manufacturer: None,
+            model: Some(model.into()),
+            x,
+            y: 0,
+        };
+        let saved = output("main", 960);
+        assert_eq!(
+            restore_output(&saved, &[output("secondary", 0), output("main", 960)]),
+            Some(1)
+        );
+        assert_eq!(
+            restore_output(&saved, &[output("main", -2560), output("secondary", 0)]),
+            Some(0)
+        );
+        assert_eq!(restore_output(&saved, &[output("secondary", 0)]), None);
+        assert_eq!(
+            restore_output(&saved, &[output("main", 0), output("main", 2560)]),
+            None
+        );
+        let old: SavedGeometry = serde_json::from_str(r#"{"x":100,"y":600,"width":760}"#).unwrap();
+        assert!(old.output.is_none());
+        let area = gtk::gdk::Rectangle::new(-960, 0, 960, 1707);
+        assert!(contains(&area, (-1, 20)));
+        assert!(!contains(&area, (0, 20)));
+    }
+
     #[test]
     fn move_and_resize_use_surface_local_coordinates() {
         let geometry = Geometry {
@@ -531,6 +671,97 @@ mod tests {
                             .unwrap();
                         service
                             .pointer("end".into(), GestureKind::Move, 0.0, 0.0)
+                            .unwrap();
+                        let expected = service
+                            .on_main(|| {
+                                WINDOWS.with(|slot| {
+                                    Ok(OutputIdentity::of(&slot.borrow().as_ref().unwrap().monitor))
+                                })
+                            })
+                            .unwrap();
+                        // Exercise actual layer remapping on every attached output using service APIs.
+                        let targets = service
+                            .on_main(|| {
+                                WINDOWS.with(|slot| {
+                                    let slot = slot.borrow();
+                                    let resources = slot.as_ref().unwrap();
+                                    Ok(monitors(&resources.window.display())
+                                        .into_iter()
+                                        .map(|m| OutputIdentity::of(&m))
+                                        .collect::<Vec<_>>())
+                                })
+                            })
+                            .unwrap();
+                        for target in targets.iter().chain(std::iter::once(&expected)) {
+                            let destination = (target.x, target.y);
+                            let expected_target = (target.x, target.y);
+                            let (x, y) = service
+                                .on_main(move || {
+                                    WINDOWS.with(|slot| {
+                                        let slot = slot.borrow();
+                                        let resources = slot.as_ref().unwrap();
+                                        let bounds = resources.monitor.geometry();
+                                        Ok((
+                                            (destination.0 - bounds.x() - resources.geometry.x + 20)
+                                                as f64,
+                                            (destination.1 - bounds.y() - resources.geometry.y + 20)
+                                                as f64,
+                                        ))
+                                    })
+                                })
+                                .unwrap();
+                            service
+                                .pointer("begin".into(), GestureKind::Move, 10.0, 10.0)
+                                .unwrap();
+                            service
+                                .pointer("update".into(), GestureKind::Move, x, y)
+                                .unwrap();
+                            service
+                                .pointer("end".into(), GestureKind::Move, 0.0, 0.0)
+                                .unwrap();
+                            std::thread::sleep(Duration::from_millis(250));
+                            service
+                                .on_main(move || {
+                                    WINDOWS.with(|slot| {
+                                        let slot = slot.borrow();
+                                        let resources = slot.as_ref().unwrap();
+                                        let bounds = resources.monitor.geometry();
+                                        assert_eq!((bounds.x(), bounds.y()), expected_target);
+                                        let actual = resources
+                                            .window
+                                            .display()
+                                            .monitor_at_window(&resources.window.window().unwrap())
+                                            .unwrap();
+                                        assert_eq!(actual, resources.monitor);
+                                        assert_eq!(
+                                            resources.helper.monitor().as_ref(),
+                                            Some(&resources.monitor)
+                                        );
+                                        Ok(())
+                                    })
+                                })
+                                .unwrap();
+                        }
+                        service.hide(&app).unwrap();
+                        let closing = std::time::Instant::now();
+                        while app.get_webview_window("desktop-lyrics").is_some() {
+                            assert!(closing.elapsed() < Duration::from_secs(5));
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                        service.show(&app, Some(64)).unwrap();
+                        service.window_ready().unwrap();
+                        service
+                            .on_main(move || {
+                                WINDOWS.with(|slot| {
+                                    assert_eq!(
+                                        OutputIdentity::of(
+                                            &slot.borrow().as_ref().unwrap().monitor
+                                        ),
+                                        expected
+                                    );
+                                    Ok(())
+                                })
+                            })
                             .unwrap();
                         assert!(service.lock().unwrap().locked);
                         let (pointer_sent, pointer_received) = mpsc::channel();

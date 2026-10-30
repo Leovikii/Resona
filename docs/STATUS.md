@@ -1,9 +1,23 @@
 # 开发状态
 
-最后更新：2026-10-29
+最后更新：2026-10-30
+
+## beta.2 验收与交付
+
+- 当前版本为 `0.3.0-beta.2`，接续 beta.1；本轮范围见 [开发与验证计划](plans/0.3.0-beta.2.md)。所有者于 2026-10-30 确认 Linux 测试已完成、Windows 本机可测项目均通过，并授权推送 dev、最新双平台 PR CI 通过后合并 main、发布 beta.2，再将 dev 快进到 main。交付结果以 [main CD](https://github.com/Leovikii/Resona/actions/workflows/main-merge-delivery.yml) 和 [beta.2 Release](https://github.com/Leovikii/Resona/releases/tag/v0.3.0-beta.2) 为准。
+- Linux 更新在 Pacman 安装与数据库复核成功后保存窗口/播放偏好并调用 Tauri `request_restart`，正常 Exit 事件释放单实例名称；取消和失败保留原进程。没有重启 helper，也不自动下载或安装。
+- KDE Wayland 歌词只保存屏内坐标且绑定创建时输出，旧拖动被本屏边界限制，KWin 普通窗口记忆不作用于 layer surface。修复为保存显示器厂商/型号与布局原点，优先恢复原屏；无记录时只参考已映射的主窗口，避免隐藏启动窗口的 `(0,0)` 误判。GTK 3 Wayland 未实现 primary monitor 查询，本机两屏 `is_primary=false` 不等于 KDE 未设置主屏。
+- 拖动指针进入另一输出时同时重绑定歌词与解锁 helper，按逻辑坐标约束到目标屏。layer-shell 换屏会 remap 并结束本次拖动，需松手后继续调整；无需开关歌词。暂不实现运行中的热拔插恢复。
+- Windows 未发现同类单输出钳制：系统拖动、物理坐标保存、最大交集/最近屏恢复及目标 DPI 约束已存在。已修复拖动、保存几何、锁定 helper 定位时持有服务锁调用 Tauri 的卡死风险，去除字号变化时重复 helper 定位。Windows 原生回归另发现关闭歌词在工作线程卸载 WinEvent hook 会报“句柄无效”，现回到安装 hook 的事件线程卸载，重复关闭/重建不再报错。
+- beta.2 首次由 agent 启动时残留工具环境 `LC_ALL=C.UTF-8`，覆盖 KDE 的 `LANG=zh_CN.UTF-8`，导致测试界面英文。已定位为启动环境错误，后续 agent 启动必须先清除继承的 LANG/LANGUAGE/LC_*，再完整复制桌面会话对应变量；不改应用检测、不强制中文偏好。
+- 所有者于 2026-10-29 明确确认 **Windows 实机更新功能正常**；该确认只覆盖更新，不扩展到本轮 Windows 多屏修复。
+- Windows 11 x64 本机：Node 71 通过/4 平台跳过、Rust 145 通过/12 条件忽略，fmt、常规与嵌入前端 Clippy、TypeScript/Vite、许可证无差异、嵌入前端 Release 通过。新增原生歌词生命周期回归 1 项通过，覆盖实际 200% 缩放、16/64px 字号、锁定/helper 边界、几何保存、关闭重建和 hook 释放；入口为 `scripts/test-windows-lyrics.ps1`，在独立进程嵌入 Tauri 清单、限制 30 秒并清理隔离配置。测试版为忽略目录 `src-tauri/target/test-build/Resona-0.3.0-beta.2-windows-x86_64/Resona.exe`，沿用独立测试标识，不覆盖安装版。所有者确认本机可测的拖动、锁定穿透、字号、关闭重开及应用重启恢复均通过；本轮 API 只枚举到单屏，负坐标/不同 DPI 双屏没有实测，不回填为通过。所有者随后明确授权发布 beta.2，保留该专项证据边界。
+- Linux 2026-10-29 自动记录：Node 75 项、Rust 137 项（21 条件忽略）、TypeScript/Vite、fmt/Clippy 通过。真实 KDE 双屏 layer-shell 切换、helper 同屏、保存/关闭重建和输入区域回归，以及真实进程重启/单实例释放回归，各 1 项通过；嵌入前端 Release、既有桌面集成及 beta.2 测试目录 SHA256 校验通过。该轮未执行真实 Polkit/Pacman 跨版本安装；所有者随后于 2026-10-30 告知 Linux 测试完成，未补充的专项不回填为独立通过。
 
 ## beta.1 验收与交付
 
+- 本机测试环境已清理：移除旧 Alpha 测试程序/归档、旧应用测试二进制、Rust debug 增量缓存和一次性打包文件，释放约 25.2 GB。保留最新 beta.1 测试目录及归档、Release、依赖缓存和正式回归脚本；旧 Alpha 的列表/设置迁存于忽略目录 `src-tauri/target/test-build/saved-profiles/`。最新测试包文件校验及 Node 75 项回归通过；未重新编译 Rust，后续 debug 构建会重建增量缓存。详细本机清单在忽略文件 `src-tauri/target/CLEANUP.json`。
+- PR #23 已合并到 `33320a5`，远端 main/dev 已同步；[main CD](https://github.com/Leovikii/Resona/actions/runs/40893356189) 的 Windows、Arch 构建和完整发布均成功。
 - Windows 自动验证环境为 Windows 11 x64 build 26200；以下 CachyOS/KDE 结果是 Linux 实机记录。本轮 `991f045` 的 Node 71 通过/4 平台跳过、Rust 145 通过/12 条件忽略，另 9 项真实输出/CUE/SMTC 和 1 项固定 FFmpeg 转换矩阵通过；fmt/Clippy、前端/嵌入 Release、许可证/品牌资源/fixture/工作流检查通过。[最新基线双平台 CI](https://github.com/Leovikii/Resona/actions/runs/40888887844) 通过，后续提交仍需新 CI。详情及人工清单见 [Windows 验证](plans/0.3.0-beta.1-windows-validation.md)。
 - 所有者于 2026-10-29 确认 Windows 和 Linux 实机测试均已通过，授权合并 PR #23、由 main CD 发布 `0.3.0-beta.1`，再将 dev 快进同步到 main。双平台实机验收门禁已解除；未逐项记录的专项不因此补写为通过。Windows 测试版使用独立标识隔离现有数据；没有执行 NSIS 覆盖/卸载，不提交私人媒体路径。
 - Windows 映射网络目录 19 个 FLAC/对应歌词可读，一首真实 FLAC 的目录/去重、完整解码、seek 和低音量暂停/继续专项通过。测试移除“200 毫秒必已启动”的固定等待，最多 5 秒等待实际进度，并在暂停后读取权威快照；不修改播放生产逻辑，不将单首专项扩展成全目录播放或听感通过。
