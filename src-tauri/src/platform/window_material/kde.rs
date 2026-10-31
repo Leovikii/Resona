@@ -5,8 +5,14 @@
 use super::WindowMaterial;
 use glib::translate::ToGlibPtr;
 use gtk::{gdk, glib, prelude::*};
-use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::mpsc, time::Duration};
-use tauri::{Emitter, Runtime, WebviewWindow};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    rc::Rc,
+    sync::mpsc,
+    time::Duration,
+};
+use tauri::{Emitter, Manager, Runtime, WebviewWindow};
 use wayland_client::{
     backend::{Backend, ObjectId},
     protocol::{
@@ -22,6 +28,8 @@ use wayland_protocols::ext::background_effect::v1::client::{
 use wayland_protocols_plasma::blur::client::{
     org_kde_kwin_blur::OrgKdeKwinBlur, org_kde_kwin_blur_manager::OrgKdeKwinBlurManager,
 };
+
+mod shadow;
 
 #[derive(Clone, Copy, Debug, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,6 +50,7 @@ struct Session {
 }
 struct BlurState {
     connection: Connection,
+    registry: wl_registry::WlRegistry,
     compositor: WlCompositor,
     surface: WlSurface,
     manager: Option<(u32, OrgKdeKwinBlurManager)>,
@@ -50,6 +59,8 @@ struct BlurState {
     effect: Option<ExtBackgroundEffectSurfaceV1>,
     blur_capability: bool,
     capabilities_received: bool,
+    shadow: shadow::Shadow,
+    normal: bool,
     content: ContentRect,
     size: (i32, i32),
     ready: bool,
@@ -68,6 +79,7 @@ impl BlurState {
         }
     }
     fn update(&mut self, qh: &QueueHandle<Self>) {
+        self.shadow.update(&self.surface, self.normal, qh);
         if let Some((_, manager)) = &self.effect_manager {
             if let Some(blur) = self.blur.take() {
                 if let Some((_, legacy)) = &self.manager {
@@ -133,6 +145,14 @@ impl Dispatch<wl_registry::WlRegistry, ()> for BlurState {
                 name,
                 interface,
                 version,
+            } if matches!(interface.as_str(), "org_kde_kwin_shadow_manager" | "wl_shm") => {
+                state.shadow.bind(registry, name, &interface, version, qh);
+                state.update(qh);
+            }
+            wl_registry::Event::Global {
+                name,
+                interface,
+                version,
             } if interface == "ext_background_effect_manager_v1" => {
                 state.effect_manager = Some((name, registry.bind(name, version.min(1), qh, ())));
                 state.update(qh);
@@ -170,6 +190,10 @@ impl Dispatch<wl_registry::WlRegistry, ()> for BlurState {
                 state.manager = None;
                 state.update(qh);
                 log::info!("KWin blur capability removed; using solid shell");
+            }
+            wl_registry::Event::GlobalRemove { name } => {
+                state.shadow.remove_global(name, &state.surface);
+                state.update(qh);
             }
             _ => {}
         }
@@ -209,6 +233,11 @@ impl Dispatch<wl_callback::WlCallback, ()> for BlurState {
 wayland_client::delegate_noop!(BlurState: ignore OrgKdeKwinBlurManager);
 wayland_client::delegate_noop!(BlurState: ignore OrgKdeKwinBlur);
 wayland_client::delegate_noop!(BlurState: ignore WlRegion);
+wayland_client::delegate_noop!(BlurState: ignore wayland_client::protocol::wl_shm::WlShm);
+wayland_client::delegate_noop!(BlurState: ignore wayland_client::protocol::wl_shm_pool::WlShmPool);
+wayland_client::delegate_noop!(BlurState: ignore wayland_client::protocol::wl_buffer::WlBuffer);
+wayland_client::delegate_noop!(BlurState: ignore wayland_protocols_plasma::shadow::client::org_kde_kwin_shadow_manager::OrgKdeKwinShadowManager);
+wayland_client::delegate_noop!(BlurState: ignore wayland_protocols_plasma::shadow::client::org_kde_kwin_shadow::OrgKdeKwinShadow);
 
 pub(super) fn sync<R: Runtime>(window: &WebviewWindow<R>) -> Result<WindowMaterial, String> {
     if !std::env::var("XDG_CURRENT_DESKTOP")
@@ -251,9 +280,10 @@ pub(super) fn sync<R: Runtime>(window: &WebviewWindow<R>) -> Result<WindowMateri
     }
 }
 
-fn initialize<R: Runtime>(
+fn start_session<R: Runtime>(
     window: &WebviewWindow<R>,
     sender: mpsc::SyncSender<Result<WindowMaterial, String>>,
+    content: Option<ContentRect>,
 ) -> Result<(), String> {
     let native = window.gtk_window().map_err(|error| error.to_string())?;
     native.realize();
@@ -262,8 +292,8 @@ fn initialize<R: Runtime>(
     if display.type_().name() != "GdkWaylandDisplay" {
         return Err("GTK is not using Wayland".into());
     }
-    // SAFETY: all borrowed GDK objects stay live on this thread. The unrealize
-    // handler removes/drops the entire session before GTK destroys wl_surface.
+    // SAFETY: borrowed GDK objects are used only during this surface's GTK lifetime.
+    // Unmap cleanup never sends a request referencing GTK's destroyed surface.
     let (connection, surface, compositor) = unsafe {
         let display_ptr: *mut gdk::ffi::GdkDisplay = display.to_glib_none().0;
         let surface_ptr: *mut gdk::ffi::GdkWindow = surface.to_glib_none().0;
@@ -292,7 +322,7 @@ fn initialize<R: Runtime>(
     };
     let queue = connection.new_event_queue();
     let qh = queue.handle();
-    connection.display().get_registry(&qh, ());
+    let registry = connection.display().get_registry(&qh, ());
     connection.display().sync(&qh, ());
     connection.flush().map_err(|error| error.to_string())?;
     let size = (native.allocated_width(), native.allocated_height());
@@ -301,6 +331,7 @@ fn initialize<R: Runtime>(
         queue,
         state: BlurState {
             connection,
+            registry,
             surface,
             compositor,
             manager: None,
@@ -309,12 +340,17 @@ fn initialize<R: Runtime>(
             effect: None,
             blur_capability: false,
             capabilities_received: false,
-            content: ContentRect {
+            shadow: shadow::Shadow::default(),
+            normal: !native.is_maximized()
+                && !native
+                    .window()
+                    .is_some_and(|window| window.state().contains(gdk::WindowState::FULLSCREEN)),
+            content: content.unwrap_or(ContentRect {
                 x: 0,
                 y: 48,
                 width: size.0,
                 height: (size.1 - 48).max(0),
-            },
+            }),
             size,
             ready: false,
             waiting: vec![sender],
@@ -355,38 +391,110 @@ fn initialize<R: Runtime>(
         }
         glib::ControlFlow::Continue
     });
-    let weak = Rc::downgrade(&session);
+    Ok(())
+}
+
+fn initialize<R: Runtime>(
+    window: &WebviewWindow<R>,
+    sender: mpsc::SyncSender<Result<WindowMaterial, String>>,
+) -> Result<(), String> {
+    start_session(window, sender, None)?;
+    let native = window.gtk_window().map_err(|error| error.to_string())?;
+    let label = window.label().to_owned();
+    let resized_label = label.clone();
     native.connect_size_allocate(move |_, rect| {
-        if let Some(session) = weak.upgrade() {
-            let mut session = session.borrow_mut();
-            session.state.size = (rect.width(), rect.height());
-            let qh = session.queue.handle();
-            session.state.update(&qh);
-        }
-    });
-    native.connect_unrealize(move |_| {
         SESSIONS.with(|sessions| {
-            if let Some(session) = sessions.borrow_mut().remove(&label) {
+            if let Some(session) = sessions.borrow().get(&resized_label) {
                 let mut session = session.borrow_mut();
-                if let Some((_, manager)) = &session.state.manager {
-                    manager.unset(&session.state.surface);
-                }
-                if let Some(blur) = session.state.blur.take() {
-                    blur.release();
-                }
-                if let Some(effect) = session.state.effect.take() {
-                    effect.destroy();
-                }
-                if let Some((_, manager)) = session.state.effect_manager.take() {
-                    manager.destroy();
-                }
-                if let Err(error) = session.state.connection.flush() {
-                    log::warn!("KDE blur cleanup failed: {error}");
-                }
+                session.state.size = (rect.width(), rect.height());
+                let qh = session.queue.handle();
+                session.state.update(&qh);
             }
         });
     });
+    let state_label = label.clone();
+    native.connect_window_state_event(move |native, event| {
+        SESSIONS.with(|sessions| {
+            if let Some(session) = sessions.borrow().get(&state_label) {
+                let mut session = session.borrow_mut();
+                session.state.normal = !event
+                    .new_window_state()
+                    .intersects(gdk::WindowState::MAXIMIZED | gdk::WindowState::FULLSCREEN);
+                let qh = session.queue.handle();
+                session.state.update(&qh);
+                native.queue_draw();
+            }
+        });
+        glib::Propagation::Proceed
+    });
+    let content = Rc::new(Cell::new(None));
+    let unmapped_content = content.clone();
+    let unmapped_label = label.clone();
+    native.connect_unmap(move |_| {
+        if let Some(rect) = cleanup(&unmapped_label) {
+            unmapped_content.set(Some(rect));
+        }
+    });
+    let unrealized_content = content.clone();
+    let unrealized_label = label.clone();
+    native.connect_unrealize(move |_| {
+        if let Some(rect) = cleanup(&unrealized_label) {
+            unrealized_content.set(Some(rect));
+        }
+    });
+    let app = window.app_handle().clone();
+    native.connect_map(move |_| {
+        if SESSIONS.with(|sessions| sessions.borrow().contains_key(&label)) {
+            return;
+        }
+        if let Some(window) = app.get_webview_window(&label) {
+            let (sender, _) = mpsc::sync_channel(1);
+            if let Err(error) = start_session(&window, sender, content.get()) {
+                log::warn!("KDE material remap failed: {error}");
+            }
+        }
+    });
     Ok(())
+}
+
+fn cleanup(label: &str) -> Option<ContentRect> {
+    let session = SESSIONS.with(|sessions| sessions.borrow_mut().remove(label));
+    if let Some(session) = session {
+        let mut session = session.borrow_mut();
+        let state = &mut session.state;
+        // GDK destroys wl_surface during unmap, before these GTK signals.
+        state.shadow.clear();
+        if let Some(blur) = state.blur.take() {
+            blur.release();
+        }
+        if let Some(effect) = state.effect.take() {
+            effect.destroy();
+        }
+        if let Some((_, manager)) = state.manager.take() {
+            state
+                .connection
+                .backend()
+                .destroy_object(&manager.id())
+                .unwrap_or_else(|error| {
+                    log::warn!("KDE legacy blur manager cleanup failed: {error}");
+                });
+        }
+        if let Some((_, manager)) = state.effect_manager.take() {
+            manager.destroy();
+        }
+        if let Err(error) = state
+            .connection
+            .backend()
+            .destroy_object(&state.registry.id())
+        {
+            log::warn!("KDE registry cleanup failed: {error}");
+        }
+        if let Err(error) = state.connection.flush() {
+            log::warn!("KDE material cleanup failed: {error}");
+        }
+        return Some(state.content);
+    }
+    None
 }
 
 pub fn set_content_rect<R: Runtime>(
@@ -426,11 +534,123 @@ fn shell_regions((width, height): (i32, i32), content: ContentRect) -> [(i32, i3
         (right, y, width - right, bottom - y),
         (0, bottom, width, height - bottom),
     ]
+    .map(|(x, y, w, h)| {
+        // Keep blur one surface-local logical pixel off the edge to avoid KWin move trails.
+        let left = x.max(1);
+        let top = y.max(1);
+        let right = (x + w).min(width - 1);
+        let bottom = (y + h).min(height - 1);
+        (left, top, (right - left).max(0), (bottom - top).max(0))
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires an isolated KDE Wayland session; checks protocol lifecycle, not visual appearance"]
+    fn native_shadow_lifecycle() {
+        use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+
+        fn wait_shadow(app: &tauri::AppHandle, label: &str, expected: Option<bool>) {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                let (done, received) = mpsc::sync_channel(1);
+                let label = label.to_owned();
+                app.run_on_main_thread(move || {
+                    let actual = SESSIONS.with(|sessions| {
+                        sessions.borrow().get(&label).map(|session| {
+                            let session = session.borrow();
+                            (session.state.shadow.attached(), session.state.normal)
+                        })
+                    });
+                    done.send(actual).unwrap();
+                })
+                .unwrap();
+                let actual = received.recv_timeout(Duration::from_secs(5)).unwrap();
+                if actual == expected.map(|attached| (attached, attached)) {
+                    return;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "shadow state {actual:?}, expected {expected:?}"
+                );
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+
+        crate::platform::initialize_process();
+        let mut context = tauri::generate_context!();
+        context.config_mut().app.windows.clear();
+        let (finished, result) = mpsc::sync_channel(1);
+        let app = tauri::Builder::default()
+            .any_thread()
+            .setup(move |app| {
+                let app = app.handle().clone();
+                std::thread::spawn(move || {
+                    let checked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        for label in ["main", "audio-compression", "audio-compression"] {
+                            let handle = app.clone();
+                            let (done, received) = mpsc::sync_channel(1);
+                            app.run_on_main_thread(move || {
+                                let window = WebviewWindowBuilder::new(
+                                    &handle,
+                                    label,
+                                    WebviewUrl::External("about:blank".parse().unwrap()),
+                                )
+                                .decorations(false)
+                                .transparent(true)
+                                .inner_size(720.0, 500.0)
+                                .build();
+                                done.send(window).unwrap();
+                            })
+                            .unwrap();
+                            let window = received.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+                            assert_eq!(sync(&window).unwrap(), WindowMaterial::KdeBlur);
+                            wait_shadow(&app, label, Some(true));
+                            window.maximize().unwrap();
+                            wait_shadow(&app, label, Some(false));
+                            window.unmaximize().unwrap();
+                            wait_shadow(&app, label, Some(true));
+                            window.set_fullscreen(true).unwrap();
+                            wait_shadow(&app, label, Some(false));
+                            window.set_fullscreen(false).unwrap();
+                            wait_shadow(&app, label, Some(true));
+                            set_content_rect(&window, ContentRect { x: 12, y: 48, width: 696, height: 356 }).unwrap();
+                            window.hide().unwrap();
+                            wait_shadow(&app, label, None);
+                            assert!(app.get_webview_window(label).is_some());
+                            window.show().unwrap();
+                            wait_shadow(&app, label, Some(true));
+                            let (done, received) = mpsc::sync_channel(1);
+                            app.run_on_main_thread(move || {
+                                done.send(SESSIONS.with(|sessions| sessions.borrow().get(label).unwrap().borrow().state.content.width)).unwrap();
+                            }).unwrap();
+                            assert_eq!(received.recv_timeout(Duration::from_secs(5)).unwrap(), 696);
+                            if label == "audio-compression" {
+                                window.destroy().unwrap();
+                                wait_shadow(&app, label, None);
+                            }
+                        }
+                        app.get_webview_window("main").unwrap().hide().unwrap();
+                        wait_shadow(&app, "main", None);
+                        println!("PASS: main/compression shadow attach, maximize/fullscreen removal, hide/show with content preservation, and compression recreation");
+                    }));
+                    finished.send(checked).unwrap();
+                    app.exit(0);
+                });
+                Ok(())
+            })
+            .build(context)
+            .expect("build shadow lifecycle test");
+        assert_eq!(app.run_return(|_, _| {}), 0);
+        result
+            .recv_timeout(Duration::from_secs(40))
+            .unwrap()
+            .unwrap();
+    }
+
     #[test]
     fn blur_region_excludes_content_and_clamps_stale_geometry() {
         assert_eq!(
@@ -444,10 +664,10 @@ mod tests {
                 }
             ),
             [
-                (0, 0, 1080, 48),
-                (0, 48, 208, 548),
-                (1068, 48, 12, 548),
-                (0, 596, 1080, 104)
+                (1, 1, 1078, 47),
+                (1, 48, 207, 548),
+                (1068, 48, 11, 548),
+                (1, 596, 1078, 103)
             ]
         );
         assert_eq!(
@@ -461,11 +681,67 @@ mod tests {
                 }
             ),
             [
-                (0, 0, 360, 84),
-                (0, 84, 8, 516),
-                (360, 84, 0, 516),
-                (0, 600, 360, 0)
+                (1, 1, 358, 83),
+                (1, 84, 7, 515),
+                (360, 84, 0, 515),
+                (1, 600, 358, 0)
             ]
         );
+    }
+
+    #[test]
+    fn blur_stays_inside_perimeter_and_outside_content_across_layouts() {
+        for ((width, height), content) in [
+            (
+                (420, 720),
+                ContentRect {
+                    x: 8,
+                    y: 84,
+                    width: 404,
+                    height: 516,
+                },
+            ),
+            (
+                (720, 500),
+                ContentRect {
+                    x: 0,
+                    y: 141,
+                    width: 720,
+                    height: 359,
+                },
+            ),
+            ((1080, 700), ContentRect::default()),
+            ((0, 0), ContentRect::default()),
+            ((1, 1), ContentRect::default()),
+            ((2, 2), ContentRect::default()),
+        ] {
+            let regions = shell_regions((width, height), content);
+            for (x, y, w, h) in regions {
+                assert!(w >= 0 && h >= 0);
+                if w == 0 || h == 0 {
+                    continue;
+                }
+                assert!(x >= 1 && y >= 1 && x + w < width && y + h < height);
+                assert!(
+                    x + w <= content.x
+                        || x >= content.x + content.width
+                        || y + h <= content.y
+                        || y >= content.y + content.height
+                );
+            }
+            // Check coverage too: excluding the content must leave no interior gaps.
+            for y in 1..height - 1 {
+                for x in 1..width - 1 {
+                    let in_content = x >= content.x
+                        && x < content.x + content.width
+                        && y >= content.y
+                        && y < content.y + content.height;
+                    let blurred = regions.iter().any(|&(left, top, w, h)| {
+                        x >= left && x < left + w && y >= top && y < top + h
+                    });
+                    assert_eq!(blurred, !in_content, "pixel ({x}, {y}) in {width}x{height}");
+                }
+            }
+        }
     }
 }

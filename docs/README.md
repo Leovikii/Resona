@@ -17,6 +17,6 @@
 | [releases/](releases/) | 版本发布说明 |
 | [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) | 自动生成的依赖许可证 |
 
-当前入口：[beta.1 方案](plans/0.3.0-beta.1.md) · [Windows 验证与人工清单](plans/0.3.0-beta.1-windows-validation.md) · [Linux 验证](plans/0.3.0-beta.1-linux-validation.md) · [测试执行规则](DEVELOPMENT.md#双平台精简执行) · [Arch Linux / Wayland](LINUX.md)。历史发行事实见 STATUS 与 releases/。
+当前入口：[rc.1 范围与验收](plans/0.3.0-rc.1.md) · [测试执行规则](DEVELOPMENT.md#双平台精简执行) · [Arch Linux / Wayland](LINUX.md) · [已知问题](KNOWN_ISSUES.md)。历史发行说明见 releases/，实施与验证历史见 Git。
 
 冲突时优先级：当前代码/测试/构建结果 > Accepted ADR > 架构与开发规范 > 状态与路线图 > 其他说明。发现不一致必须在同一任务修正文档，不新增逐日流水或复制同一事实到多处。
