@@ -1,7 +1,7 @@
 # ADR 0036：原生文件访问与窗口内播放快捷键
 
 - 状态：Accepted；2026-10-29 所有者批准实施、测试与推送 dev；Windows 实机通过前不合并发布；所有者于同日确认 Windows/Linux 实机均通过并授权合并交付，最新双平台 CI 门禁保持。
-- 对应：[0.3.0-beta.1 开发方案](../plans/0.3.0-beta.1.md)。
+- 对应：[0.3.0-beta.1 发布说明](../releases/0.3.0-beta.1.md)。
 - 补充 ADR 0005、0018、0026、0028；不替代 Rodio 单引擎、CUE、列表或现有平台媒体控制边界。
 
 ## 背景
@@ -34,4 +34,4 @@ Dolphin 通过 KIO-FUSE 传给 Resona 的 NFS 文件可读，但本机父目录�
 - 文件选择、路径解析、文件可读、完整解码/定位和物理音频输出分别验证，不能相互替代。
 - 不新增持久网络源模型或数据库迁移。beta.1 使用现有物理路径持久化，临时映射重启后可能失效，必须提示重新选择；永久 URI 恢复需要另行范围决定。
 - 平台依赖变化需同步 Arch 包和许可证；KDE 原生集成需实机验收，键盘与 actor 边界需双平台自动/原生验证。
-- 实现与验收分开记录；Linux 原生选择、NFS 与输出专项见本版验证文档，Windows 实机、真实网络中断和语言故障仍保留待验收项。portal 引入的 zbus Tokio feature 与现有 MPRIS 共用 runtime 上下文，保留 GLib executor；必须保留 MPRIS 原生回归。
+- portal 引入的 zbus Tokio feature 与现有 MPRIS 共用 runtime 上下文，保留 GLib executor；必须保留 MPRIS 原生回归。后续验收区分文件选择、映射、目录、音频输出和真实断网；开放限制见 [KNOWN_ISSUES](../KNOWN_ISSUES.md)。

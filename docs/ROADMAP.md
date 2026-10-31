@@ -1,16 +1,12 @@
 # 路线图
 
-路线图只表达顺序，不承诺日期。事实见 [STATUS](STATUS.md)，产品边界见 [PRODUCT](PRODUCT.md)。
+路线图只表达顺序，不承诺日期。当前事实见 [STATUS](STATUS.md)，产品边界见 [PRODUCT](PRODUCT.md)。
 
-| 版本 | 阶段与范围 |
+| 阶段 | 范围 |
 | --- | --- |
-| 0.1.0 | Windows x64 首个正式版已发布，见[发行说明](releases/0.1.0.md) |
-| 0.2.0 | 本地专辑体验增强已正式发布，见[发行说明](releases/0.2.0.md) |
-| 0.3.0 | Arch Linux x86_64 / Wayland 基础兼容 alpha.1；后续 [alpha.2 KDE 与歌词修复](plans/0.3.0-alpha.2.md)（已发布，本机自动回归及五项 KDE 实际效果验收通过），见[基础计划与验收边界](plans/0.3.0.md) |
-| 0.2.1 | 关闭询问与压缩进度 UI 优化已完成开发验证，见[计划与发行门禁](plans/0.2.1.md) |
+| 0.1.0–0.2.1 | Windows 本地播放、专辑与压缩体验，已发布；见 [发布说明](releases/) |
+| 0.3.0 alpha/beta | Arch/KDE Wayland、原生包更新、无边框材质、网络文件访问与歌词多屏支持，已发布 |
+| 0.3.0-rc.1 | Linux 拖动残线修复及原生阴影，所有者验收通过；见 [当前计划](plans/0.3.0-rc.1.md) |
+| 0.3.0 正式版 | 根据 RC 反馈收敛缺陷，沿用双平台 CI、签名和完整交付门禁 |
 
-后续修复按实际反馈确定范围；标签编辑、额外格式等能力不能以 UI 补丁扩大范围。
-
-Linux 当前提供本机构建开发预览，复用领域层与 React UI；已实现 layer-shell 桌面歌词和 KDE MPRIS；正式发行格式、签名和多屏验收仍有开放门禁。
-
-[alpha.3](plans/0.3.0-alpha.3.md) 使用 GitHub Arch 原生包与应用内 Tauri 下载验签、Polkit/Pacman 安装，移除 AUR；Windows NSIS 与界面设计沿用。每个版本只发布一个普通版本 tag，双平台完整交付与实际测试边界见 [STATUS](STATUS.md)。
+后续修复按实际反馈确定范围；标签编辑、额外格式等能力需独立范围决定。Linux 继续聚焦 Arch x86_64 / KDE Wayland，Windows 沿用 NSIS。每个版本只发布一个普通版本 tag，流程见 [ADR 0034](decisions/0034-main-only-ci-and-dependency-cache.md)。

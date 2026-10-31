@@ -26,14 +26,14 @@ Download the `.exe` NSIS installer from [GitHub Releases](https://github.com/Leo
 
 ### Arch Linux x86_64 · Wayland
 
-Download the [alpha.4 Arch package](https://github.com/Leovikii/Resona/releases/tag/v0.3.0-alpha.4) and its `SHA256SUMS` from the same release. Verify the package hash before installing:
+Download the [rc.1 Arch package](https://github.com/Leovikii/Resona/releases/tag/v0.3.0-rc.1) and its `SHA256SUMS` from the same release. Verify the package hash before installing:
 
 ```bash
 sha256sum --ignore-missing -c SHA256SUMS
-sudo pacman -U ./resona-0.3.0alpha4-1-x86_64.pkg.tar.zst
+sudo pacman -U ./resona-0.3.0rc1-1-x86_64.pkg.tar.zst
 ```
 
-The package registers MP3/WAV/FLAC opening. Future in-app updates download and verify the package, show the transaction, and request Polkit authorization for Pacman. Restart after installation. Remove with `sudo pacman -R resona`; user data and audio remain. Preview and stable releases share the `resona` package name. If an old test package is installed, remove it before installing this package; no automatic package-name migration is provided. Reinstall alpha.4 manually if you already installed the earlier alpha.4 build.
+The package registers MP3/WAV/FLAC opening. Future in-app updates download and verify the package, show the transaction, and request Polkit authorization for Pacman. The application restarts automatically after a successful installation. Remove with `sudo pacman -R resona`; user data and audio remain. Preview and stable releases share the `resona` package name. If an old test package is installed, remove it before installing this package; no automatic package-name migration is provided.
 
 Pacman keeps your system signature policy; `.tauri.sig` is a Tauri signature, not OpenPGP. A graphical Polkit agent is required. Linux uses system FFmpeg for compression. KDE Plasma is the tested desktop; other distributions, X11 and ARM are outside the current scope. See the [Linux guide](docs/LINUX.md).
 

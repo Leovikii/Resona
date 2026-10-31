@@ -31,4 +31,4 @@ AUR 安装由 pacman 管理文件。Linux 沿用这一更新归属即可满足�
 - 首个具备构建识别能力的 Windows 预览包需手动安装；本机 Linux 测试包首次安装和隔离数据迁移也需说明，不能被当作已自动支持。
 - 预览与稳定仍共用应用标识，安装会替换同平台既有版本；本提案不增加可并行运行的另一套数据库或播放器。
 
-详细资产、触发条件、包修订格式、失败处理、实施顺序和验收要求统一维护于[预览交付方案](../plans/0.3.0-preview-delivery.md)。实现与本机验证已落盘；GitHub Actions 实际发布、AUR 凭据接入与 Windows 原生覆盖更新仍是发行门禁。
+当前交付流程见 [ADR 0034](0034-main-only-ci-and-dependency-cache.md)，统一 Arch 包身份见 [ADR 0035](0035-unified-arch-package.md)；旧预览方案及其验收历史保存在 Git，不再以旧 AUR 门禁约束当前交付。

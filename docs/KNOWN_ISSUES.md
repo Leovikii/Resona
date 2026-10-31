@@ -22,4 +22,15 @@ Windows 原生文件选择窗口曾低频阻塞，当前没有稳定复现。应
 
 ## 分发限制
 
-- 0.1.0 安装包不使用 Authenticode，Windows 首次安装可能显示 SmartScreen 提示；仅从 GitHub Releases 下载并核对 SHA-256。updater `.sig` 仍是自动更新的强制完整性门禁。
+- Windows 安装包尚未使用 Authenticode，Windows 首次安装可能显示 SmartScreen 提示；仅从 GitHub Releases 下载并核对 SHA-256。updater `.sig` 仍是自动更新的强制完整性门禁。
+
+## KDE Wayland 限制与保留项
+
+- 既有 `native_window_controls_and_geometry` 回归在初始尺寸断言失败：请求 1080×700，KWin 窗口记忆返回 1080×719。该完整用例未通过，未证明与拖动残线有关；不改应用尺寸或桌面设置掩盖结果。重新调查需在保留桌面配置的环境区分窗口记忆与应用几何。
+- 歌词绑定输出内逻辑坐标；跨屏重绑定会结束当前拖动，需松手继续。GTK 3 Wayland 不提供 primary monitor 查询，两个输出均非 primary 不代表 KDE 未设置主屏；运行中热拔插恢复尚不支持。
+- 托盘宿主运行中重启后的恢复未确认；目前仅启动时检查。历史压缩最小化动画未被自动捕获，不能记为通过；物理命中/系统菜单、GPU 功耗与音频听感须按实际设备反馈验证，不从协议测试推导结论。
+- rc.1 的 blur 边界内收是已验收场景的兼容规避，尚未确定 compositor/驱动内部根因；原生阴影与该修复独立。其他 compositor 缺少 blur/shadow 协议时按能力回退。
+
+## 网络文件映射
+
+NFS 列表持久化桌面映射的物理路径，桌面会话结束后可能失效，需重新选择；不承诺永久 URI 恢复。KIO 目录请求有 15 秒任务期限及 20 秒父进程兜底，不保证所有 FUSE stat/read 都可立即中断。真实服务器断网恢复和网络 WAV 转换不由不可达地址或本地转换测试替代。

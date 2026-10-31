@@ -26,14 +26,14 @@
 
 ### Arch Linux x86_64 · Wayland
 
-从 [alpha.4 发布页](https://github.com/Leovikii/Resona/releases/tag/v0.3.0-alpha.4) 下载原生包和同一版本的 `SHA256SUMS`，先核对包的哈希，再安装：
+从 [rc.1 发布页](https://github.com/Leovikii/Resona/releases/tag/v0.3.0-rc.1) 下载原生包和同一版本的 `SHA256SUMS`，先核对包的哈希，再安装：
 
 ```bash
 sha256sum --ignore-missing -c SHA256SUMS
-sudo pacman -U ./resona-0.3.0alpha4-1-x86_64.pkg.tar.zst
+sudo pacman -U ./resona-0.3.0rc1-1-x86_64.pkg.tar.zst
 ```
 
-安装会注册 MP3/WAV/FLAC 的桌面“打开方式”。后续在应用内检查更新、下载验签并确认安装预览，经 Polkit 授权后由 Pacman 安装，完成后重新启动。卸载使用 `sudo pacman -R resona`，保留用户数据与音频。预览和正式版统一使用 `resona` 包名。测试环境如已安装旧包，先卸载再安装，不提供包名自动迁移；此前已安装 alpha.4 的测试程序也需手动重装本次同版本构建。
+安装会注册 MP3/WAV/FLAC 的桌面“打开方式”。后续在应用内检查更新、下载验签并确认安装预览，经 Polkit 授权后由 Pacman 安装，成功后自动重启。卸载使用 `sudo pacman -R resona`，保留用户数据与音频。预览和正式版统一使用 `resona` 包名。测试环境如已安装旧包，先卸载再安装，不提供包名自动迁移。
 
 应用遵守系统签名策略，`.tauri.sig` 是 Tauri 签名，不是 OpenPGP 签名；需要图形 Polkit 授权代理。压缩继续使用系统 FFmpeg。当前桌面范围为 KDE Plasma，其他发行版、X11 和 ARM 暂不支持，详见 [Linux 指南](docs/LINUX.md)。
 
