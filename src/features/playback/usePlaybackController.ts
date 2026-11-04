@@ -80,12 +80,14 @@ export function usePlaybackController(imports: FileImportActivity) {
   const defaultPlaylistRef = useRef(defaultPlaylist);
   const lyricsRevisionRef = useRef(lyrics.revision);
   const playRequestIdRef = useRef(0);
+  const refreshRequestRef = useRef(0);
 
   useEffect(() => {
     lyricsRevisionRef.current = lyrics.revision;
   }, [lyrics.revision]);
 
   const acceptPlaybackSnapshot = useCallback((next: PlaybackSnapshot) => {
+    refreshRequestRef.current += 1;
     const merged = mergePlaybackSnapshot(snapshotRef.current, next);
     snapshotRef.current = merged;
     setSnapshot(merged);
@@ -139,10 +141,12 @@ export function usePlaybackController(imports: FileImportActivity) {
 
   const refresh = useCallback(async () => {
     if (!isTauriRuntime()) return;
+    const request = ++refreshRequestRef.current;
     try {
       const next = await invokeTauri<NowPlayingSnapshot>("get_now_playing_state", {
         knownLyricsRevision: lyricsRevisionRef.current,
       });
+      if (request !== refreshRequestRef.current) return;
       acceptPlaybackSnapshot(next.playback);
       setActivePlaylist((current) => sameActivePlaylist(current, next.activePlaylist)
         ? current
@@ -150,22 +154,24 @@ export function usePlaybackController(imports: FileImportActivity) {
       setLyrics((current) => mergeLyricsSnapshot(current, next.lyrics));
       setRefreshError(null);
     } catch (error) {
-      setRefreshError(toPlaybackFailure(error));
+      if (request === refreshRequestRef.current) setRefreshError(toPlaybackFailure(error));
     }
   }, [acceptPlaybackSnapshot]);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
+    let disposed = false;
     void invokeTauri<DefaultPlaylistSnapshot>("get_default_playlist")
-      .then(acceptDefaultPlaylist)
-      .catch((error) => setRefreshError(toPlaybackFailure(error)));
+      .then((next) => { if (!disposed) acceptDefaultPlaylist(next); })
+      .catch((error) => { if (!disposed) setRefreshError(toPlaybackFailure(error)); });
+    return () => { disposed = true; };
   }, [acceptDefaultPlaylist, refresh]);
 
   useEffect(() => {
     if (!isTauriRuntime() || !documentVisible) return;
     void refresh();
     const timer = window.setInterval(() => void refresh(), 750);
-    return () => window.clearInterval(timer);
+    return () => { refreshRequestRef.current += 1; window.clearInterval(timer); };
   }, [documentVisible, refresh]);
 
   useEffect(() => {

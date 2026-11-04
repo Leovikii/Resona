@@ -1,31 +1,17 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import { stripTypeScriptTypes } from "node:module";
+import { hookHost } from "../tests/hookHost.mjs";
 
 // Execute the real hook with deferred IPC and a minimal hook host; no browser or new test dependency.
 function mountLibrary() {
-  let cursor = 0;
-  const slots = [];
   const pending = [];
-  const state = (initial) => {
-    const index = cursor++;
-    if (!(index in slots)) slots[index] = typeof initial === "function" ? initial() : initial;
-    return [slots[index], (next) => { slots[index] = typeof next === "function" ? next(slots[index]) : next; }];
-  };
-  const ref = (initial) => {
-    const index = cursor++;
-    return slots[index] ??= { current: initial };
-  };
-  const source = stripTypeScriptTypes(readFileSync(new URL("../src/features/library/useLibrary.ts", import.meta.url), "utf8"))
-    .replace(/^import .*?;\s*/gms, "").replace("export function useLibrary", "function useLibrary").replaceAll("import.meta.env.DEV", "false");
-  const hook = new Function("useState", "useRef", "useCallback", "useMemo", "useEffect", "isTauriRuntime", "invokeTauri", `${source}\nreturn useLibrary;`)(
-    state, ref, (callback) => callback, (factory) => factory(), () => {}, () => true,
-    (command, args) => new Promise((resolve, reject) => pending.push({ command, args, resolve, reject })),
-  );
+  const hook = hookHost(new URL("../src/features/library/useLibrary.ts", import.meta.url), "useLibrary", {
+    isTauriRuntime: () => true,
+    invokeTauri: (command, args) => new Promise((resolve, reject) => pending.push({ command, args, resolve, reject })),
+  });
   return {
     pending,
-    render: () => { cursor = 0; return hook({ run: (operation) => operation() }); },
+    render: () => hook({ run: (operation) => operation() }),
   };
 }
 
