@@ -26,6 +26,8 @@ npm run release:windows
 
 现有 Windows PR job 另提供保留 7 天的 `windows-release-test` 测试产物，包含 Release EXE 和运行资源；它未经安装包签名，不是 updater 安装包，不使用 release 密钥。用于缺少本机构建工具链时的原生验收，不增加 Linux CI。
 
+同一 job 的 `windows-native-tests` 产物包含已嵌入应用 manifest 的歌词生命周期回归程序。本机缺少 MSVC 时，核验 Actions 产物哈希后可运行 `pwsh scripts/test-windows-lyrics.ps1 -TestExecutable <解压后的 resona-native-tests.exe>`，不重新编译；它使用独立测试 profile、通过原生 API 检查现有显示器上的几何/锁定/隐藏重建，并在结束后回收 profile。CI 只用 `-PrepareOnly` 编译准备，不以 runner 代替用户桌面。
+
 真实转换矩阵：
 
 ```powershell
