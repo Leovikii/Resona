@@ -95,7 +95,7 @@ pub fn persist_geometry<R: Runtime>(app: &AppHandle<R>) {
     }
     match serde_json::to_vec(&geometry) {
         Ok(bytes) => {
-            if let Err(error) = std::fs::write(data_dir.join(GEOMETRY_FILE), bytes) {
+            if let Err(error) = crate::stored_state::write(&data_dir.join(GEOMETRY_FILE), &bytes) {
                 eprintln!("audio compression geometry save failed: {error}");
             }
         }

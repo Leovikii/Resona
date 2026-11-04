@@ -10,6 +10,10 @@ export async function invokeTauri<T>(command: string, args?: Record<string, unkn
   return invoke<T>(command, args);
 }
 
+export function listenTauri<T>(event: string, onPayload: (payload: T) => void) {
+  return listen<T>(event, ({ payload }) => onPayload(payload));
+}
+
 export async function startCurrentWindowResize(direction: "East" | "West") {
   return getCurrentWindow().startResizeDragging(direction);
 }

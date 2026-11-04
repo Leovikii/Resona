@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
 
-import { invokeTauri, isTauriRuntime } from "../../shared/bridge/tauri";
+import { invokeTauri, isTauriRuntime, listenTauri } from "../../shared/bridge/tauri";
 import {
   defaultApplicationUpdateSnapshot,
   type ApplicationUpdateCheckResult,
@@ -78,13 +77,13 @@ export function useApplicationUpdate() {
     if (!isTauriRuntime()) return;
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void listen<ApplicationUpdateProgress>(
+    void listenTauri<ApplicationUpdateProgress>(
       "resona://application-update-progress",
-      ({ payload }) => setProgress(payload),
+      (payload) => { if (!disposed) setProgress(payload); },
     ).then((stop) => {
       if (disposed) stop();
       else unlisten = stop;
-    });
+    }).catch((cause) => { if (!disposed) setError(normalizeFailure(cause)); });
     return () => {
       disposed = true;
       unlisten?.();

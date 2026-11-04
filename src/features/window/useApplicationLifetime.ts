@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
 
-import { invokeTauri, isTauriRuntime } from "../../shared/bridge/tauri";
+import { invokeTauri, isTauriRuntime, listenTauri } from "../../shared/bridge/tauri";
 import {
   defaultApplicationLifetimeSnapshot,
   type ApplicationLifetimeSnapshot,
@@ -38,13 +37,14 @@ export function useApplicationLifetime() {
     if (!isTauriRuntime()) return;
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void listen("resona://exit-confirmation-requested", () => {
+    void listenTauri("resona://exit-confirmation-requested", () => {
+      if (disposed) return;
       setClosePromptOpen(false);
       setExitConfirmationOpen(true);
     }).then((stop) => {
       if (disposed) stop();
       else unlisten = stop;
-    });
+    }).catch((cause) => { if (!disposed) setError(errorMessage(cause)); });
     return () => {
       disposed = true;
       unlisten?.();
@@ -55,10 +55,10 @@ export function useApplicationLifetime() {
     if (!isTauriRuntime()) return;
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void listen("resona://close-requested", () => setClosePromptOpen(true)).then((stop) => {
+    void listenTauri("resona://close-requested", () => { if (!disposed) setClosePromptOpen(true); }).then((stop) => {
       if (disposed) stop();
       else unlisten = stop;
-    });
+    }).catch((cause) => { if (!disposed) setError(errorMessage(cause)); });
     return () => {
       disposed = true;
       unlisten?.();

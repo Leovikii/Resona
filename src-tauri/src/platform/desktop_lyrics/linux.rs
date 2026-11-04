@@ -481,7 +481,7 @@ impl Resources {
             output: Some(OutputIdentity::of(&self.monitor)),
         })
         .map_err(std::io::Error::other)
-        .and_then(|bytes| std::fs::write(&self.path, bytes))
+        .and_then(|bytes| crate::stored_state::write(&self.path, &bytes))
         {
             log::warn!("cannot save Wayland lyrics geometry: {error}");
         }

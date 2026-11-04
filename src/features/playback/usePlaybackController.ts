@@ -1,10 +1,9 @@
 import type { FileImportActivity } from "../../shared/bridge/useFileImportActivity";
 import { previewPlaybackControl, type PlaybackControl } from "./playbackShortcuts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
 
 import { selectAudioFiles, selectAudioFolders } from "../../shared/bridge/audioDialog";
-import { invokeTauri, isTauriRuntime } from "../../shared/bridge/tauri";
+import { invokeTauri, isTauriRuntime, listenTauri } from "../../shared/bridge/tauri";
 import type {
   ActivePlaylistSnapshot,
   DefaultPlaylistSnapshot,
@@ -22,6 +21,7 @@ import {
 } from "../../shared/model/lyrics";
 import {
   emptySnapshot,
+  mergePlaybackSnapshot,
   previewSnapshot,
   type PlaybackFailure,
   type PlaybackSnapshot,
@@ -180,7 +180,7 @@ export function usePlaybackController(imports: FileImportActivity) {
         if (!disposed) setRefreshError(toPlaybackFailure(error));
       }
     };
-    void listen("resona://external-media-ready", () => void consume()).then((stop) => {
+    void listenTauri("resona://external-media-ready", () => void consume()).then((stop) => {
       if (disposed) { stop(); return; }
       stopReady = stop;
       void consume();
@@ -649,67 +649,9 @@ function clamp(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(value, maximum));
 }
 
-function mergePlaybackSnapshot(
-  previous: PlaybackSnapshot,
-  next: PlaybackSnapshot,
-): PlaybackSnapshot {
-  const queue = sameQueue(previous.queue, next.queue) ? previous.queue : next.queue;
-  const output = sameOutput(previous.output, next.output) ? previous.output : next.output;
-  const error = sameFailure(previous.error, next.error) ? previous.error : next.error;
-  if (
-    previous.status === next.status
-    && previous.path === next.path
-    && previous.positionMs === next.positionMs
-    && previous.durationMs === next.durationMs
-    && previous.volume === next.volume
-    && previous.seekable === next.seekable
-    && previous.currentItemId === next.currentItemId
-    && previous.playbackMode === next.playbackMode
-    && previous.queue === queue
-    && previous.output === output
-    && previous.error === error
-  ) {
-    return previous;
-  }
-  return { ...next, queue, output, error };
-}
-
-function sameQueue(left: PlaybackSnapshot["queue"], right: PlaybackSnapshot["queue"]) {
-  return left.length === right.length && left.every((item, index) => {
-    const candidate = right[index];
-    return item.id === candidate.id
-      && item.path === candidate.path
-      && item.displayName === candidate.displayName
-      && item.durationMs === candidate.durationMs
-      && item.status === candidate.status
-      && sameFailure(item.error, candidate.error);
-  });
-}
-
-function sameFailure(left: PlaybackFailure | null, right: PlaybackFailure | null) {
-  return left === right || (left?.code === right?.code && left?.message === right?.message);
-}
-
 function sameActivePlaylist(
   left: ActivePlaylistSnapshot | null,
   right: ActivePlaylistSnapshot | null,
 ) {
   return left?.kind === right?.kind && left?.playlistId === right?.playlistId;
-}
-
-function sameOutput(left: PlaybackSnapshot["output"], right: PlaybackSnapshot["output"]) {
-  return left.status === right.status
-    && left.followSystemDefault === right.followSystemDefault
-    && left.selectedDeviceId === right.selectedDeviceId
-    && left.activeDeviceId === right.activeDeviceId
-    && left.activeDeviceName === right.activeDeviceName
-    && sameFailure(left.error, right.error)
-    && left.devices.length === right.devices.length
-    && left.devices.every((device, index) => {
-      const candidate = right.devices[index];
-      return device.id === candidate.id
-        && device.name === candidate.name
-        && device.isDefault === candidate.isDefault
-        && device.interfaceType === candidate.interfaceType;
-    });
 }

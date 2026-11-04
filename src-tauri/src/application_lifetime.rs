@@ -89,9 +89,18 @@ impl ApplicationLifetimeService {
         &self,
         behavior: CloseBehavior,
     ) -> Result<ApplicationLifetimeSnapshot, ApplicationLifetimeFailure> {
-        self.lock_state()?.close_behavior = behavior;
-        self.persist()?;
-        self.snapshot()
+        let mut state = self.lock_state()?;
+        let next = StoredApplicationLifetime {
+            close_behavior: behavior,
+        };
+        let bytes = serde_json::to_vec(&next)
+            .map_err(|error| failure("application_lifetime_serialize_failed", error))?;
+        crate::stored_state::write(&self.path, &bytes)
+            .map_err(|error| failure("application_lifetime_write_failed", error))?;
+        *state = next;
+        Ok(ApplicationLifetimeSnapshot {
+            close_behavior: behavior,
+        })
     }
 
     pub fn handle_close(
@@ -136,22 +145,6 @@ impl ApplicationLifetimeService {
 
     pub fn begin_exit(&self) -> bool {
         !self.exiting.swap(true, Ordering::AcqRel)
-    }
-
-    fn persist(&self) -> Result<(), ApplicationLifetimeFailure> {
-        let state = self.lock_state()?.clone();
-        let parent = self.path.parent().ok_or_else(|| {
-            failure(
-                "application_lifetime_path_invalid",
-                "application lifetime state path has no parent directory",
-            )
-        })?;
-        std::fs::create_dir_all(parent)
-            .map_err(|error| failure("application_lifetime_directory_failed", error))?;
-        let bytes = serde_json::to_vec(&state)
-            .map_err(|error| failure("application_lifetime_serialize_failed", error))?;
-        std::fs::write(&self.path, bytes)
-            .map_err(|error| failure("application_lifetime_write_failed", error))
     }
 
     fn lock_state(
@@ -249,5 +242,28 @@ mod tests {
         let path = std::env::temp_dir().join(format!("resona-lifetime-{nonce}"));
         std::fs::create_dir_all(&path).expect("create lifetime fixture");
         path
+    }
+
+    #[test]
+    fn failed_write_does_not_change_close_behavior() {
+        let directory = tempfile::tempdir().unwrap();
+        let service = ApplicationLifetimeService::load(directory.path());
+        std::fs::create_dir(&service.path).unwrap();
+        assert!(service.set_close_behavior(CloseBehavior::Exit).is_err());
+        assert_eq!(
+            service.snapshot().unwrap().close_behavior,
+            CloseBehavior::Ask
+        );
+        std::fs::remove_dir(&service.path).unwrap();
+        service
+            .set_close_behavior(CloseBehavior::HideToTray)
+            .unwrap();
+        assert_eq!(
+            ApplicationLifetimeService::load(directory.path())
+                .snapshot()
+                .unwrap()
+                .close_behavior,
+            CloseBehavior::HideToTray
+        );
     }
 }

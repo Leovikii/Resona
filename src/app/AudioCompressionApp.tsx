@@ -1,3 +1,4 @@
+import { Hint } from "../shared/ui/Hint";
 import { useFileImportActivity } from "../shared/bridge/useFileImportActivity";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent, ReactNode } from "react";
@@ -17,7 +18,6 @@ import {
   Text,
   ThemeIcon,
   Title,
-  Tooltip,
   UnstyledButton,
   VisuallyHidden,
 } from "@mantine/core";
@@ -331,9 +331,9 @@ export default function AudioCompressionApp() {
                 <Text fw={650} size="xs">{t("compression.warnings", { count: compression.scan.warnings.length })}</Text>
               </Group>
               {compression.scan.warnings.slice(0, 4).map((warning) => (
-                <Text c="dimmed" key={`${warning.code}-${warning.path}`} lineClamp={2} size="xs" title={`${t(`compression.scanWarnings.${warning.code}`, { defaultValue: warning.message })}: ${warning.path}`}>
+                <Hint key={`${warning.code}-${warning.path}`} label={`${t(`compression.scanWarnings.${warning.code}`, { defaultValue: warning.message })}: ${warning.path}`}><Text c="dimmed" lineClamp={2} size="xs">
                   {t(`compression.scanWarnings.${warning.code}`, { defaultValue: warning.message })} · {warning.path}
-                </Text>
+                </Text></Hint>
               ))}
             </div>
           )}
@@ -391,7 +391,7 @@ export default function AudioCompressionApp() {
                   percent: overall.percent, ended: compression.snapshot.completed, total: compression.snapshot.total,
                   running: overall.running, succeeded: overall.succeeded, failed: overall.failed, cancelled: overall.cancelled,
                 })}</Text>}
-                <Text c="dimmed" lineClamp={1} size="xs" title={summary}>{summary}</Text>
+                <Hint label={summary}><Text c="dimmed" lineClamp={1} size="xs">{summary}</Text></Hint>
               </div>
             </>}
           </div>
@@ -480,7 +480,6 @@ function CompressionTreeNode({ disabled, expanded, level, node, onRemove, onTogg
         data-status={item?.status}
         data-unavailable={!node.ready && !directory || undefined}
         style={{ "--tree-indent": `${level * 18}px` } as CSSProperties}
-        title={item?.message || undefined}
       >
         {item && <span className="compression-tree-progress" style={{ width: `${progress}%` }} />}
         {directory ? (
@@ -489,28 +488,29 @@ function CompressionTreeNode({ disabled, expanded, level, node, onRemove, onTogg
           </UnstyledButton>
         ) : <span className="tree-toggle-spacer" />}
         {directory ? <Folder size={17} /> : <FileAudio size={17} />}
-        <Text className="compression-tree-name" lineClamp={1} size="sm" title={node.path}>{node.name}</Text>
+        <Hint label={node.path}><Text className="compression-tree-name" lineClamp={1} size="sm">{node.name}</Text></Hint>
         <span className="compression-tree-meta">
           {directory && !open && (runningByDirectory.get(node.path) ?? 0) > 0 && <Text size="xs">{t("compression.activeCount", { count: runningByDirectory.get(node.path) })}</Text>}
           {node.issueCode && <Badge color="yellow" size="xs" variant="light">{t(`compression.issues.${node.issueCode}`)}</Badge>}
           {item?.status === "running" && <Text c="dimmed" size="xs">{progress}%</Text>}
           {item?.status === "completed" && (
-            <Tooltip label={item.sourceDeleted ? t("compression.sourceDeleted") : t("compression.completed")}>
+            <Hint label={item.sourceDeleted ? t("compression.sourceDeleted") : t("compression.completed")}>
               <span className="compression-item-state compression-item-state-completed"><Check size={14} />{formatBytes(item.outputBytes)}</span>
-            </Tooltip>
+            </Hint>
           )}
           {item?.status === "failed" && (
-            <Tooltip label={item.message || t("compression.failed")}><CircleX className="compression-item-state-failed" size={15} /></Tooltip>
+            <Hint label={item.message || t("compression.failed")}><CircleX className="compression-item-state-failed" size={15} /></Hint>
           )}
           {item?.status === "cancelled" && <Text c="dimmed" size="xs">{t("compression.cancelled")}</Text>}
           {!item && node.kind === "file" && <Text c="dimmed" size="xs">{formatBytes(node.sourceBytes)}</Text>}
         </span>
-        <Tooltip label={t("common.remove")}>
+        <Hint label={t("common.remove")}>
           <ActionIcon aria-label={t("common.remove")} disabled={disabled} onClick={() => onRemove(node.path)} size="sm" variant="subtle">
             <X size={14} />
           </ActionIcon>
-        </Tooltip>
+        </Hint>
       </div>
+      {item?.status === "failed" && item.message && <Text c="red" role="alert" size="xs">{item.message}</Text>}
       {directory && open && (
         <>
           {visibleChildren.map((child) => (

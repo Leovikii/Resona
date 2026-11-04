@@ -209,28 +209,26 @@ export default function DesktopLyricsWindow() {
       style={style}
     >
       <div aria-hidden="true" className="desktop-lyrics-background" />
-      <button
+      <Hint label={t("desktopLyrics.resizeLeft")}><button
         aria-label={t("desktopLyrics.resizeLeft")}
         className="desktop-lyrics-resize-handle desktop-lyrics-resize-left"
         onPointerDown={startResizing("West")}
-        title={t("desktopLyrics.resizeLeft")}
         type="button"
       >
         <GripVertical aria-hidden="true" size={14} />
-      </button>
-      <button
+      </button></Hint>
+      <Hint label={t("desktopLyrics.resizeRight")}><button
         aria-label={t("desktopLyrics.resizeRight")}
         className="desktop-lyrics-resize-handle desktop-lyrics-resize-right"
         onPointerDown={startResizing("East")}
-        title={t("desktopLyrics.resizeRight")}
         type="button"
       >
         <GripVertical aria-hidden="true" size={14} />
-      </button>
+      </button></Hint>
       <div className="desktop-lyrics-toolbar" onPointerDown={stopControlDrag}>
-        <div className="desktop-lyrics-toolbar-title" title={fileNameFromPath(playback.path)}>
+        <Hint label={fileNameFromPath(playback.path)}><div className="desktop-lyrics-toolbar-title">
           {fileNameFromPath(playback.path) || t("playback.noTrack")}
-        </div>
+        </div></Hint>
         <div className="desktop-lyrics-toolbar-group desktop-lyrics-toolbar-center">
           <DesktopLyricsButton
             ariaLabel={t("playback.previous")}
@@ -304,13 +302,12 @@ export default function DesktopLyricsWindow() {
           </span>
         </div>
         <div className="desktop-lyrics-current-slot">
-          <div
+          <Hint label={display.current.trim()}><div
             aria-live="polite"
             className="desktop-lyrics-current"
-            title={display.current.trim() || undefined}
           >
             {display.current}
-          </div>
+          </div></Hint>
         </div>
         <div
           aria-hidden={layout.mode !== "single" || undefined}
@@ -383,15 +380,15 @@ function DesktopLyricsButton({
   title: string;
 }) {
   return (
-    <button
+    <Hint label={title}><button
       aria-label={ariaLabel}
       className="desktop-lyrics-button resona-active"
       disabled={disabled}
       onClick={onClick}
-      title={title}
       type="button"
     >
       {children}
-    </button>
+    </button></Hint>
   );
 }
+import { Hint } from "../shared/ui/Hint";

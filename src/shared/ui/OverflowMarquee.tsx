@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Hint } from "./Hint";
 
 export function OverflowMarquee({ auto = false, className, observe = true, text }: {
   auto?: boolean;
@@ -39,7 +40,7 @@ export function OverflowMarquee({ auto = false, className, observe = true, text 
   }, [measure, observe, text]);
 
   return (
-    <div
+    <Hint label={measurement.overflow ? text : undefined}><div
       className={["overflow-marquee", className].filter(Boolean).join(" ")}
       data-auto={auto || undefined}
       data-overflow={measurement.overflow || undefined}
@@ -48,7 +49,6 @@ export function OverflowMarquee({ auto = false, className, observe = true, text 
       onPointerEnter={observe ? undefined : measure}
       ref={viewportRef}
       style={{ "--marquee-duration": `${measurement.duration}s` } as React.CSSProperties}
-      title={measurement.overflow ? text : undefined}
     >
       <span className="overflow-marquee-static">
         <span className="overflow-marquee-measure" ref={textRef}>{text}</span>
@@ -59,6 +59,6 @@ export function OverflowMarquee({ auto = false, className, observe = true, text 
           <span>{text}</span>
         </span>
       )}
-    </div>
+    </div></Hint>
   );
 }

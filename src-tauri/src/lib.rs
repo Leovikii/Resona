@@ -17,6 +17,7 @@ mod persistence;
 mod platform;
 mod playback;
 mod playlists;
+mod stored_state;
 
 #[cfg(target_os = "windows")]
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -149,8 +150,8 @@ pub fn run() {
             migrate_legacy_data_directory(&legacy_data_dir, &data_dir)?;
             std::fs::create_dir_all(&data_dir)?;
             let ffmpeg_dependency = FfmpegDependencyService::new(&data_dir);
-            let (ffmpeg, ffprobe) = ffmpeg_dependency.binary_paths();
-            app.manage(Arc::new(CompressionService::with_binaries(ffmpeg, ffprobe)));
+            let (ffmpeg, _) = ffmpeg_dependency.binary_paths();
+            app.manage(Arc::new(CompressionService::with_ffmpeg(ffmpeg)));
             app.manage(ffmpeg_dependency);
             app.manage(Arc::new(ApplicationLifetimeService::load(&data_dir)));
             app.manage(Arc::new(ApplicationUpdateService::load(&data_dir)));

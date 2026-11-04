@@ -1,3 +1,4 @@
+import { Hint } from "../shared/ui/Hint";
 import { useEffect, useMemo, useState } from "react";
 import { Button, Group, Loader, Modal, Stack, Text } from "@mantine/core";
 import { FolderOpen } from "lucide-react";
@@ -45,7 +46,7 @@ export function AudioFileInfoDialog({ onClose, path }: {
             {rows.map(([label, value]) => (
               <div className="audio-info-row" key={label}>
                 <Text c="dimmed" size="sm">{label}</Text>
-                <Text className="audio-info-value" size="sm" title={value}>{value}</Text>
+                <Hint label={value}><Text className="audio-info-value" size="sm">{value}</Text></Hint>
               </div>
             ))}
           </div>
