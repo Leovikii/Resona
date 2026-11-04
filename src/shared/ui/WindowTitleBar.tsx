@@ -1,5 +1,6 @@
+import { Hint } from "./Hint";
 import { useEffect, useState } from "react";
-import { ActionIcon, Tooltip } from "@mantine/core";
+import { ActionIcon } from "@mantine/core";
 import { Copy, Minus, Settings, Square, Wrench, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import icon from "../../../assets/resona-icon.svg";
@@ -37,20 +38,20 @@ export function WindowTitleBar({ title = "Resona", compact = false, selection, o
         <span>{title}</span>
       </div>
       {compact && onNavigate && <nav className="window-titlebar-navigation" aria-label={t("app.name")}>
-        {(["tools", "settings"] as const).map((kind) => <Tooltip key={kind} label={t(`nav.${kind}`)} events={{ hover: true, focus: true, touch: false }}>
+        {(["tools", "settings"] as const).map((kind) => <Hint key={kind} label={t(`nav.${kind}`)}>
           <ActionIcon aria-current={selection === kind ? "page" : undefined} aria-label={t(`nav.${kind}`)} className="window-titlebar-button" data-active={selection === kind || undefined} onClick={() => onNavigate(kind)} radius={0} size={44} variant="subtle">
             {kind === "tools" ? <Wrench {...titleBarIconProps} /> : <Settings {...titleBarIconProps} />}
           </ActionIcon>
-        </Tooltip>)}
+        </Hint>)}
       </nav>}
       <nav className="window-caption-buttons" aria-label={t("window.controls")}>
         {(["minimize", "maximize", "close"] as const).map((action) => {
           const label = t(`window.${action === "maximize" && state.maximized ? "restore" : action}`);
-          return <Tooltip key={action} label={label} events={{ hover: true, focus: true, touch: false }}>
+          return <Hint key={action} label={label}>
             <ActionIcon aria-label={label} className="window-titlebar-button" data-caption={action} data-native-hover={action === "maximize" && state.nativeMaximizeHovered || undefined} onClick={() => act(action)} radius={0} size={44} variant="subtle">
               {action === "minimize" ? <Minus {...titleBarIconProps} /> : action === "close" ? <X {...titleBarIconProps} /> : state.maximized ? <Copy {...titleBarIconProps} /> : <Square {...titleBarIconProps} />}
             </ActionIcon>
-          </Tooltip>;
+          </Hint>;
         })}
       </nav>
       {error && <button className="window-control-error" role="alert" onClick={() => setError(null)}>{t("window.failed")}: {error}</button>}

@@ -1,6 +1,6 @@
 # Arch Linux / KDE Wayland
 
-当前版本：[0.3.0-rc.1](plans/0.3.0-rc.1.md)。本机渲染修复与新增阴影已获所有者验收；测试与交付事实见 [STATUS](STATUS.md)，平台限制见 [KNOWN_ISSUES](KNOWN_ISSUES.md)。支持 Arch 系 x86_64 / KDE Wayland，不以 XWayland 或浏览器预览代替原生验证。
+代码基线为 `0.3.0-rc.1`，当前进入 [0.3.0 正式版开发](plans/0.3.0.md)。既有渲染修复与阴影已获所有者验收；本轮验证事实见 [STATUS](STATUS.md)，平台限制见 [KNOWN_ISSUES](KNOWN_ISSUES.md)。支持 Arch 系 x86_64 / KDE Wayland，不以 XWayland 或浏览器预览代替原生验证。
 
 ## 安装与更新
 

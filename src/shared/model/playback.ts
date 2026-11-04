@@ -136,3 +136,71 @@ function queueItem(
     error: null,
   };
 }
+
+export function mergePlaybackSnapshot(
+  previous: PlaybackSnapshot,
+  next: PlaybackSnapshot,
+): PlaybackSnapshot {
+  const queue = sameQueue(previous.queue, next.queue) ? previous.queue : next.queue;
+  const output = sameOutput(previous.output, next.output) ? previous.output : next.output;
+  const error = sameFailure(previous.error, next.error) ? previous.error : next.error;
+  if (
+    previous.status === next.status
+    && previous.path === next.path
+    && previous.positionMs === next.positionMs
+    && previous.durationMs === next.durationMs
+    && previous.volume === next.volume
+    && previous.seekable === next.seekable
+    && previous.currentItemId === next.currentItemId
+    && previous.playbackMode === next.playbackMode
+    && previous.queue === queue
+    && previous.output === output
+    && previous.error === error
+  ) {
+    return previous;
+  }
+  return { ...next, queue, output, error };
+}
+
+function sameQueue(left: PlaybackSnapshot["queue"], right: PlaybackSnapshot["queue"]) {
+  return left.length === right.length && left.every((item, index) => {
+    const candidate = right[index];
+    return item.id === candidate.id
+      && item.path === candidate.path
+      && item.displayName === candidate.displayName
+      && item.durationMs === candidate.durationMs
+      && item.status === candidate.status
+      && item.cue?.cuePath === candidate.cue?.cuePath
+      && item.cue?.trackNumber === candidate.cue?.trackNumber
+      && item.cue?.title === candidate.cue?.title
+      && item.cue?.performer === candidate.cue?.performer
+      && item.cue?.album === candidate.cue?.album
+      && item.cue?.startMs === candidate.cue?.startMs
+      && item.cue?.endMs === candidate.cue?.endMs
+      && sameFailure(item.error, candidate.error);
+  });
+}
+
+function sameFailure(left: PlaybackFailure | null, right: PlaybackFailure | null) {
+  return left === right || (left?.code === right?.code && left?.message === right?.message);
+}
+
+function sameOutput(left: PlaybackSnapshot["output"], right: PlaybackSnapshot["output"]) {
+  return left.status === right.status
+    && left.followSystemDefault === right.followSystemDefault
+    && left.selectedDeviceId === right.selectedDeviceId
+    && left.activeDeviceId === right.activeDeviceId
+    && left.activeDeviceName === right.activeDeviceName
+    && left.activeSampleRate === right.activeSampleRate
+    && left.activeChannelCount === right.activeChannelCount
+    && left.activeSampleFormat === right.activeSampleFormat
+    && sameFailure(left.error, right.error)
+    && left.devices.length === right.devices.length
+    && left.devices.every((device, index) => {
+      const candidate = right.devices[index];
+      return device.id === candidate.id
+        && device.name === candidate.name
+        && device.isDefault === candidate.isDefault
+        && device.interfaceType === candidate.interfaceType;
+    });
+}

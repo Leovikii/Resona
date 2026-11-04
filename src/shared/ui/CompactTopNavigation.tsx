@@ -1,6 +1,7 @@
+import { Hint } from "./Hint";
 import { Fragment, memo, useRef } from "react";
 import type { WheelEvent } from "react";
-import { ActionIcon, ScrollArea, Tabs, Tooltip } from "@mantine/core";
+import { ActionIcon, ScrollArea, Tabs } from "@mantine/core";
 import { ArrowDown, ArrowUp, Eraser, ListX, Pencil, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -191,20 +192,19 @@ export const CompactTopNavigation = memo(function CompactTopNavigation({
                           onPointerDown={(event) => reorder.onPointerDown(event, playlist.id)}
                           onPointerMove={reorder.onPointerMove}
                           onPointerUp={reorder.onPointerUp}
-                          title={playlist.name}
                           value={`user:${playlist.id}`}
                         >
                           <PlaylistTabLabel label={playlist.name} order={index + 2} playing={playing} />
                         </Tabs.Tab>
                       </AppContextMenu>
-                      <Tooltip label={t("library.delete")}>
+                      <Hint label={t("library.delete")}>
                         <ActionIcon aria-label={`${t("library.delete")}: ${playlist.name}`}
                           className="compact-playlist-delete" color="red" size="sm" variant="subtle"
                           disabled={moveDisabled}
                           onClick={(event) => { event.stopPropagation(); onDeletePlaylist(playlist.id); }}>
                           <Trash2 size={14} />
                         </ActionIcon>
-                      </Tooltip>
+                      </Hint>
                     </div>
                     <CompactPlaylistGap
                       active={externalDragActive && index === playlists.length - 1
@@ -219,12 +219,12 @@ export const CompactTopNavigation = memo(function CompactTopNavigation({
             </Tabs.List>
           </Tabs>
         </ScrollArea>
-        <Tooltip label={t("library.create")}>
+        <Hint label={t("library.create")}>
           <ActionIcon aria-label={t("library.create")} className="compact-create-button"
             disabled={moveDisabled} onClick={onCreatePlaylist} size={44} variant="subtle">
             <Plus size={16} />
           </ActionIcon>
-        </Tooltip>
+        </Hint>
       </div>
 
     </header>
@@ -248,12 +248,12 @@ function CompactPlaylistGap({ active, position }: { active: boolean; position: n
 function PlaylistTabLabel({ label, order, playing }: { label: string; order: number; playing: boolean }) {
   const { t } = useTranslation();
   return (
-    <span className="compact-playlist-tab-label">
+    <Hint label={label}><span className="compact-playlist-tab-label">
       <span className="compact-playlist-order-slot">{playing
         ? <span aria-label={t("playback.playing")} className="playlist-playing-indicator"><i /><i /><i /></span>
         : <span className="playlist-order">{order}</span>}
       </span>
       <span>{label}</span>
-    </span>
+    </span></Hint>
   );
 }

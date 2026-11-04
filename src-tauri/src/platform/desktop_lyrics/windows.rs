@@ -279,7 +279,7 @@ impl DesktopLyricsWindowService {
         };
         if let Err(error) = std::fs::create_dir_all(&data_dir).and_then(|_| {
             let bytes = serde_json::to_vec(&geometry).map_err(std::io::Error::other)?;
-            std::fs::write(data_dir.join(GEOMETRY_FILE), bytes)
+            crate::stored_state::write(&data_dir.join(GEOMETRY_FILE), &bytes)
         }) {
             eprintln!("desktop lyrics geometry save failed: {error}");
         }

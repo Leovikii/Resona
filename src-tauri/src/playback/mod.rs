@@ -1141,13 +1141,12 @@ impl AudioActor {
         if recovery.index >= self.queue.len() {
             return Ok(());
         }
-        self.start_from_index(recovery.index)?;
-        if recovery.position_ms > 0 {
-            let player = self.player.as_ref().ok_or(PlaybackError::NothingLoaded)?;
-            player
-                .try_seek(Duration::from_millis(recovery.position_ms))
-                .map_err(|error| PlaybackError::Seek(error.to_string()))?;
-            self.snapshot.position_ms = recovery.position_ms;
+        if let Err(error) = self.start_from_index_at(recovery.index, recovery.position_ms) {
+            self.stop_player();
+            self.snapshot.status = PlaybackStatus::Failed;
+            self.snapshot.error = Some(error.failure());
+            self.sync_snapshot_queue();
+            return Err(error);
         }
         if recovery.paused {
             self.player
@@ -1194,8 +1193,9 @@ impl AudioActor {
                 .is_ok_and(|available| available)
                 && self.output.ensure_open().is_ok()
             {
-                let _ = self.restore_output_recovery();
-                self.snapshot.error = None;
+                if let Err(error) = self.restore_output_recovery() {
+                    log::warn!("output recovery failed: {error}");
+                }
                 self.sync_output_snapshot();
             }
             return;
@@ -1211,9 +1211,10 @@ impl AudioActor {
                     if let Some(recovery) = recovery {
                         self.stop_player();
                         self.recovery = Some(recovery);
-                        let _ = self.restore_output_recovery();
+                        if let Err(error) = self.restore_output_recovery() {
+                            log::warn!("output recovery failed: {error}");
+                        }
                     }
-                    self.snapshot.error = None;
                     self.sync_output_snapshot();
                 }
             }
@@ -2362,5 +2363,27 @@ mod tests {
             .expect("system time")
             .as_nanos();
         std::env::temp_dir().join(format!("resona-{nonce}.{extension}"))
+    }
+
+    #[test]
+    fn failed_output_recovery_preserves_a_diagnostic_without_opening_audio() {
+        let mut actor = AudioActor::new();
+        actor
+            .replace_queue(vec![MediaSource::file(
+                fixture_directory().join("missing.wav"),
+            )])
+            .unwrap();
+        actor.recovery = Some(OutputRecovery {
+            index: 0,
+            position_ms: 1000,
+            paused: true,
+        });
+        assert!(actor.restore_output_recovery().is_err());
+        assert_eq!(actor.snapshot.status, PlaybackStatus::Failed);
+        assert_eq!(
+            actor.snapshot.error.as_ref().unwrap().code,
+            PlaybackErrorCode::Decode
+        );
+        assert!(actor.player.is_none());
     }
 }

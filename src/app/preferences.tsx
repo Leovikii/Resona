@@ -6,6 +6,7 @@ import {
   localStorageColorSchemeManager,
   MantineProvider,
   Modal,
+  Tooltip,
   useMantineColorScheme,
 } from "@mantine/core";
 import "@mantine/core/styles.css";
@@ -86,6 +87,16 @@ export function AppProvider({ children }: PropsWithChildren) {
         fontFamilyMonospace: "ui-monospace, monospace",
         headings: { fontFamily: "system-ui, sans-serif" },
         components: {
+          Tooltip: Tooltip.extend({
+            defaultProps: {
+              openDelay: 400,
+              closeDelay: 80,
+              events: { hover: true, focus: true, touch: false },
+              multiline: true,
+              radius: "sm",
+              classNames: { tooltip: "resona-tooltip" },
+            },
+          }),
           Modal: Modal.extend({
             defaultProps: {
               transitionProps: { duration: 180, transition: "pop" },

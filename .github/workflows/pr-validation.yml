@@ -84,6 +84,29 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: node scripts/release-channel.mjs --base "$BASE_SHA"
 
+      - name: Build Windows release test binary
+        run: npm run build:exe
+
+      - name: Prepare native Windows regression executable
+        shell: pwsh
+        run: ./scripts/test-windows-lyrics.ps1 -PrepareOnly
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-release-test
+          path: |
+            src-tauri/target/release/resona.exe
+            src-tauri/target/release/icons/*
+          if-no-files-found: error
+          retention-days: 7
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-native-tests
+          path: src-tauri/target/windows-lyrics-test/resona-native-tests.exe
+          if-no-files-found: error
+          retention-days: 7
+
   linux-validation:
     name: Arch Linux validation
     if: github.event_name == 'pull_request'

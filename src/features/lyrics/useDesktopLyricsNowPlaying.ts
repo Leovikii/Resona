@@ -43,8 +43,10 @@ export function useDesktopLyricsNowPlaying() {
   const [error, setError] = useState<PlaybackFailure | null>(null);
   const [initialized, setInitialized] = useState(preview);
   const revisionRef = useRef(lyrics.revision);
+  const refreshRequestRef = useRef(0);
 
   const acceptPlayback = useCallback((next: PlaybackSnapshot) => {
+    refreshRequestRef.current += 1;
     setPlayback(next);
     setLyrics((current) => current.audioPath === next.path ? current : {
       ...emptyLyricsSnapshot,
@@ -59,17 +61,21 @@ export function useDesktopLyricsNowPlaying() {
 
   const refresh = useCallback(async () => {
     if (preview) return;
+    const request = ++refreshRequestRef.current;
     try {
       const next = await invokeTauri<NowPlayingSnapshot>("get_now_playing_state", {
         knownLyricsRevision: revisionRef.current,
       });
+      if (request !== refreshRequestRef.current) return;
       acceptPlayback(next.playback);
       setLyrics((current) => mergeLyricsSnapshot(current, next.lyrics));
       setError(null);
-    } catch (nextError) {
-      setError(toPlaybackFailure(nextError));
-    } finally {
       setInitialized(true);
+    } catch (nextError) {
+      if (request === refreshRequestRef.current) {
+        setError(toPlaybackFailure(nextError));
+        setInitialized(true);
+      }
     }
   }, [acceptPlayback, preview]);
 
@@ -93,7 +99,7 @@ export function useDesktopLyricsNowPlaying() {
     void refresh();
     if (preview || !documentVisible) return;
     const timer = window.setInterval(() => void refresh(), 750);
-    return () => window.clearInterval(timer);
+    return () => { refreshRequestRef.current += 1; window.clearInterval(timer); };
   }, [documentVisible, preview, refresh]);
 
   return { error, initialized, lyrics, playback, runPlayback };

@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -229,7 +229,7 @@ impl CompressionService {
         }
         Ok(guard)
     }
-    pub fn with_binaries(ffmpeg: PathBuf, _ffprobe: PathBuf) -> Self {
+    pub fn with_ffmpeg(ffmpeg: PathBuf) -> Self {
         Self {
             ffmpeg,
             ..Self::default()
@@ -393,6 +393,9 @@ impl CompressionService {
     }
 
     pub fn clear_scan_inputs(&self) -> Result<CompressionScanSnapshot, CompressionFailure> {
+        let _install_guard = self.file_task_gate.try_lock().map_err(|_| {
+            CompressionFailure::new("compression_busy", "A file task or installation is running")
+        })?;
         let mut task = self.prepare_input_change()?;
         let scan = self.discard_scan_inputs();
         *task = CompressionSnapshot::idle();
@@ -769,7 +772,7 @@ impl CompressionService {
 
     fn convert_one(
         &self,
-        task_id: u64,
+        _task_id: u64,
         index: usize,
         source: &Path,
         preset: CompressionPreset,
@@ -788,14 +791,12 @@ impl CompressionService {
             return Err("output FLAC already exists".to_owned());
         }
         let input = inspect_wav(source)?;
-        let temp = source.with_file_name(format!(
-            ".{}.resona-{task_id}-{index}.tmp.flac",
-            source
-                .file_stem()
-                .and_then(|value| value.to_str())
-                .unwrap_or("audio")
-        ));
-        let _ = fs::remove_file(&temp);
+        let temp = tempfile::Builder::new()
+            .prefix(".resona-")
+            .suffix(".tmp.flac")
+            .tempfile_in(source.parent().ok_or("WAV input has no parent directory")?)
+            .map_err(|error| format!("failed to reserve temporary FLAC: {error}"))?
+            .into_temp_path();
         let target_bits = if input.bits_per_sample <= 16 { 16 } else { 24 };
         let mut command = crate::platform::compression_tools::background_command(&self.ffmpeg);
         command
@@ -824,10 +825,12 @@ impl CompressionService {
         let mut child = command
             .spawn()
             .map_err(|error| format!("failed to start FFmpeg: {error}"))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| "FFmpeg progress stream unavailable".to_owned())?;
+        let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("FFmpeg output streams unavailable".to_owned());
+        };
+        let error_reader = thread::spawn(move || read_diagnostics(stderr));
         let progress_state = Arc::clone(&self.snapshot);
         let duration_us = input.duration_seconds * 1_000_000.0;
         let progress_reader = thread::spawn(move || {
@@ -853,25 +856,17 @@ impl CompressionService {
                 let _ = child.kill();
                 let _ = child.wait();
                 let _ = progress_reader.join();
-                let _ = fs::remove_file(&temp);
+                let _ = error_reader.join();
                 return Err("cancelled".to_owned());
             }
             match child.try_wait() {
                 Ok(Some(status)) => {
-                    let stderr = child
-                        .stderr
-                        .take()
-                        .map(|stream| {
-                            BufReader::new(stream)
-                                .lines()
-                                .map_while(Result::ok)
-                                .collect::<Vec<_>>()
-                                .join("\n")
-                        })
-                        .unwrap_or_default();
                     let _ = progress_reader.join();
+                    let stderr = error_reader
+                        .join()
+                        .map_err(|_| "FFmpeg diagnostic reader failed".to_owned())?
+                        .map_err(|error| format!("FFmpeg diagnostics unavailable: {error}"))?;
                     if !status.success() {
-                        let _ = fs::remove_file(&temp);
                         return Err(if stderr.is_empty() {
                             "FFmpeg conversion failed".to_owned()
                         } else {
@@ -883,28 +878,27 @@ impl CompressionService {
                 Ok(None) => thread::sleep(Duration::from_millis(80)),
                 Err(error) => {
                     let _ = child.kill();
+                    let _ = child.wait();
                     let _ = progress_reader.join();
-                    let _ = fs::remove_file(&temp);
+                    let _ = error_reader.join();
                     return Err(format!("FFmpeg process failed: {error}"));
                 }
             }
         }
-        let verified = inspect_flac(&temp).inspect_err(|_| {
-            let _ = fs::remove_file(&temp);
-        })?;
+        let verified = inspect_flac(&temp)?;
         if verified.sample_rate != input.sample_rate
             || verified.channels != input.channels
             || verified.bits_per_sample != target_bits
         {
-            let _ = fs::remove_file(&temp);
             return Err(
                 "FLAC validation did not preserve the required audio properties".to_owned(),
             );
         }
-        crate::platform::file_commit::commit_new_file(&temp, &output).map_err(|error| {
-            let _ = fs::remove_file(&temp);
-            format!("failed to commit FLAC output: {error}")
-        })?;
+        if self.cancel.load(Ordering::Acquire) {
+            return Err("cancelled".to_owned());
+        }
+        crate::platform::file_commit::commit_new_file(&temp, &output)
+            .map_err(|error| format!("failed to commit FLAC output: {error}"))?;
         let output_bytes = fs::metadata(&output)
             .map_err(|error| format!("failed to read FLAC output size: {error}"))?
             .len();
@@ -949,6 +943,20 @@ impl CompressionService {
             item.progress = item.progress.max(progress.clamp(0.0, 1.0));
         }
     }
+}
+
+fn read_diagnostics(mut stream: impl Read) -> std::io::Result<String> {
+    const LIMIT: usize = 64 * 1024;
+    let mut bytes = Vec::new();
+    let mut buffer = [0; 4096];
+    loop {
+        let count = stream.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buffer[..count.min(LIMIT - bytes.len())]);
+    }
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 fn compression_worker_count(item_count: usize) -> usize {
@@ -1532,9 +1540,8 @@ mod tests {
 
     #[test]
     fn terminal_batches_reject_restart_without_overwriting_results() {
-        let service = Arc::new(CompressionService::with_binaries(
+        let service = Arc::new(CompressionService::with_ffmpeg(
             std::env::current_exe().unwrap(),
-            PathBuf::new(),
         ));
         for status in ["completed", "completed_with_errors", "cancelled"] {
             prime_batch_snapshot(&service, 91, Path::new("finished.wav"));
@@ -1595,9 +1602,8 @@ mod tests {
 
     #[test]
     fn running_tasks_and_scans_serialize_input_changes_and_start() {
-        let service = Arc::new(CompressionService::with_binaries(
+        let service = Arc::new(CompressionService::with_ffmpeg(
             std::env::current_exe().unwrap(),
-            PathBuf::new(),
         ));
         for status in ["running", "cancelling"] {
             prime_batch_snapshot(&service, 95, Path::new("active.wav"));
@@ -1664,6 +1670,10 @@ mod tests {
         let guard = service.system_install_guard().unwrap();
         assert!(service.system_install_guard().is_err());
         assert_eq!(
+            service.clear_scan_inputs().unwrap_err().code,
+            "compression_busy"
+        );
+        assert_eq!(
             service
                 .add_scan_inputs(vec![PathBuf::from("test.wav")])
                 .unwrap_err()
@@ -1687,6 +1697,121 @@ mod tests {
         assert!(service.system_install_guard().is_err());
         service.snapshot.lock().unwrap().status = "idle".into();
         assert!(service.system_install_guard().is_ok());
+    }
+
+    #[test]
+    fn diagnostics_are_fully_drained_with_a_bounded_message() {
+        let data = vec![b'x'; 1024 * 1024];
+        let mut input = std::io::Cursor::new(&data);
+        let message = read_diagnostics(&mut input).unwrap();
+        assert_eq!(message.len(), 64 * 1024);
+        assert_eq!(input.position(), data.len() as u64);
+        assert!(read_diagnostics(&b""[..]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn diagnostic_writer_child() {
+        if std::env::var_os("RESONA_TEST_DIAGNOSTIC_CHILD").is_none() {
+            return;
+        }
+        use std::io::Write;
+        std::io::stderr()
+            .write_all(&vec![b'x'; 1024 * 1024])
+            .unwrap();
+        std::process::exit(1);
+    }
+
+    #[test]
+    fn a_child_can_exit_after_writing_more_than_the_stderr_pipe_capacity() {
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "compression::tests::diagnostic_writer_child",
+                "--nocapture",
+            ])
+            .env("RESONA_TEST_DIAGNOSTIC_CHILD", "1")
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stderr = child.stderr.take().unwrap();
+        let reader = thread::spawn(move || read_diagnostics(stderr));
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if std::time::Instant::now() > deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = reader.join();
+                panic!("diagnostic pipe prevented child exit");
+            }
+            thread::sleep(Duration::from_millis(10));
+        };
+        assert!(!status.success());
+        assert_eq!(reader.join().unwrap().unwrap().len(), 64 * 1024);
+    }
+
+    #[test]
+    fn failed_start_cleans_only_its_reserved_temporary_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source.wav");
+        fs::copy(fixture_directory().join("wav_44100_16_stereo.wav"), &source).unwrap();
+        let residual = directory.path().join(".source.resona-1-0.tmp.flac");
+        fs::write(&residual, b"not owned by this conversion").unwrap();
+        let service = CompressionService::with_ffmpeg(directory.path().join("missing-ffmpeg"));
+        assert!(service
+            .convert_one(1, 0, &source, CompressionPreset::Fast)
+            .is_err());
+        assert_eq!(
+            fs::read(&residual).unwrap(),
+            b"not owned by this conversion"
+        );
+        assert!(source.is_file());
+        assert!(!source.with_extension("flac").exists());
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 2);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn cancellation_reaps_an_active_ffmpeg_and_cleans_only_owned_temporaries() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source.wav");
+        fs::copy(fixture_directory().join("wav_44100_16_stereo.wav"), &source).unwrap();
+        let residual = directory.path().join(".source.resona-1-0.tmp.flac");
+        fs::write(&residual, b"unowned").unwrap();
+        let executable = directory.path().join("ffmpeg");
+        fs::write(
+            &executable,
+            b"#!/bin/sh\nprintf '%s' \"$$\" > \"$0.pid\"\nexec sleep 30\n",
+        )
+        .unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        let service = Arc::new(CompressionService::with_ffmpeg(executable.clone()));
+        let worker_service = Arc::clone(&service);
+        let worker_source = source.clone();
+        let worker = thread::spawn(move || {
+            worker_service.convert_one(1, 0, &worker_source, CompressionPreset::Fast)
+        });
+        let marker = executable.with_extension("pid");
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !marker.is_file() && std::time::Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        service.cancel.store(true, Ordering::Release);
+        assert_eq!(worker.join().unwrap().unwrap_err(), "cancelled");
+        let pid = fs::read_to_string(marker).unwrap();
+        assert!(!PathBuf::from(format!("/proc/{pid}")).exists());
+        assert!(source.is_file());
+        assert!(!source.with_extension("flac").exists());
+        assert_eq!(fs::read(residual).unwrap(), b"unowned");
+        assert!(!fs::read_dir(directory.path()).unwrap().any(|entry| entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".resona-")));
     }
 
     #[test]
@@ -2000,13 +2125,11 @@ mod tests {
         let source = directory.join("source.wav");
         let output = source.with_extension("flac");
         let fake_ffmpeg = directory.join("ffmpeg.exe");
-        let fake_ffprobe = directory.join("ffprobe.exe");
         fs::copy(fixture_directory().join("wav_44100_16_stereo.wav"), &source)
             .expect("copy WAV fixture");
         fs::write(&output, b"existing output").expect("create existing output");
         fs::write(&fake_ffmpeg, b"not executed").expect("create fake ffmpeg");
-        fs::write(&fake_ffprobe, b"not executed").expect("create fake ffprobe");
-        let service = Arc::new(CompressionService::with_binaries(fake_ffmpeg, fake_ffprobe));
+        let service = Arc::new(CompressionService::with_ffmpeg(fake_ffmpeg));
         service
             .start(vec![source.clone()], CompressionPreset::Fast, true, true)
             .expect("start conversion");

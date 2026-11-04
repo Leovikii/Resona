@@ -26,5 +26,6 @@ LRC is the common music format, while SRT and WebVTT are widely available timed-
 - SRT/WebVTT cue layout, styling and regions are intentionally reduced to timed plain text; Resona is not a video subtitle renderer.
 - SRT/WebVTT cue end times do not control playback visibility. The main player keeps the last started line highlighted, while desktop lyrics changes its current/next slots only when a new line starts.
 - LRC offset and metadata are retained in the normalized document; malformed files degrade the lyrics feature without blocking playback.
+- Lyrics and CUE sidecar reads share an 8 MiB byte limit before decoding; oversized lyrics report a read failure and oversized CUE files fall back to ordinary audio with a diagnostic.
 - The main window receives the full lyrics document only when its revision changes; periodic playback refreshes return only the active line and status.
 - Independent desktop lyrics, source selection, online lookup, translation and word-level karaoke require later decisions.

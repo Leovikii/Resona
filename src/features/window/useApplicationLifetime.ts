@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
 
-import { invokeTauri, isTauriRuntime } from "../../shared/bridge/tauri";
+import { invokeTauri, isTauriRuntime, listenTauri } from "../../shared/bridge/tauri";
 import {
   defaultApplicationLifetimeSnapshot,
   type ApplicationLifetimeSnapshot,
@@ -26,25 +25,29 @@ export function useApplicationLifetime() {
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
+    let disposed = false;
     void invokeTauri<ApplicationLifetimeSnapshot>("get_application_lifetime_state")
       .then((next) => {
+        if (disposed) return;
         setSnapshot(next);
         setError(null);
       })
-      .catch((nextError) => setError(errorMessage(nextError)));
+      .catch((nextError) => { if (!disposed) setError(errorMessage(nextError)); });
+    return () => { disposed = true; };
   }, []);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void listen("resona://exit-confirmation-requested", () => {
+    void listenTauri("resona://exit-confirmation-requested", () => {
+      if (disposed) return;
       setClosePromptOpen(false);
       setExitConfirmationOpen(true);
     }).then((stop) => {
       if (disposed) stop();
       else unlisten = stop;
-    });
+    }).catch((cause) => { if (!disposed) setError(errorMessage(cause)); });
     return () => {
       disposed = true;
       unlisten?.();
@@ -55,10 +58,10 @@ export function useApplicationLifetime() {
     if (!isTauriRuntime()) return;
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void listen("resona://close-requested", () => setClosePromptOpen(true)).then((stop) => {
+    void listenTauri("resona://close-requested", () => { if (!disposed) setClosePromptOpen(true); }).then((stop) => {
       if (disposed) stop();
       else unlisten = stop;
-    });
+    }).catch((cause) => { if (!disposed) setError(errorMessage(cause)); });
     return () => {
       disposed = true;
       unlisten?.();

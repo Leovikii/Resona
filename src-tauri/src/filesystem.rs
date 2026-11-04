@@ -2,12 +2,27 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
 use crate::media_source::{expand_same_name_cue, MediaSource};
 use crate::playback::PlaybackFailure;
+
+pub fn read_sidecar(path: &Path) -> std::io::Result<Vec<u8>> {
+    const LIMIT: u64 = 8 * 1024 * 1024;
+    let file = fs::File::open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::other("sidecar is not a regular file"));
+    }
+    let mut bytes = Vec::new();
+    file.take(LIMIT + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > LIMIT {
+        return Err(std::io::Error::other("sidecar exceeds 8 MiB"));
+    }
+    Ok(bytes)
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -383,6 +398,22 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
+
+    #[test]
+    fn sidecar_reads_are_bounded_and_preserve_small_files() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("lyrics.lrc");
+        fs::write(&path, b"[00:01.00]text").unwrap();
+        assert_eq!(read_sidecar(&path).unwrap(), b"[00:01.00]text");
+        let file = fs::OpenOptions::new().write(true).open(&path).unwrap();
+        file.set_len(8 * 1024 * 1024).unwrap();
+        assert_eq!(read_sidecar(&path).unwrap().len(), 8 * 1024 * 1024);
+        file.set_len(8 * 1024 * 1024 + 1).unwrap();
+        assert_eq!(
+            read_sidecar(&path).unwrap_err().to_string(),
+            "sidecar exceeds 8 MiB"
+        );
+    }
 
     #[test]
     fn file_uri_import_preserves_literal_percent_hash_and_unicode() {

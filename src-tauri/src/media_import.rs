@@ -10,7 +10,11 @@ use crate::filesystem::{
     self, AudioFileContext, RejectedPath, RejectedPathReason, ResolvedAudioPaths,
 };
 use crate::media_source::MediaSource;
+use crate::persistence::{
+    PersistenceFailure, PersistenceService, PlaylistItemRecord, PlaylistSummary,
+};
 use crate::playback::{PlaybackEngine, PlaybackFailure, PlaybackSnapshot, RodioPlaybackEngine};
+use crate::playlists::PlaylistMutationResult;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -99,6 +103,7 @@ struct DefaultPlaylistState {
 pub struct MediaImportService {
     engine: Arc<RodioPlaybackEngine>,
     state: Mutex<DefaultPlaylistState>,
+    user_changes: Mutex<()>,
     external_result: Mutex<Option<Result<OpenMediaResult, PlaybackFailure>>>,
 }
 
@@ -107,6 +112,7 @@ impl MediaImportService {
         Self {
             engine,
             state: Mutex::new(DefaultPlaylistState::default()),
+            user_changes: Mutex::new(()),
             external_result: Mutex::new(None),
         }
     }
@@ -317,15 +323,19 @@ impl MediaImportService {
 
     pub fn play_user_playlist(
         &self,
+        database: &PersistenceService,
         playlist_id: i64,
-        sources: Vec<MediaSource>,
-        selected_index: usize,
+        item_id: i64,
     ) -> Result<PlaylistPlaybackResult, PlaybackFailure> {
-        if selected_index >= sources.len() {
-            return Err(PlaybackFailure::task_failed(
-                "playlist target is unavailable".to_owned(),
-            ));
-        }
+        let _guard = self.user_changes.lock().map_err(|_| state_poisoned())?;
+        let items = database
+            .list_playlist_items(playlist_id)
+            .map_err(|error| PlaybackFailure::task_failed(error.to_string()))?;
+        let selected_index = items
+            .iter()
+            .position(|item| item.id == item_id)
+            .ok_or_else(|| PlaybackFailure::task_failed("playlist item not found".to_owned()))?;
+        let sources = playlist_paths(&items);
         let mut state = self.state.lock().map_err(|_| state_poisoned())?;
         let playback = self
             .engine
@@ -472,6 +482,191 @@ impl MediaImportService {
             .and_then(|id| playback.queue.iter().position(|item| item.id == id));
         state.active_playlist = Some(ActivePlaylistSnapshot::default_playlist());
         Ok(Some(snapshot_from_state(&state)))
+    }
+
+    pub fn delete_user_playlist(
+        &self,
+        database: &PersistenceService,
+        id: i64,
+    ) -> Result<(), PersistenceFailure> {
+        self.coordinate_user_change(|| {
+            database
+                .delete_playlist(id)
+                .map_err(|error| error.failure())?;
+            self.detach_deleted_user_playlists(&[id])
+                .map_err(playlist_sync_failure)?;
+            Ok(())
+        })
+    }
+
+    pub fn delete_other_user_playlists(
+        &self,
+        database: &PersistenceService,
+        keep_id: Option<i64>,
+    ) -> Result<Vec<PlaylistSummary>, PersistenceFailure> {
+        self.coordinate_user_change(|| {
+            let deleted_ids = database
+                .delete_other_playlists(keep_id)
+                .map_err(|error| error.failure())?;
+            self.detach_deleted_user_playlists(&deleted_ids)
+                .map_err(playlist_sync_failure)?;
+            database.list_playlists().map_err(|error| error.failure())
+        })
+    }
+
+    pub fn add_user_playlist_items(
+        &self,
+        database: &PersistenceService,
+        playlist_id: i64,
+        paths: Vec<String>,
+        position: Option<i64>,
+    ) -> Result<PlaylistMutationResult, PersistenceFailure> {
+        self.coordinate_user_change(|| {
+            let previous = database
+                .list_playlist_items(playlist_id)
+                .map_err(|error| error.failure())?;
+            let result = crate::playlists::add_playlist_items(
+                database,
+                playlist_id,
+                paths.into_iter().map(PathBuf::from).collect(),
+                position,
+            )
+            .map_err(|error| error.failure())?;
+            self.sync_user_insert(
+                playlist_id,
+                &playlist_paths(&previous),
+                &playlist_paths(&result.items),
+            )
+            .map_err(playlist_sync_failure)?;
+            Ok(result)
+        })
+    }
+
+    pub fn remove_user_playlist_item(
+        &self,
+        database: &PersistenceService,
+        playlist_id: i64,
+        item_id: i64,
+    ) -> Result<Vec<PlaylistItemRecord>, PersistenceFailure> {
+        self.coordinate_user_change(|| {
+            let previous = database
+                .list_playlist_items(playlist_id)
+                .map_err(|error| error.failure())?;
+            let items = database
+                .remove_playlist_item(playlist_id, item_id)
+                .map_err(|error| error.failure())?;
+            self.sync_user_remove(
+                playlist_id,
+                &playlist_paths(&previous),
+                &playlist_paths(&items),
+            )
+            .map_err(playlist_sync_failure)?;
+            Ok(items)
+        })
+    }
+
+    pub fn remove_user_playlist_items(
+        &self,
+        database: &PersistenceService,
+        playlist_id: i64,
+        item_ids: Vec<i64>,
+    ) -> Result<Vec<PlaylistItemRecord>, PersistenceFailure> {
+        self.coordinate_user_change(|| {
+            let previous = database
+                .list_playlist_items(playlist_id)
+                .map_err(|error| error.failure())?;
+            let items = database
+                .remove_playlist_items(playlist_id, &item_ids)
+                .map_err(|error| error.failure())?;
+            self.sync_user_remove_many(
+                playlist_id,
+                &playlist_paths(&previous),
+                &playlist_paths(&items),
+            )
+            .map_err(playlist_sync_failure)?;
+            Ok(items)
+        })
+    }
+
+    pub fn clear_user_playlist_items(
+        &self,
+        database: &PersistenceService,
+        playlist_id: i64,
+    ) -> Result<Vec<PlaylistItemRecord>, PersistenceFailure> {
+        self.coordinate_user_change(|| {
+            let previous = database
+                .list_playlist_items(playlist_id)
+                .map_err(|error| error.failure())?;
+            let items = database
+                .clear_playlist_items(playlist_id)
+                .map_err(|error| error.failure())?;
+            self.sync_user_remove_many(
+                playlist_id,
+                &playlist_paths(&previous),
+                &playlist_paths(&items),
+            )
+            .map_err(playlist_sync_failure)?;
+            Ok(items)
+        })
+    }
+
+    pub fn move_user_playlist_item(
+        &self,
+        database: &PersistenceService,
+        playlist_id: i64,
+        item_id: i64,
+        to_position: i64,
+    ) -> Result<Vec<PlaylistItemRecord>, PersistenceFailure> {
+        self.coordinate_user_change(|| {
+            let previous = database
+                .list_playlist_items(playlist_id)
+                .map_err(|error| error.failure())?;
+            let from_position = previous
+                .iter()
+                .position(|item| item.id == item_id)
+                .ok_or_else(|| {
+                    crate::persistence::PersistenceError::PlaylistItemNotFound.failure()
+                })?;
+            let items = database
+                .move_playlist_item(playlist_id, item_id, to_position)
+                .map_err(|error| error.failure())?;
+            let next_position = items
+                .iter()
+                .position(|item| item.id == item_id)
+                .ok_or_else(|| {
+                    crate::persistence::PersistenceError::PlaylistItemNotFound.failure()
+                })?;
+            self.sync_user_move(
+                playlist_id,
+                &playlist_paths(&previous),
+                from_position,
+                next_position,
+            )
+            .map_err(playlist_sync_failure)?;
+            Ok(items)
+        })
+    }
+
+    fn coordinate_user_change<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, PersistenceFailure>,
+    ) -> Result<T, PersistenceFailure> {
+        let _guard = self
+            .user_changes
+            .lock()
+            .map_err(|_| playlist_sync_failure(state_poisoned()))?;
+        let result = operation();
+        if let Err(error) = &result {
+            if error.code == "playback_sequence_sync_failed" {
+                // The database is committed: preserve execution as a default list instead of binding it to stale rows.
+                let active = self.active_playlist().map_err(playlist_sync_failure)?;
+                if let Some(id) = active.and_then(|playlist| playlist.playlist_id) {
+                    self.detach_deleted_user_playlists(&[id])
+                        .map_err(playlist_sync_failure)?;
+                }
+            }
+        }
+        result
     }
 
     fn play_sources(
@@ -711,6 +906,17 @@ fn sequence_mismatch() -> PlaybackFailure {
     )
 }
 
+fn playlist_paths(items: &[PlaylistItemRecord]) -> Vec<crate::media_source::MediaSource> {
+    items.iter().map(PlaylistItemRecord::source).collect()
+}
+
+fn playlist_sync_failure(failure: PlaybackFailure) -> PersistenceFailure {
+    PersistenceFailure {
+        code: "playback_sequence_sync_failed".to_owned(),
+        message: failure.message,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs::{self, File};
@@ -761,6 +967,70 @@ mod tests {
             .unwrap();
         assert!(service.take_external_result().is_err());
         assert!(service.take_external_result().unwrap().is_none());
+    }
+
+    #[test]
+    fn committed_edit_detaches_a_mismatched_execution_sequence() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = PersistenceService::open(&directory.path().join("lists.sqlite")).unwrap();
+        let source = directory.path().join("track.wav");
+        File::create(&source).unwrap();
+        let list =
+            crate::playlists::create_playlist(&database, "test", vec![source], None, false, true)
+                .unwrap();
+        let service = MediaImportService::new(Arc::new(RodioPlaybackEngine::new()));
+        service.state.lock().unwrap().active_playlist =
+            Some(ActivePlaylistSnapshot::user_playlist(list.playlist.id));
+        let error = service
+            .clear_user_playlist_items(&database, list.playlist.id)
+            .unwrap_err();
+        assert_eq!(error.code, "playback_sequence_sync_failed");
+        assert!(database
+            .list_playlist_items(list.playlist.id)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            service.active_playlist().unwrap(),
+            Some(ActivePlaylistSnapshot::default_playlist())
+        );
+        assert!(service
+            .clear_user_playlist_items(&database, list.playlist.id)
+            .is_ok());
+    }
+
+    #[test]
+    fn concurrent_edits_keep_inactive_lists_consistent_and_deleted_items_cannot_activate() {
+        let directory = tempfile::tempdir().unwrap();
+        let database =
+            Arc::new(PersistenceService::open(&directory.path().join("lists.sqlite")).unwrap());
+        let paths = ["first.wav", "second.wav"].map(|name| {
+            let path = directory.path().join(name);
+            File::create(&path).unwrap();
+            path
+        });
+        let list =
+            crate::playlists::create_playlist(&database, "test", paths.to_vec(), None, false, true)
+                .unwrap();
+        let service = Arc::new(MediaImportService::new(
+            Arc::new(RodioPlaybackEngine::new()),
+        ));
+        std::thread::scope(|scope| {
+            for item in &list.items {
+                scope.spawn(|| {
+                    service
+                        .remove_user_playlist_item(&database, list.playlist.id, item.id)
+                        .unwrap();
+                });
+            }
+        });
+        assert!(database
+            .list_playlist_items(list.playlist.id)
+            .unwrap()
+            .is_empty());
+        assert!(service
+            .play_user_playlist(&database, list.playlist.id, list.items[0].id)
+            .is_err());
+        assert_eq!(service.active_playlist().unwrap(), None);
     }
 
     #[test]

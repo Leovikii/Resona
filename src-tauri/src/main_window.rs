@@ -257,16 +257,9 @@ impl MainWindowService {
     }
 
     fn persist(&self) -> Result<(), MainWindowFailure> {
-        let state = self.lock_state()?.clone();
-        let parent = self.path.parent().ok_or_else(|| {
-            failure(
-                "main_window_state_path",
-                "main window state path has no parent directory",
-            )
-        })?;
-        std::fs::create_dir_all(parent).map_err(state_io_failure)?;
-        let bytes = serde_json::to_vec(&state).map_err(state_io_failure)?;
-        std::fs::write(&self.path, bytes).map_err(state_io_failure)
+        let state = self.lock_state()?;
+        let bytes = serde_json::to_vec(&*state).map_err(state_io_failure)?;
+        crate::stored_state::write(&self.path, &bytes).map_err(state_io_failure)
     }
 
     fn lock_state(

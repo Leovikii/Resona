@@ -570,18 +570,7 @@ pub async fn play_user_playlist_item(
     let media_import = Arc::clone(media_import.inner());
     let database = Arc::clone(persistence.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        let items = database
-            .list_playlist_items(playlist_id)
-            .map_err(|error| PlaybackFailure::task_failed(error.to_string()))?;
-        let selected_index = items
-            .iter()
-            .position(|item| item.id == item_id)
-            .ok_or_else(|| PlaybackFailure::task_failed("playlist item not found".to_owned()))?;
-        media_import.play_user_playlist(
-            playlist_id,
-            items.iter().map(PlaylistItemRecord::source).collect(),
-            selected_index,
-        )
+        media_import.play_user_playlist(&database, playlist_id, item_id)
     })
     .await
     .map_err(|error| PlaybackFailure::task_failed(format!("playlist task failed: {error}")))?
@@ -879,20 +868,12 @@ pub async fn delete_playlist(
 ) -> Result<(), PersistenceFailure> {
     let database = Arc::clone(persistence.inner());
     let media_import = Arc::clone(media_import.inner());
-    tauri::async_runtime::spawn_blocking(move || {
-        database
-            .delete_playlist(id)
-            .map_err(|error| error.failure())?;
-        media_import
-            .detach_deleted_user_playlists(&[id])
-            .map_err(playlist_sync_failure)?;
-        Ok(())
-    })
-    .await
-    .map_err(|error| PersistenceFailure {
-        code: "playlist_task_failed".to_owned(),
-        message: format!("playlist task failed: {error}"),
-    })?
+    tauri::async_runtime::spawn_blocking(move || media_import.delete_user_playlist(&database, id))
+        .await
+        .map_err(|error| PersistenceFailure {
+            code: "playlist_task_failed".to_owned(),
+            message: format!("playlist task failed: {error}"),
+        })?
 }
 
 #[tauri::command]
@@ -904,13 +885,7 @@ pub async fn delete_other_playlists(
     let database = Arc::clone(persistence.inner());
     let media_import = Arc::clone(media_import.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        let deleted_ids = database
-            .delete_other_playlists(keep_id)
-            .map_err(|error| error.failure())?;
-        media_import
-            .detach_deleted_user_playlists(&deleted_ids)
-            .map_err(playlist_sync_failure)?;
-        database.list_playlists().map_err(|error| error.failure())
+        media_import.delete_other_user_playlists(&database, keep_id)
     })
     .await
     .map_err(|error| PersistenceFailure {
@@ -961,24 +936,7 @@ pub async fn add_playlist_items(
                 code: error.code,
                 message: error.message,
             })?;
-        let previous = database
-            .list_playlist_items(playlist_id)
-            .map_err(|error| error.failure())?;
-        let result = crate::playlists::add_playlist_items(
-            &database,
-            playlist_id,
-            paths.into_iter().map(PathBuf::from).collect(),
-            position,
-        )
-        .map_err(|error| error.failure())?;
-        media_import
-            .sync_user_insert(
-                playlist_id,
-                &playlist_paths(&previous),
-                &playlist_paths(&result.items),
-            )
-            .map_err(playlist_sync_failure)?;
-        Ok(result)
+        media_import.add_user_playlist_items(&database, playlist_id, paths, position)
     })
     .await
     .map_err(|error| PersistenceFailure {
@@ -997,20 +955,7 @@ pub async fn remove_playlist_item(
     let database = Arc::clone(persistence.inner());
     let media_import = Arc::clone(media_import.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        let previous = database
-            .list_playlist_items(playlist_id)
-            .map_err(|error| error.failure())?;
-        let items = database
-            .remove_playlist_item(playlist_id, item_id)
-            .map_err(|error| error.failure())?;
-        media_import
-            .sync_user_remove(
-                playlist_id,
-                &playlist_paths(&previous),
-                &playlist_paths(&items),
-            )
-            .map_err(playlist_sync_failure)?;
-        Ok(items)
+        media_import.remove_user_playlist_item(&database, playlist_id, item_id)
     })
     .await
     .map_err(|error| PersistenceFailure {
@@ -1029,20 +974,7 @@ pub async fn remove_playlist_items(
     let database = Arc::clone(persistence.inner());
     let media_import = Arc::clone(media_import.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        let previous = database
-            .list_playlist_items(playlist_id)
-            .map_err(|error| error.failure())?;
-        let items = database
-            .remove_playlist_items(playlist_id, &item_ids)
-            .map_err(|error| error.failure())?;
-        media_import
-            .sync_user_remove_many(
-                playlist_id,
-                &playlist_paths(&previous),
-                &playlist_paths(&items),
-            )
-            .map_err(playlist_sync_failure)?;
-        Ok(items)
+        media_import.remove_user_playlist_items(&database, playlist_id, item_ids)
     })
     .await
     .map_err(|error| PersistenceFailure {
@@ -1060,20 +992,7 @@ pub async fn clear_playlist_items(
     let database = Arc::clone(persistence.inner());
     let media_import = Arc::clone(media_import.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        let previous = database
-            .list_playlist_items(playlist_id)
-            .map_err(|error| error.failure())?;
-        let items = database
-            .clear_playlist_items(playlist_id)
-            .map_err(|error| error.failure())?;
-        media_import
-            .sync_user_remove_many(
-                playlist_id,
-                &playlist_paths(&previous),
-                &playlist_paths(&items),
-            )
-            .map_err(playlist_sync_failure)?;
-        Ok(items)
+        media_import.clear_user_playlist_items(&database, playlist_id)
     })
     .await
     .map_err(|error| PersistenceFailure {
@@ -1093,46 +1012,13 @@ pub async fn move_playlist_item(
     let database = Arc::clone(persistence.inner());
     let media_import = Arc::clone(media_import.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        let previous = database
-            .list_playlist_items(playlist_id)
-            .map_err(|error| error.failure())?;
-        let from_position = previous
-            .iter()
-            .position(|item| item.id == item_id)
-            .ok_or_else(|| crate::persistence::PersistenceError::PlaylistItemNotFound.failure())?;
-        let items = database
-            .move_playlist_item(playlist_id, item_id, to_position)
-            .map_err(|error| error.failure())?;
-        let next_position = items
-            .iter()
-            .position(|item| item.id == item_id)
-            .ok_or_else(|| crate::persistence::PersistenceError::PlaylistItemNotFound.failure())?;
-        media_import
-            .sync_user_move(
-                playlist_id,
-                &playlist_paths(&previous),
-                from_position,
-                next_position,
-            )
-            .map_err(playlist_sync_failure)?;
-        Ok(items)
+        media_import.move_user_playlist_item(&database, playlist_id, item_id, to_position)
     })
     .await
     .map_err(|error| PersistenceFailure {
         code: "playlist_task_failed".to_owned(),
         message: format!("playlist task failed: {error}"),
     })?
-}
-
-fn playlist_paths(items: &[PlaylistItemRecord]) -> Vec<crate::media_source::MediaSource> {
-    items.iter().map(PlaylistItemRecord::source).collect()
-}
-
-fn playlist_sync_failure(failure: PlaybackFailure) -> PersistenceFailure {
-    PersistenceFailure {
-        code: "playback_sequence_sync_failed".to_owned(),
-        message: failure.message,
-    }
 }
 
 #[tauri::command]

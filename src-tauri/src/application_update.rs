@@ -456,6 +456,10 @@ impl ApplicationUpdateService {
             };
             Ok(())
         } else {
+            let compression = app.state::<Arc<crate::compression::CompressionService>>();
+            let _install_guard = compression.system_install_guard().map_err(|error| {
+                ApplicationUpdateFailure::new("update_file_tasks_busy", error.message)
+            })?;
             self.phase("installing")?;
             update.install(bytes).map_err(updater_failure)?;
             self.phase("")
@@ -538,20 +542,11 @@ impl ApplicationUpdateService {
     }
 
     fn persist(&self) -> Result<(), ApplicationUpdateFailure> {
-        let state = self.lock_state()?.clone();
-        let parent = self.path.parent().ok_or_else(|| {
-            ApplicationUpdateFailure::new(
-                "update_state_path_invalid",
-                "application update state path has no parent directory",
-            )
-        })?;
-        std::fs::create_dir_all(parent).map_err(|error| {
-            ApplicationUpdateFailure::new("update_state_directory_failed", error.to_string())
-        })?;
-        let bytes = serde_json::to_vec(&state).map_err(|error| {
+        let state = self.lock_state()?;
+        let bytes = serde_json::to_vec(&*state).map_err(|error| {
             ApplicationUpdateFailure::new("update_state_serialize_failed", error.to_string())
         })?;
-        std::fs::write(&self.path, bytes).map_err(|error| {
+        crate::stored_state::write(&self.path, &bytes).map_err(|error| {
             ApplicationUpdateFailure::new("update_state_write_failed", error.to_string())
         })
     }

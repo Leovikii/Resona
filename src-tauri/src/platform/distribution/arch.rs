@@ -26,27 +26,37 @@ pub struct PreparedUpdate {
 }
 
 fn query(args: &[&str]) -> Result<String> {
+    query_command(
+        Command::new("/usr/bin/pacman")
+            .env("LC_ALL", "C")
+            .args(args),
+    )
+}
+
+fn query_command(command: &mut Command) -> Result<String> {
     let mut log = tempfile::tempfile().map_err(|e| error("update_package_query", e))?;
-    let mut child = Command::new("/usr/bin/pacman")
-        .env("LC_ALL", "C")
-        .args(args)
+    let mut diagnostic = tempfile::tempfile().map_err(|e| error("update_package_query", e))?;
+    let mut child = command
         .stdin(Stdio::null())
         .stdout(
             log.try_clone()
                 .map_err(|e| error("update_package_query", e))?,
         )
-        .stderr(Stdio::piped())
+        .stderr(
+            diagnostic
+                .try_clone()
+                .map_err(|e| error("update_package_query", e))?,
+        )
         .spawn()
         .map_err(|e| error("update_package_query", e))?;
     // Read-only probes may time out; the installing Pacman below must never be killed.
     let started = Instant::now();
-    loop {
-        if child
+    let status = loop {
+        if let Some(status) = child
             .try_wait()
             .map_err(|e| error("update_package_query", e))?
-            .is_some()
         {
-            break;
+            break status;
         }
         if started.elapsed() > Duration::from_secs(30) {
             let _ = child.kill();
@@ -54,14 +64,19 @@ fn query(args: &[&str]) -> Result<String> {
             return Err(error("update_package_query", "Pacman query timed out"));
         }
         thread::sleep(Duration::from_millis(50));
-    }
-    let output = child
-        .wait_with_output()
+    };
+    diagnostic
+        .seek(SeekFrom::Start(0))
         .map_err(|e| error("update_package_query", e))?;
-    if !output.status.success() || !output.stderr.is_empty() {
+    let mut diagnostic_bytes = Vec::new();
+    diagnostic
+        .take(16 * 1024)
+        .read_to_end(&mut diagnostic_bytes)
+        .map_err(|e| error("update_package_query", e))?;
+    if !status.success() || !diagnostic_bytes.is_empty() {
         return Err(error(
             "update_package_query",
-            String::from_utf8_lossy(&output.stderr),
+            String::from_utf8_lossy(&diagnostic_bytes),
         ));
     }
     log.seek(SeekFrom::Start(0))
@@ -295,6 +310,23 @@ impl PreparedUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn noisy_queries_return_bounded_diagnostics_without_blocking_exit() {
+        let failure = query_command(
+            Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "compression::tests::diagnostic_writer_child",
+                    "--nocapture",
+                ])
+                .env("RESONA_TEST_DIAGNOSTIC_CHILD", "1"),
+        )
+        .err()
+        .unwrap();
+        assert_eq!(failure.code, "update_package_query");
+        assert_eq!(failure.message, "x".repeat(16 * 1024));
+    }
     #[test]
     #[ignore = "requires the CI-built Arch package and Pacman"]
     fn packaged_update_metadata() {

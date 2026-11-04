@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Hint } from "./Hint";
 import { ActionIcon, Paper, Text, UnstyledButton } from "@mantine/core";
 import {
   ChevronDown,
@@ -199,7 +200,7 @@ export function PlaylistTrackList({
     setAnchor(itemId);
   }, [anchor, items]);
 
-  const openTrackMenu = useCallback((event: React.MouseEvent, itemId: number) => {
+  const openTrackMenu = useCallback((_event: React.MouseEvent, itemId: number) => {
     if (!selected.has(itemId)) {
       setSelected(new Set([itemId]));
       setAnchor(itemId);
@@ -387,7 +388,7 @@ function renderTreeNodes(
       );
       return (
         <div className="playlist-folder-branch" key={node.id}>
-          <UnstyledButton
+          <Hint label={node.path}><UnstyledButton
             aria-expanded={open}
             className="playlist-folder-row"
             data-insertion-edge={insertionEdge}
@@ -397,7 +398,6 @@ function renderTreeNodes(
             data-track-position={node.startPosition}
             onClick={() => context.toggleFolder(node.path)}
             style={{ "--playlist-tree-level": level } as React.CSSProperties}
-            title={node.path}
           >
             <span className="playlist-folder-toggle">
               {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
@@ -407,7 +407,7 @@ function renderTreeNodes(
             <Text c="dimmed" className="playlist-folder-summary" size="xs">
               {node.itemCount} · {formatAggregateDuration(duration)}
             </Text>
-          </UnstyledButton>
+          </UnstyledButton></Hint>
           {open && (
             <div className="playlist-folder-children">
               {renderTreeNodes(node.children, level + 1, context)}

@@ -1,3 +1,17 @@
+.resona-tooltip {
+  background: var(--mantine-color-body);
+  color: var(--mantine-color-text);
+  border: 1px solid var(--mantine-color-default-border);
+  box-shadow: var(--mantine-shadow-sm);
+  font-size: var(--mantine-font-size-xs);
+  font-weight: 400;
+  line-height: 1.4;
+  padding: 6px 8px;
+  max-width: min(240px, calc(100vw - 16px));
+  overflow-wrap: anywhere;
+  pointer-events: auto;
+}
+
 :root {
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -1443,36 +1457,12 @@ h2.page-heading {
   flex: 1;
 }
 
-.simple-track-list,
 .saved-track-list,
 .tool-list {
   min-width: 0;
   padding-right: 5px;
   display: grid;
   gap: 2px;
-}
-
-.simple-track-row {
-  width: 100%;
-  min-width: 0;
-  min-height: 54px;
-  padding: 7px 9px;
-  display: grid;
-  grid-template-columns: 24px 34px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  border-radius: var(--mantine-radius-sm);
-  text-align: left;
-  transition: background-color 130ms ease;
-}
-
-.simple-track-row:hover,
-.simple-track-row:focus-visible {
-  background: var(--mantine-color-default-hover);
-}
-
-.simple-track-row[data-current] {
-  background: var(--mantine-primary-color-light);
 }
 
 .saved-track-slot {
@@ -1867,6 +1857,19 @@ h2.page-heading {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.settings-version-button {
+  max-width: 100%;
+  height: auto;
+  min-height: 30px;
+  padding-block: 6px;
+}
+
+.settings-version-button .mantine-Button-label {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
 }
 
 .application-update-heading {
@@ -2518,21 +2521,22 @@ h2.page-heading {
   width: 100%;
 }
 
-.app-shell[data-layout="compact"] .font-size-setting {
-  grid-template-columns: minmax(0, 1fr) auto !important;
-  align-items: center;
-  gap: 12px;
-}
-
+.app-shell[data-layout="compact"] .settings-about-section .setting-row,
+.app-shell[data-layout="compact"] .font-size-setting,
 .app-shell[data-layout="compact"] .color-setting {
   grid-template-columns: minmax(0, 1fr) auto !important;
   align-items: center;
   gap: 12px;
 }
 
+.app-shell[data-layout="compact"] .settings-about-section .setting-control,
 .app-shell[data-layout="compact"] .color-setting .setting-control {
   width: auto;
   justify-self: end;
+}
+
+.app-shell[data-layout="compact"] .settings-about-section .setting-control {
+  max-width: 65vw;
 }
 
 .app-shell[data-layout="compact"] .font-size-setting .setting-control {

@@ -9,6 +9,7 @@ Resona/
 │  │  ├─ App.tsx
 │  │  ├─ AudioCompressionApp.tsx
 │  │  ├─ ApplicationUpdateDialog.tsx
+│  │  ├─ SettingsView.tsx
 │  │  └─ preferences.tsx
 │  ├─ windows/                     # 歌词与压缩等独立窗口入口
 │  ├─ features/
@@ -35,6 +36,7 @@ Resona/
 │  │  ├─ media_source.rs           # 普通文件与 CUE 逻辑音轨模型/解析
 │  │  ├─ playlists.rs              # 用户/默认列表领域逻辑
 │  │  ├─ persistence.rs            # SQLite schema 与事务
+│  │  ├─ stored_state.rs           # JSON 偏好同目录原子替换
 │  │  ├─ metadata.rs               # 按需元数据与有界封面缓存
 │  │  ├─ lyrics.rs                 # 本地歌词解析
 │  │  ├─ compression.rs            # 扫描、并行转换与任务快照

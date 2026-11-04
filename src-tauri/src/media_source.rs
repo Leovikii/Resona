@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::borrow::Cow;
-use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -89,7 +88,7 @@ fn same_name_cue(path: &Path, siblings: &[PathBuf]) -> Option<PathBuf> {
 }
 
 fn parse_cue_for_audio(cue_path: &Path, audio_path: &Path) -> Result<Vec<MediaSource>, String> {
-    let bytes = fs::read(cue_path).map_err(|error| error.to_string())?;
+    let bytes = crate::filesystem::read_sidecar(cue_path).map_err(|error| error.to_string())?;
     let text = decode_text(&bytes)?;
     let mut reader = Cursor::new(text.as_bytes());
     let cue = rcue::parser::parse(&mut reader, false).map_err(|error| error.to_string())?;
@@ -174,6 +173,7 @@ fn decode_text(bytes: &[u8]) -> Result<Cow<'_, str>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn expands_matching_cue_into_bounded_tracks() {

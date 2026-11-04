@@ -26,7 +26,7 @@ Download the `.exe` NSIS installer from [GitHub Releases](https://github.com/Leo
 
 ### Arch Linux x86_64 · Wayland
 
-Download the [rc.1 Arch package](https://github.com/Leovikii/Resona/releases/tag/v0.3.0-rc.1) and its `SHA256SUMS` from the same release. Verify the package hash before installing:
+Download the [stable Arch package](https://github.com/Leovikii/Resona/releases/tag/v0.3.0) and its `SHA256SUMS` from the same release. Verify the package hash before installing:
 
 ```bash
 sha256sum --ignore-missing -c SHA256SUMS
