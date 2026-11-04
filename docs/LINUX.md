@@ -1,14 +1,14 @@
 # Arch Linux / KDE Wayland
 
-代码基线为 `0.3.0-rc.1`，当前进入 [0.3.0 正式版开发](plans/0.3.0.md)。既有渲染修复与阴影已获所有者验收；本轮验证事实见 [STATUS](STATUS.md)，平台限制见 [KNOWN_ISSUES](KNOWN_ISSUES.md)。支持 Arch 系 x86_64 / KDE Wayland，不以 XWayland 或浏览器预览代替原生验证。
+代码版本为 `0.3.0`。既有渲染修复与阴影已获所有者验收；本轮验证事实见 [STATUS](STATUS.md)，平台限制见 [KNOWN_ISSUES](KNOWN_ISSUES.md)。支持 Arch 系 x86_64 / KDE Wayland，不以 XWayland 或浏览器预览代替原生验证。
 
 ## 安装与更新
 
-从 [rc.1 Release](https://github.com/Leovikii/Resona/releases/tag/v0.3.0-rc.1) 下载原生包及同版本 `SHA256SUMS`，校验后安装：
+从 [0.3.0 Release](https://github.com/Leovikii/Resona/releases/tag/v0.3.0) 下载原生包及同版本 `SHA256SUMS`，校验后安装：
 
 ```bash
 sha256sum --ignore-missing -c SHA256SUMS
-sudo pacman -U ./resona-0.3.0rc1-1-x86_64.pkg.tar.zst
+sudo pacman -U ./resona-0.3.0-1-x86_64.pkg.tar.zst
 # 卸载保留用户数据与音频
 sudo pacman -R resona
 ```
@@ -36,8 +36,6 @@ GDK_BACKEND=wayland ./src-tauri/target/release/resona /path/to/track.flac
 播放使用 Rodio/CPAL ALSA，PipeWire 桌面需有 `pipewire-alsa`。压缩检查系统 `/usr/bin/ffmpeg` 与 `ffprobe`，不下载 Windows 工具。`build:linux` 使用 Tauri `--no-bundle` 与 `custom-protocol`，不生成通用便携包；程序仍依赖本机 GTK/WebKitGTK 等共享库。CI 负责生成 Arch 发布包。
 
 数据遵循 Tauri XDG 目录，应用标识 `io.github.vki.resona`。测试仅隔离数据/缓存，保留 `XDG_CONFIG_HOME` 和桌面字体；独立数据目录需要链接原用户数据目录的 `fonts/`。由 agent 启动时先清除继承的 LANG/LANGUAGE/LC_*，再完整复制桌面会话的语言变量，不强制中文或改应用偏好。
-
-最新本机测试包位于忽略目录 `src-tauri/target/test-build/Resona-0.3.0-rc.1-shadow-arch-wayland-x86_64/`，执行 `start-resona.sh`；需保留整个目录，并先退出其他实例。其独立 Tauri 标识与 `test-profile/` 隔离安装版数据，但 GTK/MPRIS 沿用既有标识。旧测试配置迁存 `saved-profiles/`，归档不含用户测试数据。
 
 ## 窗口与材质
 

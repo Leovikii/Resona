@@ -48,7 +48,7 @@ Linux 本机构建使用 `npm run build:linux`，开发与运行使用 `npm run 
 - 跨层 DTO 必须类型化并使用稳定 camelCase 序列化。不要暴露 Rodio、CPAL、数据库行或 Win32 类型。
 - Mantine 用于组件行为和可访问性，应用 token/CSS 负责布局与材质。不得加入第二套组件库或全局 CSS Acrylic/blur；普通窗口复用 ADR 0033 的共享无边框标题栏，平台动作由 Tauri/adapter 执行。
 - 短时通知使用 Mantine `Notification` 及其原生图标插槽；文案按“结果：实际原因”组织，在无歧义前提下尽量简短。只有无需持续处理的临时反馈才自动消失，持续错误保留在对应工作流中。
-- 悬浮提示按 [ADR 0037](decisions/0037-standard-tooltips.md) 集中维护，实施范围与验证状态见 [活动计划](plans/0.3.0.md)。
+- 悬浮提示按 [ADR 0037](decisions/0037-standard-tooltips.md) 集中维护，当前验证状态见 [STATUS](STATUS.md)。
 - 平台能力放入 `platform` adapter。Win32/COM 回调只读缓存或发 typed command，不能做文件 I/O、图片解码、等待播放锁或直接控制 Rodio。
 - 同步窗口查询可能等待 UI 线程；查询尺寸、位置或窗口状态时不得持有 UI 事件处理也会使用的 service mutex。先读取窗口快照，再加锁更新服务状态，避免布局切换与 resize/close 事件互相等待。
 - 不增加第二播放引擎、mpv fallback、DSP、隐式重采样或未经测量的高频轮询。
