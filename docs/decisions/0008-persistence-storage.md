@@ -6,9 +6,10 @@
 ## 决定
 
 - SQLite 只保存用户播放列表、稠密排序的列表项目、文件夹导入时每项可选的根目录上下文和应用状态；默认列表、播放执行序列、最近播放、媒体索引和封面不持久化。根目录上下文只用于恢复列表层级，不代表受管理文件夹，也不触发重扫或监视。
-- schema 版本集中管理，迁移在事务内按顺序执行且幂等。schema v6 为既有播放列表项目增加可空 `folder_root`，旧项目保持扁平显示；schema v5 删除旧 `recent_plays`，更早迁移已删除 `managed_folders` 与 `media_records`。
+- schema 版本集中管理，迁移在事务内按顺序执行且幂等。schema v7 增加可空 CUE 逻辑音轨字段；v6 增加可空 `folder_root`，旧项目保持扁平显示；v5 删除旧 `recent_plays`，更早迁移已删除 `managed_folders` 与 `media_records`。
 - 数据访问只经 persistence adapter；播放、React 和 Tauri command 不直接执行 SQL。
 - 用户列表写入使用事务并保持项目位置稠密。迁移失败不得部分提交或静默重建数据库。
+- JSON 偏好与窗口几何经共享 `stored_state` 写入同目录排他临时文件，flush/sync 后原子替换；关闭偏好只有写成功才提交内存。持有对应状态锁覆盖序列化和写入，避免并发旧快照覆盖。
 
 ## 理由与后果
 

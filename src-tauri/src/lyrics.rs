@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::borrow::Cow;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -261,7 +260,8 @@ fn sidecar_match_rank(audio_stem: &str, audio_file_name: &str, lyrics_stem: &str
 }
 
 fn read_document(path: &Path, format: LyricsFormat) -> Result<LyricsDocument, LyricsError> {
-    let bytes = fs::read(path).map_err(|error| LyricsError::Read(error.to_string()))?;
+    let bytes = crate::filesystem::read_sidecar(path)
+        .map_err(|error| LyricsError::Read(error.to_string()))?;
     let text = decode_text(&bytes)?;
     let mut document = match format {
         LyricsFormat::Lrc => parse_lrc(&text)?,
@@ -602,6 +602,7 @@ fn vtt_timestamp_ms(timestamp: VttTimestamp) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_ID: AtomicU64 = AtomicU64::new(1);
