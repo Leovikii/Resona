@@ -59,7 +59,6 @@ export const resources = {
         noTrack: "尚未选择音频",
         progress: "播放进度",
         volume: "音量",
-        shortcuts: "窗口内快捷键：空格播放/暂停，←/→ 定位 5 秒，↑/↓ 音量 ±10%；控件操作优先",
         volumeFeedback: "音量 {{volume}}%",
         controlFeedback: "{{status}} · {{position}} 秒",
         directoryWarnings: {
@@ -424,7 +423,6 @@ export const resources = {
         noTrack: "No audio selected",
         progress: "Playback progress",
         volume: "Volume",
-        shortcuts: "Window shortcuts: Space play/pause, ←/→ seek 5s, ↑/↓ volume ±10%; focused controls take priority",
         volumeFeedback: "Volume {{volume}}%",
         controlFeedback: "{{status}} · {{position}}s",
         directoryWarnings: {

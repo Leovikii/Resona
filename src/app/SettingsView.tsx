@@ -99,6 +99,7 @@ export function SettingsView({ applicationLifetime, applicationUpdate, busy, des
         <Text className="settings-section-title" fw={650}>{t("settings.about")}</Text>
         <SettingRow label={t("settings.version")}>
           <Button
+            className="settings-version-button"
             leftSection={applicationUpdate.available ? <Download size={15} /> : <RefreshCw size={15} />}
             loading={applicationUpdate.status === "checking"}
             onClick={() => void handleUpdateAction()}
@@ -330,9 +331,6 @@ export function SettingsView({ applicationLifetime, applicationUpdate, busy, des
               ? t("settings.activeOutput", { name: output.activeDeviceName })
               : t("settings.outputClosed")}
         </Text>
-      </section>
-      <section className="settings-section">
-        <Text c="dimmed" size="sm">{t("playback.shortcuts")}</Text>
       </section>
     </div>
     </ScrollArea>

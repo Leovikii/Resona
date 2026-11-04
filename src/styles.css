@@ -1859,6 +1859,19 @@ h2.page-heading {
   gap: 12px;
 }
 
+.settings-version-button {
+  max-width: 100%;
+  height: auto;
+  min-height: 30px;
+  padding-block: 6px;
+}
+
+.settings-version-button .mantine-Button-label {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
 .application-update-heading {
   min-width: 0;
 }
@@ -2508,21 +2521,22 @@ h2.page-heading {
   width: 100%;
 }
 
-.app-shell[data-layout="compact"] .font-size-setting {
-  grid-template-columns: minmax(0, 1fr) auto !important;
-  align-items: center;
-  gap: 12px;
-}
-
+.app-shell[data-layout="compact"] .settings-about-section .setting-row,
+.app-shell[data-layout="compact"] .font-size-setting,
 .app-shell[data-layout="compact"] .color-setting {
   grid-template-columns: minmax(0, 1fr) auto !important;
   align-items: center;
   gap: 12px;
 }
 
+.app-shell[data-layout="compact"] .settings-about-section .setting-control,
 .app-shell[data-layout="compact"] .color-setting .setting-control {
   width: auto;
   justify-self: end;
+}
+
+.app-shell[data-layout="compact"] .settings-about-section .setting-control {
+  max-width: 65vw;
 }
 
 .app-shell[data-layout="compact"] .font-size-setting .setting-control {
