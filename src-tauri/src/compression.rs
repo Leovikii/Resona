@@ -894,6 +894,9 @@ impl CompressionService {
                 "FLAC validation did not preserve the required audio properties".to_owned(),
             );
         }
+        if self.cancel.load(Ordering::Acquire) {
+            return Err("cancelled".to_owned());
+        }
         crate::platform::file_commit::commit_new_file(&temp, &output)
             .map_err(|error| format!("failed to commit FLAC output: {error}"))?;
         let output_bytes = fs::metadata(&output)
@@ -1768,6 +1771,47 @@ mod tests {
         assert!(source.is_file());
         assert!(!source.with_extension("flac").exists());
         assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 2);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn cancellation_reaps_an_active_ffmpeg_and_cleans_only_owned_temporaries() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source.wav");
+        fs::copy(fixture_directory().join("wav_44100_16_stereo.wav"), &source).unwrap();
+        let residual = directory.path().join(".source.resona-1-0.tmp.flac");
+        fs::write(&residual, b"unowned").unwrap();
+        let executable = directory.path().join("ffmpeg");
+        fs::write(
+            &executable,
+            b"#!/bin/sh\nprintf '%s' \"$$\" > \"$0.pid\"\nexec sleep 30\n",
+        )
+        .unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        let service = Arc::new(CompressionService::with_ffmpeg(executable.clone()));
+        let worker_service = Arc::clone(&service);
+        let worker_source = source.clone();
+        let worker = thread::spawn(move || {
+            worker_service.convert_one(1, 0, &worker_source, CompressionPreset::Fast)
+        });
+        let marker = executable.with_extension("pid");
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !marker.is_file() && std::time::Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        service.cancel.store(true, Ordering::Release);
+        assert_eq!(worker.join().unwrap().unwrap_err(), "cancelled");
+        let pid = fs::read_to_string(marker).unwrap();
+        assert!(!PathBuf::from(format!("/proc/{pid}")).exists());
+        assert!(source.is_file());
+        assert!(!source.with_extension("flac").exists());
+        assert_eq!(fs::read(residual).unwrap(), b"unowned");
+        assert!(!fs::read_dir(directory.path()).unwrap().any(|entry| entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".resona-")));
     }
 
     #[test]

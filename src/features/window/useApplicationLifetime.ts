@@ -25,12 +25,15 @@ export function useApplicationLifetime() {
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
+    let disposed = false;
     void invokeTauri<ApplicationLifetimeSnapshot>("get_application_lifetime_state")
       .then((next) => {
+        if (disposed) return;
         setSnapshot(next);
         setError(null);
       })
-      .catch((nextError) => setError(errorMessage(nextError)));
+      .catch((nextError) => { if (!disposed) setError(errorMessage(nextError)); });
+    return () => { disposed = true; };
   }, []);
 
   useEffect(() => {

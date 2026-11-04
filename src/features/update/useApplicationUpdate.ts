@@ -65,12 +65,15 @@ export function useApplicationUpdate() {
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
+    let disposed = false;
     void invokeTauri<ApplicationUpdateSnapshot>("get_application_update_state")
       .then((next) => {
+        if (disposed) return;
         setSnapshot(next);
         setError(null);
       })
-      .catch((nextError) => setError(normalizeFailure(nextError)));
+      .catch((nextError) => { if (!disposed) setError(normalizeFailure(nextError)); });
+    return () => { disposed = true; };
   }, []);
 
   useEffect(() => {

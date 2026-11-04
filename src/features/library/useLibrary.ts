@@ -37,11 +37,26 @@ export function useLibrary(imports: FileImportActivity) {
   );
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
   const [selectedItems, setSelectedItems] = useState<PlaylistItem[]>([]);
+  const selectionRef = useRef<number | null>(null);
+  const itemRequestRef = useRef(0);
+  const refreshRequestRef = useRef(0);
   const [loading, setLoading] = useState(false);
   const [itemsLoading, setItemsLoading] = useState(false);
   const [rejectedPaths, setRejectedPaths] = useState<RejectedPath[]>([]);
   const errorSequenceRef = useRef(0);
   const [error, setError] = useState<{ id: number; message: string; code?: string } | null>(null);
+  const changeSelection = useCallback((id: number | null, items: PlaylistItem[] = []) => {
+    selectionRef.current = id;
+    itemRequestRef.current += 1;
+    setSelectedPlaylistId(id);
+    setSelectedItems(items);
+    setItemsLoading(false);
+  }, []);
+  const acceptItems = useCallback((playlistId: number, items: PlaylistItem[]) => {
+    if (selectionRef.current !== playlistId) return;
+    itemRequestRef.current += 1;
+    setSelectedItems(items);
+  }, []);
   const reportError = useCallback((cause: unknown) => {
     errorSequenceRef.current += 1;
     const code = typeof cause === "object" && cause !== null && "code" in cause && typeof cause.code === "string" ? cause.code : undefined;
@@ -55,29 +70,31 @@ export function useLibrary(imports: FileImportActivity) {
 
   const refresh = useCallback(async () => {
     if (preview) return;
+    const request = ++refreshRequestRef.current;
     setLoading(true);
     try {
       const nextPlaylists = await invokeTauri<PlaylistSummary[]>("list_playlists");
+      if (request !== refreshRequestRef.current) return;
       setPlaylists(nextPlaylists);
-      setSelectedPlaylistId((current) =>
-        current !== null && nextPlaylists.some((playlist) => playlist.id === current)
-          ? current
-          : null,
-      );
+      if (selectionRef.current !== null && !nextPlaylists.some((playlist) => playlist.id === selectionRef.current)) {
+        changeSelection(null);
+      }
       setError(null);
     } catch (cause) {
-      reportError(cause);
+      if (request === refreshRequestRef.current) reportError(cause);
     } finally {
-      setLoading(false);
+      if (request === refreshRequestRef.current) setLoading(false);
     }
-  }, [preview, reportError]);
+  }, [changeSelection, preview, reportError]);
 
   useEffect(() => {
     void refresh();
+    return () => { refreshRequestRef.current += 1; itemRequestRef.current += 1; };
   }, [refresh]);
 
   const selectPlaylist = useCallback(async (playlistId: number | null) => {
-    setSelectedPlaylistId(playlistId);
+    changeSelection(playlistId);
+    const request = itemRequestRef.current;
     if (playlistId === null) {
       setSelectedItems([]);
       return;
@@ -88,15 +105,27 @@ export function useLibrary(imports: FileImportActivity) {
     }
     setItemsLoading(true);
     try {
-      setSelectedItems(await invokeTauri<PlaylistItem[]>("list_playlist_items", { playlistId }));
+      const items = await invokeTauri<PlaylistItem[]>("list_playlist_items", { playlistId });
+      if (request !== itemRequestRef.current) return;
+      setSelectedItems(items);
       setError(null);
     } catch (cause) {
-      setSelectedItems([]);
-      reportError(cause);
+      if (request === itemRequestRef.current) {
+        setSelectedItems([]);
+        reportError(cause);
+      }
     } finally {
-      setItemsLoading(false);
+      if (request === itemRequestRef.current) setItemsLoading(false);
     }
-  }, [preview, previewItemsByPlaylist, reportError]);
+  }, [changeSelection, preview, previewItemsByPlaylist, reportError]);
+
+  const reportMutationError = useCallback(async (cause: unknown) => {
+    if (typeof cause === "object" && cause !== null && "code" in cause && cause.code === "playback_sequence_sync_failed") {
+      await refresh();
+      if (selectionRef.current !== null) await selectPlaylist(selectionRef.current);
+    }
+    reportError(cause);
+  }, [refresh, reportError, selectPlaylist]);
 
   const createPlaylist = useCallback(async ({
     ensureUniqueName = false,
@@ -111,6 +140,7 @@ export function useLibrary(imports: FileImportActivity) {
     position?: number | null;
     requireItems?: boolean;
   }) => imports.run(async () => {
+    const selection = selectionRef.current;
     if (paths.length > 0) setRejectedPaths([]);
     setLoading(true);
     try {
@@ -147,8 +177,7 @@ export function useLibrary(imports: FileImportActivity) {
         });
         await refresh();
       }
-      setSelectedPlaylistId(result.playlist.id);
-      setSelectedItems(result.items);
+      if (selectionRef.current === selection) changeSelection(result.playlist.id, result.items);
       setRejectedPaths(result.rejected);
       setError(null);
       return result;
@@ -158,7 +187,7 @@ export function useLibrary(imports: FileImportActivity) {
     } finally {
       setLoading(false);
     }
-  }), [imports.run, playlists, preview, previewItemsByPlaylist, refresh, reportError]);
+  }), [changeSelection, imports.run, playlists, preview, previewItemsByPlaylist, refresh, reportError]);
 
   const renamePlaylist = useCallback(async (id: number, name: string) => {
     setLoading(true);
@@ -193,20 +222,17 @@ export function useLibrary(imports: FileImportActivity) {
       setPlaylists((current) => current
         .filter((playlist) => playlist.id !== id)
         .map((playlist, position) => ({ ...playlist, position })));
-      if (selectedPlaylistId === id) {
-        setSelectedPlaylistId(null);
-        setSelectedItems([]);
-      }
+      if (selectionRef.current === id) changeSelection(null);
       if (!preview) await refresh();
       setError(null);
       return true;
     } catch (cause) {
-      reportError(cause);
+      await reportMutationError(cause);
       return false;
     } finally {
       setLoading(false);
     }
-  }, [preview, refresh, reportError, selectedPlaylistId]);
+  }, [changeSelection, preview, refresh, reportMutationError]);
 
   const deleteOtherPlaylists = useCallback(async (keepId: number | null) => {
     setLoading(true);
@@ -223,19 +249,16 @@ export function useLibrary(imports: FileImportActivity) {
         ));
       }
       setPlaylists(nextPlaylists);
-      if (selectedPlaylistId !== keepId) {
-        setSelectedPlaylistId(null);
-        setSelectedItems([]);
-      }
+      if (selectionRef.current !== keepId) changeSelection(null);
       setError(null);
       return true;
     } catch (cause) {
-      reportError(cause);
+      await reportMutationError(cause);
       return false;
     } finally {
       setLoading(false);
     }
-  }, [playlists, preview, reportError, selectedPlaylistId]);
+  }, [changeSelection, playlists, preview, reportMutationError]);
 
   const movePlaylist = useCallback(async (id: number, toPosition: number) => {
     setLoading(true);
@@ -248,12 +271,12 @@ export function useLibrary(imports: FileImportActivity) {
       setError(null);
       return true;
     } catch (cause) {
-      reportError(cause);
+      await reportMutationError(cause);
       return false;
     } finally {
       setLoading(false);
     }
-  }, [preview, reportError]);
+  }, [preview, reportMutationError]);
 
   const addItems = useCallback(async (
     playlistId: number,
@@ -289,18 +312,17 @@ export function useLibrary(imports: FileImportActivity) {
         });
         await refresh();
       }
-      setSelectedPlaylistId(playlistId);
-      setSelectedItems(result.items);
+      acceptItems(playlistId, result.items);
       setRejectedPaths(result.rejected);
       setError(null);
       return result;
     } catch (cause) {
-      reportError(cause);
+      await reportMutationError(cause);
       return null;
     } finally {
-      setItemsLoading(false);
+      if (selectionRef.current === playlistId) setItemsLoading(false);
     }
-  }), [imports.run, playlists, preview, previewItemsByPlaylist, refresh, reportError]);
+  }), [acceptItems, imports.run, playlists, preview, previewItemsByPlaylist, refresh, reportMutationError]);
 
   const chooseAndAddItems = useCallback(async (playlistId: number, position: number | null = null) => {
     try {
@@ -308,8 +330,8 @@ export function useLibrary(imports: FileImportActivity) {
         ? ["C:\\Music\\New track.flac"]
         : await selectAudioFiles(true);
       return addItems(playlistId, paths, position);
-    } catch (cause) { reportError(cause); return null; }
-  }, [addItems, preview, reportError]);
+    } catch (cause) { await reportMutationError(cause); return null; }
+  }, [addItems, preview, reportMutationError]);
 
   const chooseAndAddFolders = useCallback(async (playlistId: number) => {
     try {
@@ -317,8 +339,8 @@ export function useLibrary(imports: FileImportActivity) {
         ? ["C:\\Music\\Imported\\Folder track.flac"]
         : await selectAudioFolders();
       return addItems(playlistId, paths);
-    } catch (cause) { reportError(cause); return null; }
-  }, [addItems, preview, reportError]);
+    } catch (cause) { await reportMutationError(cause); return null; }
+  }, [addItems, preview, reportMutationError]);
 
   const removeItem = useCallback(async (playlistId: number, itemId: number) => {
     setItemsLoading(true);
@@ -328,11 +350,11 @@ export function useLibrary(imports: FileImportActivity) {
           .filter((candidate) => candidate.id !== itemId)
           .map((candidate, position) => ({ ...candidate, position }));
         setPreviewItemsByPlaylist((current) => ({ ...current, [playlistId]: items }));
-        setSelectedItems(items);
+        acceptItems(playlistId, items);
         setPlaylists((current) => current.map((playlist) =>
           playlist.id === playlistId ? { ...playlist, itemCount: items.length } : playlist));
       } else {
-        setSelectedItems(await invokeTauri<PlaylistItem[]>("remove_playlist_item", {
+        acceptItems(playlistId, await invokeTauri<PlaylistItem[]>("remove_playlist_item", {
           playlistId,
           itemId,
         }));
@@ -341,12 +363,12 @@ export function useLibrary(imports: FileImportActivity) {
       setError(null);
       return true;
     } catch (cause) {
-      reportError(cause);
+      await reportMutationError(cause);
       return false;
     } finally {
-      setItemsLoading(false);
+      if (selectionRef.current === playlistId) setItemsLoading(false);
     }
-  }, [preview, previewItemsByPlaylist, refresh, reportError]);
+  }, [acceptItems, preview, previewItemsByPlaylist, refresh, reportMutationError]);
 
   const removeItems = useCallback(async (playlistId: number, itemIds: number[]) => {
     if (itemIds.length === 0) return false;
@@ -363,19 +385,19 @@ export function useLibrary(imports: FileImportActivity) {
         items = await invokeTauri<PlaylistItem[]>("remove_playlist_items", { playlistId, itemIds });
         await refresh();
       }
-      setSelectedItems(items);
+      acceptItems(playlistId, items);
       setPlaylists((current) => current.map((playlist) => playlist.id === playlistId
         ? { ...playlist, itemCount: items.length }
         : playlist));
       setError(null);
       return true;
     } catch (cause) {
-      reportError(cause);
+      await reportMutationError(cause);
       return false;
     } finally {
-      setItemsLoading(false);
+      if (selectionRef.current === playlistId) setItemsLoading(false);
     }
-  }, [preview, previewItemsByPlaylist, refresh, reportError]);
+  }, [acceptItems, preview, previewItemsByPlaylist, refresh, reportMutationError]);
 
   const clearItems = useCallback(async (playlistId: number) => {
     setItemsLoading(true);
@@ -385,19 +407,19 @@ export function useLibrary(imports: FileImportActivity) {
         : await invokeTauri<PlaylistItem[]>("clear_playlist_items", { playlistId });
       if (preview) setPreviewItemsByPlaylist((current) => ({ ...current, [playlistId]: [] }));
       else await refresh();
-      setSelectedItems(items);
+      acceptItems(playlistId, items);
       setPlaylists((current) => current.map((playlist) => playlist.id === playlistId
         ? { ...playlist, itemCount: 0 }
         : playlist));
       setError(null);
       return true;
     } catch (cause) {
-      reportError(cause);
+      await reportMutationError(cause);
       return false;
     } finally {
-      setItemsLoading(false);
+      if (selectionRef.current === playlistId) setItemsLoading(false);
     }
-  }, [preview, refresh, reportError]);
+  }, [acceptItems, preview, refresh, reportMutationError]);
 
   const moveItem = useCallback(async (
     playlistId: number,
@@ -414,9 +436,9 @@ export function useLibrary(imports: FileImportActivity) {
         next.splice(clamp(toPosition, 0, next.length), 0, moved);
         const items = next.map((candidate, position) => ({ ...candidate, position }));
         setPreviewItemsByPlaylist((current) => ({ ...current, [playlistId]: items }));
-        setSelectedItems(items);
+        acceptItems(playlistId, items);
       } else {
-        setSelectedItems(await invokeTauri<PlaylistItem[]>("move_playlist_item", {
+        acceptItems(playlistId, await invokeTauri<PlaylistItem[]>("move_playlist_item", {
           playlistId,
           itemId,
           toPosition,
@@ -425,12 +447,12 @@ export function useLibrary(imports: FileImportActivity) {
       setError(null);
       return true;
     } catch (cause) {
-      reportError(cause);
+      await reportMutationError(cause);
       return false;
     } finally {
-      setItemsLoading(false);
+      if (selectionRef.current === playlistId) setItemsLoading(false);
     }
-  }, [preview, previewItemsByPlaylist, reportError]);
+  }, [acceptItems, preview, previewItemsByPlaylist, reportMutationError]);
 
   const dismissRejected = useCallback(() => setRejectedPaths([]), []);
 

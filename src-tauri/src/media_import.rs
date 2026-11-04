@@ -906,6 +906,17 @@ fn sequence_mismatch() -> PlaybackFailure {
     )
 }
 
+fn playlist_paths(items: &[PlaylistItemRecord]) -> Vec<crate::media_source::MediaSource> {
+    items.iter().map(PlaylistItemRecord::source).collect()
+}
+
+fn playlist_sync_failure(failure: PlaybackFailure) -> PersistenceFailure {
+    PersistenceFailure {
+        code: "playback_sequence_sync_failed".to_owned(),
+        message: failure.message,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs::{self, File};
@@ -1327,16 +1338,5 @@ mod tests {
         ));
         fs::create_dir_all(&path).expect("create test directory");
         path
-    }
-}
-
-fn playlist_paths(items: &[PlaylistItemRecord]) -> Vec<crate::media_source::MediaSource> {
-    items.iter().map(PlaylistItemRecord::source).collect()
-}
-
-fn playlist_sync_failure(failure: PlaybackFailure) -> PersistenceFailure {
-    PersistenceFailure {
-        code: "playback_sequence_sync_failed".to_owned(),
-        message: failure.message,
     }
 }
